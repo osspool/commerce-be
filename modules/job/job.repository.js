@@ -31,7 +31,7 @@ class JobRepository extends Repository {
    */
   async markAsStarted(jobId, options = {}) {
     return this.update(jobId, {
-      status: 'running',
+      status: 'processing',
       startedAt: new Date()
     }, options);
   }

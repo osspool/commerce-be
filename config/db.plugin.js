@@ -7,7 +7,26 @@ import mongoose from 'mongoose';
 import config from './index.js';
 
 async function mongooseConnector(fastify) {
-  const uri = config.db.uri;
+  // If connection is already open (e.g. from tests), just decorate and return
+  if (mongoose.connection.readyState !== 0) {
+    fastify.log.info('Database already connected (reusing existing connection)');
+    fastify.decorate('mongoose', mongoose);
+    return;
+  }
+
+  // Allow override via process.env.MONGO_URI for testing
+  // Check global.__MONGO_URI__ explicitly for test environment if process.env isn't set yet
+  // Also support global.__MONGO_SERVER__.getUri() if available
+  const testUri = (typeof globalThis !== 'undefined' && globalThis.__MONGO_URI__) || 
+                  (typeof globalThis !== 'undefined' && globalThis.__MONGO_SERVER__?.getUri());
+                  
+  let uri = process.env.MONGO_URI || testUri || (config.db && config.db.uri);
+
+  if (!uri && config.isTest) {
+    // Last ditch effort for test environment
+    uri = 'mongodb://localhost:27017/test-fallback';
+    fastify.log.warn('Using fallback test database URI', { uri });
+  }
   
   if (!uri) {
     throw new Error('MONGO_URI is not defined in configuration');

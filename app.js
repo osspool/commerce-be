@@ -12,6 +12,7 @@ import revenuePlugin from '#common/plugins/revenue.plugin.js';
 import { errorHandler } from '#common/utils/errors.js';
 import config from './config/index.js';
 import compress from '@fastify/compress';
+import { jobQueue, registerDefaultHandlers } from '#modules/job/JobQueue.js';
 
 async function app(fastify) {
   // ============================================
@@ -53,6 +54,33 @@ async function app(fastify) {
   // 7. API ROUTES
   // ============================================
   await fastify.register(fastifyRoutes, { prefix: '/api/v1' });
+
+  // ============================================
+  // 7.5 BACKGROUND JOB QUEUE
+  // ============================================
+  try {
+    registerDefaultHandlers();
+    jobQueue.startPolling();
+    fastify.addHook('onClose', async () => {
+      await jobQueue.shutdown();
+    });
+    fastify.log.info('Job queue started');
+  } catch (error) {
+    fastify.log.warn('Job queue failed to start', { error: error.message });
+  }
+
+  // ============================================
+  // 7.6 DOMAIN EVENT HANDLERS
+  // ============================================
+  try {
+    const { registerInventoryEventHandlers } = await import('#modules/commerce/inventory/inventory.handlers.js');
+    const { registerBranchHandlers } = await import('#common/events/branch.handlers.js');
+    registerInventoryEventHandlers();
+    registerBranchHandlers();
+    fastify.log.info('Domain event handlers registered');
+  } catch (error) {
+    fastify.log.warn('Domain event handlers failed to register', { error: error.message });
+  }
 
   // ============================================
   // 8. LOGISTICS (uses absolute paths, no prefix)

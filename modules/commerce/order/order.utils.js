@@ -37,12 +37,10 @@ export async function getCostPrice(productId, variantSku = null, branchId = null
   }
 
   // Check variant cost if variant exists
-  if (variantSku && product.variations) {
-    for (const variation of product.variations) {
-      const option = variation.options?.find(o => o.sku === variantSku);
-      if (option?.costPrice) {
-        return option.costPrice;
-      }
+  if (variantSku && product.variants?.length) {
+    const variant = product.variants.find(v => v.sku === variantSku);
+    if (variant?.costPrice) {
+      return variant.costPrice;
     }
   }
 
@@ -110,13 +108,10 @@ export async function getBatchCostPrices(items) {
     // 2. Check product/variant
     const product = productMap.get(productId);
     if (product) {
-      if (variantSku && product.variations) {
-        for (const variation of product.variations) {
-          const option = variation.options?.find(o => o.sku === variantSku);
-          if (option?.costPrice) {
-            cost = option.costPrice;
-            break;
-          }
+      if (variantSku && product.variants?.length) {
+        const variant = product.variants.find(v => v.sku === variantSku);
+        if (variant?.costPrice) {
+          cost = variant.costPrice;
         }
       }
 

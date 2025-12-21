@@ -2,7 +2,7 @@ import fp from 'fastify-plugin';
 import createCrudRouter from '#routes/utils/createCrudRouter.js';
 import reviewController from './review.controller.js';
 import reviewSchemas from './review.schemas.js';
-import * as presets from './review.presets.js';
+import permissions from '#config/permissions.js';
 
 /**
  * Review Plugin
@@ -16,26 +16,13 @@ async function reviewPlugin(fastify) {
     createCrudRouter(instance, reviewController, {
       tag: 'Review',
       schemas: reviewSchemas,
-      auth: {
-        list: [],      // Public
-        get: [],       // Public
-        create: ['user', 'admin'],
-        update: ['user', 'admin'],
-        remove: ['admin'],
-      },
-      middlewares: {
-        list: presets.listReviews(instance),
-        get: presets.getReview(instance),
-        create: presets.createReview(instance),
-        update: presets.updateReview(instance),
-        remove: presets.deleteReview(instance),
-      },
+      auth: permissions.reviews,
       additionalRoutes: [
         {
           method: 'GET',
           path: '/my/:productId',
           summary: 'Get my review for product',
-          authRoles: ['user', 'admin'],
+          authRoles: permissions.reviews.my,
           handler: reviewController.getMyReview,
         },
       ],

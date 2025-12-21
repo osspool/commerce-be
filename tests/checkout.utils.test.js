@@ -8,20 +8,9 @@ import {
 } from '#modules/commerce/order/checkout.utils.js';
 
 describe('checkout.utils (order parcel metrics)', () => {
-  it('resolves variant SKU from selected variations (first matching option sku)', () => {
-    const product = {
-      variations: [
-        { name: 'Color', options: [{ value: 'Red', sku: 'SKU-RED' }] },
-        { name: 'Size', options: [{ value: 'M', sku: 'SKU-M' }] },
-      ],
-    };
-
-    const sku = getCartItemVariantSku(product, [
-      { name: 'Size', option: { value: 'M' } },
-      { name: 'Color', option: { value: 'Red' } },
-    ]);
-
-    expect(sku).toBe('SKU-M');
+  it('resolves variant SKU from direct variantSku', () => {
+    const sku = getCartItemVariantSku(null, 'SKU-M-RED');
+    expect(sku).toBe('SKU-M-RED');
   });
 
   it('calculates order parcel metrics using variant overrides when available', () => {
@@ -30,25 +19,20 @@ describe('checkout.utils (order parcel metrics)', () => {
         weightGrams: 200,
         dimensionsCm: { length: 10, width: 10, height: 2 },
       },
-      variations: [
+      variants: [
         {
-          name: 'Size',
-          options: [
-            {
-              value: 'M',
-              sku: 'SKU-M',
-              shipping: {
-                weightGrams: 300,
-                dimensionsCm: { length: 12, width: 10, height: 3 },
-              },
-            },
-          ],
+          sku: 'SKU-M',
+          attributes: { size: 'M' },
+          shipping: {
+            weightGrams: 300,
+            dimensionsCm: { length: 12, width: 10, height: 3 },
+          },
         },
       ],
     };
 
     const metrics = calculateOrderParcelMetrics([
-      { product, quantity: 2, variations: [{ name: 'Size', option: { value: 'M' } }] },
+      { product, quantity: 2, variantSku: 'SKU-M' },
     ]);
 
     expect(metrics).toEqual({
@@ -62,16 +46,14 @@ describe('checkout.utils (order parcel metrics)', () => {
   it('returns unknown weight/dimensions when any cart item is missing required shipping attributes', () => {
     const productWithWeightOnly = {
       shipping: { weightGrams: 100 },
-      variations: [],
     };
     const productWithDimsOnly = {
       shipping: { dimensionsCm: { length: 10, width: 5, height: 2 } },
-      variations: [],
     };
 
     const metrics = calculateOrderParcelMetrics([
-      { product: productWithWeightOnly, quantity: 1, variations: [] },
-      { product: productWithDimsOnly, quantity: 3, variations: [] },
+      { product: productWithWeightOnly, quantity: 1 },
+      { product: productWithDimsOnly, quantity: 3 },
     ]);
 
     expect(metrics.weightGrams).toBeUndefined();
@@ -83,15 +65,16 @@ describe('checkout.utils (order parcel metrics)', () => {
   it('falls back to product shipping when variant shipping is absent', () => {
     const product = {
       shipping: { weightGrams: 250, dimensionsCm: { length: 8, width: 6, height: 1 } },
-      variations: [
+      variants: [
         {
-          name: 'Color',
-          options: [{ value: 'Black', sku: 'SKU-BLK' }],
+          sku: 'SKU-BLK',
+          attributes: { color: 'Black' },
+          // No shipping override
         },
       ],
     };
 
-    const resolved = resolveCartItemShipping(product, [{ name: 'Color', option: { value: 'Black' } }]);
+    const resolved = resolveCartItemShipping(product, 'SKU-BLK');
     expect(resolved.variantSku).toBe('SKU-BLK');
     expect(resolved.weightGrams).toBe(250);
     expect(resolved.dimensionsCm).toEqual({ length: 8, width: 6, height: 1 });
@@ -103,16 +86,11 @@ describe('checkout.utils (order parcel metrics)', () => {
         weightGrams: 100,
         dimensionsCm: { length: 10, width: 8, height: 2 },
       },
-      variations: [
+      variants: [
         {
-          name: 'Size',
-          options: [
-            {
-              value: 'L',
-              sku: 'SKU-L',
-              shipping: { weightGrams: 250, dimensionsCm: { length: 12, width: 8, height: 3 } },
-            },
-          ],
+          sku: 'SKU-L',
+          attributes: { size: 'L' },
+          shipping: { weightGrams: 250, dimensionsCm: { length: 12, width: 8, height: 3 } },
         },
       ],
     };

@@ -2,6 +2,11 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import { beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
+// Ensure common env vars exist before app/config modules are imported in tests
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-123456789';
+process.env.COOKIE_SECRET = process.env.COOKIE_SECRET || 'test-cookie-secret-key-1234567890123456';
+process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
+
 let mongoServer;
 
 // Start MongoDB Memory Server before all tests
@@ -20,6 +25,9 @@ beforeAll(async () => {
   }
 
   await mongoose.connect(uri);
+
+  // Set env var for app parts that read it
+  process.env.MONGO_URI = uri;
 
   console.log(`\n✓ MongoDB Memory Server started: ${uri}\n`);
 });

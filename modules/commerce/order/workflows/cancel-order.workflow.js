@@ -10,6 +10,7 @@
 import orderRepository from '../order.repository.js';
 import { getRevenue } from '#common/plugins/revenue.plugin.js';
 import { ORDER_STATUS, PAYMENT_STATUS } from '../order.enums.js';
+import { stockService } from '../../core/index.js';
 
 /**
  * Cancel Order Workflow
@@ -47,6 +48,12 @@ export async function cancelOrderWorkflow(orderId, options = {}) {
 
   const now = new Date();
   let refundResponse = null;
+
+  // Release reservation for unfulfilled web orders (stock wasn't decremented yet)
+  // This prevents reservedQuantity leaks on cancellations.
+  if (order.source === 'web' && order.stockReservationId) {
+    await stockService.release(order.stockReservationId).catch(() => {});
+  }
 
   // Process refund if requested and payment was verified
   const shouldRefund = refundOptions?.enabled;

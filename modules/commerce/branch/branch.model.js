@@ -16,7 +16,6 @@ const branchSchema = new Schema({
   // URL-friendly slug (auto-generated from name)
   slug: {
     type: String,
-    unique: true,
   },
 
   // Unique code for the branch (e.g., "DHK-1", "CTG-MAIN")
@@ -40,6 +39,16 @@ const branchSchema = new Schema({
     type: String,
     enum: ['store', 'warehouse', 'outlet', 'franchise'],
     default: 'store',
+  },
+
+  // Branch role in inventory hierarchy
+  // head_office: Can receive purchases, initiate transfers
+  // sub_branch: Can only receive transfers, do local adjustments
+  role: {
+    type: String,
+    enum: ['head_office', 'sub_branch'],
+    default: 'sub_branch',
+    index: true,
   },
 
   // Address
@@ -87,7 +96,10 @@ const branchSchema = new Schema({
 
 }, { timestamps: true });
 
-// Ensure only one default branch
+// Unique slug for stable URLs (admin UI, receipts, etc.)
+branchSchema.index({ slug: 1 }, { unique: true });
+
+// Ensure only one default branch (pre-save for .save() calls)
 branchSchema.pre('save', async function() {
   if (this.isDefault && this.isModified('isDefault')) {
     await this.constructor.updateMany(
@@ -97,8 +109,78 @@ branchSchema.pre('save', async function() {
   }
 });
 
-// Auto-slug from name
-branchSchema.plugin(slugPlugin, { sourceField: 'name', slugField: 'slug' });
+// Ensure only one default branch (pre-findOneAndUpdate for update operations)
+branchSchema.pre('findOneAndUpdate', async function() {
+  const update = this.getUpdate();
+  const isSettingDefault = update?.isDefault === true || update?.$set?.isDefault === true;
+
+  if (isSettingDefault) {
+    const docId = this.getQuery()._id;
+    await this.model.updateMany(
+      { _id: { $ne: docId }, isDefault: true },
+      { isDefault: false }
+    );
+  }
+});
+
+// Ensure only one default branch (pre-updateOne for updateOne operations)
+branchSchema.pre('updateOne', async function() {
+  const update = this.getUpdate();
+  const isSettingDefault = update?.isDefault === true || update?.$set?.isDefault === true;
+
+  if (isSettingDefault) {
+    const docId = this.getQuery()._id;
+    await this.model.updateMany(
+      { _id: { $ne: docId }, isDefault: true },
+      { isDefault: false }
+    );
+  }
+});
+
+// Ensure only one head office (pre-save)
+branchSchema.pre('save', async function() {
+  if (this.role === 'head_office' && this.isModified('role')) {
+    await this.constructor.updateMany(
+      { _id: { $ne: this._id }, role: 'head_office' },
+      { role: 'sub_branch' }
+    );
+  }
+});
+
+// Ensure only one head office (pre-findOneAndUpdate)
+branchSchema.pre('findOneAndUpdate', async function() {
+  const update = this.getUpdate();
+  const isSettingHeadOffice = update?.role === 'head_office' || update?.$set?.role === 'head_office';
+
+  if (isSettingHeadOffice) {
+    const docId = this.getQuery()._id;
+    await this.model.updateMany(
+      { _id: { $ne: docId }, role: 'head_office' },
+      { role: 'sub_branch' }
+    );
+  }
+});
+
+// Ensure only one head office (pre-updateOne)
+branchSchema.pre('updateOne', async function() {
+  const update = this.getUpdate();
+  const isSettingHeadOffice = update?.role === 'head_office' || update?.$set?.role === 'head_office';
+
+  if (isSettingHeadOffice) {
+    const docId = this.getQuery()._id;
+    await this.model.updateMany(
+      { _id: { $ne: docId }, role: 'head_office' },
+      { role: 'sub_branch' }
+    );
+  }
+});
+
+// Auto-slug from name (updateOnChange: regenerate slug when name is updated)
+branchSchema.plugin(slugPlugin, {
+  sourceField: 'name',
+  slugField: 'slug',
+  updateOnChange: true,
+});
 
 const Branch = mongoose.models.Branch || mongoose.model('Branch', branchSchema);
 export default Branch;

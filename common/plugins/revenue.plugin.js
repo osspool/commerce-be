@@ -2,6 +2,7 @@ import fp from 'fastify-plugin';
 import { Revenue } from '@classytic/revenue';
 import { ManualProvider } from '@classytic/revenue-manual';
 import Transaction from '#modules/transaction/transaction.model.js';
+import Order from '#modules/commerce/order/order.model.js';
 import { updateEntityAfterPaymentVerification } from '#common/revenue/payment-verification.utils.js';
 import { createRevenueNotificationHandlers } from '#common/integrations/email-notifications/revenue-notifications.config.js';
 
@@ -115,8 +116,36 @@ async function revenuePlugin(fastify) {
               referenceModel: transaction.referenceModel,
               referenceId: transaction.referenceId,
             });
-            // Order state changes are handled by refundOrderWorkflow
-            // to properly manage partial vs full refunds and repository events
+
+            // Enrich refund transaction for finance statements (branch/source/VAT refs).
+            // This does not affect revenue correctness; it only adds reporting context.
+            try {
+              let order = null;
+              if (transaction.referenceModel === 'Order' && transaction.referenceId) {
+                order = await Order.findById(transaction.referenceId)
+                  .select('branch vat')
+                  .populate('branch', 'code')
+                  .lean();
+              }
+
+              await Transaction.findByIdAndUpdate(refundTransaction._id, {
+                $set: {
+                  source: transaction.source || 'web',
+                  ...(order?.branch?._id ? { branch: order.branch._id } : (transaction.branch ? { branch: transaction.branch } : {})),
+                  metadata: {
+                    ...(refundTransaction.metadata || {}),
+                    orderId: transaction.referenceId?.toString?.() || null,
+                    vatInvoiceNumber: order?.vat?.invoiceNumber || transaction.metadata?.vatInvoiceNumber || null,
+                    vatSellerBin: order?.vat?.sellerBin || transaction.metadata?.vatSellerBin || null,
+                    branchCode: order?.branch?.code || transaction.metadata?.branchCode || null,
+                    refundAmount,
+                    isPartialRefund,
+                  },
+                },
+              }).catch(() => {});
+            } catch (e) {
+              fastify.log.warn('Refund transaction enrichment failed', { error: e.message });
+            }
           },
         ],
 

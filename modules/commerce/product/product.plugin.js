@@ -2,7 +2,27 @@ import fp from 'fastify-plugin';
 import createCrudRouter from '#routes/utils/createCrudRouter.js';
 import productController from './product.controller.js';
 import productSchemas from './product.schemas.js';
-import productPresets from './product.presets.js';
+import permissions from '#config/permissions.js';
+import { canManageCostPrice } from './product.utils.js';
+
+function stripCostPriceWriteFields(request) {
+  if (!request?.body) return;
+
+  // Writes are role-gated. If the caller cannot manage cost price,
+  // we silently drop it (and variant cost prices) to avoid leaking business data.
+  // This matches the documented behavior in PRODUCT_API_GUIDE.md.
+  if (canManageCostPrice(request.user)) return;
+
+  delete request.body.costPrice;
+  if (Array.isArray(request.body.variants)) {
+    request.body.variants = request.body.variants.map(v => {
+      if (!v || typeof v !== 'object') return v;
+      const next = { ...v };
+      delete next.costPrice;
+      return next;
+    });
+  }
+}
 
 async function productPlugin(fastify) {
   fastify.register((instance, _opts, done) => {
@@ -10,19 +30,10 @@ async function productPlugin(fastify) {
       tag: 'Products',
       basePath: '/api/v1/products',
       schemas: productSchemas,
-      auth: {
-        list: [],
-        get: [],
-        create: ['admin'],
-        update: ['admin'],
-        remove: ['admin'],
-      },
+      auth: permissions.products,
       middlewares: {
-        list: productPresets.authenticatedOrgScoped(instance),
-        get: productPresets.authenticatedOrgScoped(instance),
-        create: productPresets.createProduct(instance),
-        update: productPresets.updateProduct(instance),
-        remove: productPresets.deleteProduct(instance),
+        create: [async (request) => stripCostPriceWriteFields(request)],
+        update: [async (request) => stripCostPriceWriteFields(request)],
       },
       additionalRoutes: [
         {
@@ -55,6 +66,29 @@ async function productPlugin(fastify) {
                 productId: { type: 'string' },
               },
               required: ['productId'],
+            },
+          },
+        },
+        {
+          method: 'GET',
+          path: '/deleted',
+          summary: 'Get soft-deleted products (admin recovery)',
+          handler: productController.getDeleted,
+          authRoles: permissions.products.deleted,
+        },
+        {
+          method: 'POST',
+          path: '/:id/restore',
+          summary: 'Restore a soft-deleted product',
+          handler: productController.restore,
+          authRoles: permissions.products.restore,
+          schemas: {
+            params: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+              },
+              required: ['id'],
             },
           },
         },

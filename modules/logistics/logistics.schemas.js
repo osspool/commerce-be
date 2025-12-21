@@ -189,6 +189,7 @@ export const createShipmentSchema = {
       pickupStoreId: { type: 'number', description: 'Pickup store ID (uses platform default if not provided)' },
       pickupAreaId: { type: 'number', description: 'Pickup area internalId (uses platform default if not provided)' },
       weight: { type: 'number', description: 'Parcel weight in grams (uses order parcel weight or default 500g)' },
+      codAmount: { type: 'number', description: 'COD amount to collect on delivery (auto-calculated from order if not provided, 0 for prepaid)' },
       instructions: { type: 'string', description: 'Delivery instructions for courier' },
     },
     required: ['orderId'],

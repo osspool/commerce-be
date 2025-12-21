@@ -25,7 +25,7 @@ import {
 } from '../helpers/test-data.js';
 import { mockRedXApi, waitFor, sleep } from '../helpers/test-utils.js';
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/bigboss-test';
+const MONGO_URI = process.env.MONGO_URI;
 
 describe('Logistics Webhook - Order Status Propagation', () => {
   let customer;
@@ -35,11 +35,14 @@ describe('Logistics Webhook - Order Status Propagation', () => {
   let redxMock;
 
   beforeAll(async () => {
-    await mongoose.connect(MONGO_URI);
+    if (!MONGO_URI) throw new Error('MONGO_URI is not set (expected from tests/setup/global-setup.js)');
+    if (mongoose.connection.readyState === 0) {
+      await mongoose.connect(MONGO_URI);
+    }
   });
 
   afterAll(async () => {
-    await mongoose.disconnect();
+    // Global teardown closes the connection
   });
 
   beforeEach(async () => {

@@ -6,6 +6,7 @@ import {
   cascadePlugin,
 } from '@classytic/mongokit';
 import Branch from './branch.model.js';
+import { emitBranchUpdated, emitBranchDeleted } from '#common/events/branch.handlers.js';
 
 /**
  * Branch Repository
@@ -45,11 +46,32 @@ class BranchRepository extends Repository {
       }
     });
 
-    // Ensure first branch becomes default
+    // Ensure first branch becomes default and head office
     this.on('before:create', async (context) => {
       const count = await this.Model.countDocuments();
       if (count === 0) {
         context.data.isDefault = true;
+        context.data.role = 'head_office';
+      }
+    });
+
+    // Emit branch updated event for user sync
+    this.on('after:update', ({ context, result }) => {
+      const { code, name, role } = context.data || {};
+      const updates = {};
+      if (code !== undefined) updates.code = code;
+      if (name !== undefined) updates.name = name;
+      if (role !== undefined) updates.role = role;
+
+      if (Object.keys(updates).length > 0 && result?._id) {
+        emitBranchUpdated(result._id.toString(), updates);
+      }
+    });
+
+    // Emit branch deleted event for user cleanup
+    this.on('after:delete', ({ context, result }) => {
+      if (result?._id) {
+        emitBranchDeleted(result._id.toString());
       }
     });
   }
@@ -85,6 +107,57 @@ class BranchRepository extends Repository {
   }
 
   /**
+   * Get head office branch
+   * Creates one from default if no head office exists yet
+   * @returns {Promise<Object>} Head office branch document
+   */
+  async getHeadOffice() {
+    let headOffice = await this.Model.findOne({ role: 'head_office', isActive: true }).lean();
+
+    if (!headOffice) {
+      // Promote default branch to head office
+      const defaultBranch = await this.getDefaultBranch();
+      if (defaultBranch) {
+        await this.Model.updateOne(
+          { _id: defaultBranch._id },
+          { role: 'head_office' }
+        );
+        headOffice = { ...defaultBranch, role: 'head_office' };
+      }
+    }
+
+    return headOffice;
+  }
+
+  /**
+   * Check if a branch is head office
+   * @param {string} branchId - Branch ID to check
+   * @returns {Promise<boolean>}
+   */
+  async isHeadOffice(branchId) {
+    const branch = await this.Model.findById(branchId).select('role').lean();
+    return branch?.role === 'head_office';
+  }
+
+  /**
+   * Get all sub-branches (non-head-office branches)
+   * @returns {Promise<Array>}
+   */
+  async getSubBranches() {
+    return this.Model.find({ role: { $ne: 'head_office' }, isActive: true })
+      .sort({ name: 1 })
+      .lean();
+  }
+
+  /**
+   * Set a branch as head office
+   * @param {string} branchId - Branch ID to promote
+   */
+  async setHeadOffice(branchId) {
+    return this.update(branchId, { role: 'head_office' });
+  }
+
+  /**
    * Get branch by code
    */
   async getByCode(code) {
@@ -100,11 +173,9 @@ class BranchRepository extends Repository {
 
   /**
    * Set a branch as default
+   * Note: Model hooks automatically unset other defaults when isDefault is set to true
    */
   async setDefault(branchId) {
-    // Unset all defaults
-    await this.Model.updateMany({ isDefault: true }, { isDefault: false });
-    // Set new default
     return this.update(branchId, { isDefault: true });
   }
 }

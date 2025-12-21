@@ -9,6 +9,9 @@ class ProductController extends BaseController {
     super(productRepository, productSchemaOptions);
     this.getRecommendations = this.getRecommendations.bind(this);
     this.getBySlug = this.getBySlug.bind(this);
+    this.delete = this.delete.bind(this);
+    this.restore = this.restore.bind(this);
+    this.getDeleted = this.getDeleted.bind(this);
   }
 
   // Override getAll to filter cost prices
@@ -35,7 +38,7 @@ class ProductController extends BaseController {
 
     // Filter cost prices based on role
     if (result.docs) {
-      result.docs = filterCostPriceByRole(result.docs, req.user?.role);
+      result.docs = filterCostPriceByRole(result.docs, req.user);
     }
 
     return reply.code(200).send({ success: true, ...result });
@@ -45,14 +48,14 @@ class ProductController extends BaseController {
   async getById(req, reply) {
     const options = this._buildContext(req);
     const document = await this.service.getById(req.params.id, options);
-    const filtered = filterCostPriceByRole(document, req.user?.role);
+    const filtered = filterCostPriceByRole(document, req.user);
     return reply.code(200).send({ success: true, data: filtered });
   }
 
   async getRecommendations(req, reply) {
     const { productId } = req.params;
     const recommendations = await productRepository.getRecommendations(productId, 4);
-    const filtered = filterCostPriceByRole(recommendations, req.user?.role);
+    const filtered = filterCostPriceByRole(recommendations, req.user);
     return reply.code(200).send({ success: true, data: filtered });
   }
 
@@ -60,8 +63,63 @@ class ProductController extends BaseController {
     const { slug } = req.params;
     const options = this._buildContext(req);
     const product = await productRepository.getBySlug(slug, options);
-    const filtered = filterCostPriceByRole(product, req.user?.role);
+    const filtered = filterCostPriceByRole(product, req.user);
     return reply.code(200).send({ success: true, data: filtered });
+  }
+
+  /**
+   * Delete product
+   * Default: soft delete (preserves data for order history)
+   * With ?hard=true: permanent delete (admin only, cascades to inventory)
+   */
+  async delete(req, reply) {
+    const { hard } = req.query;
+
+    let result;
+    if (hard === 'true') {
+      // Hard delete - permanently remove product and cascade to inventory
+      result = await productRepository.hardDelete(req.params.id);
+    } else {
+      // Soft delete via softDeletePlugin (sets deletedAt, auto-filters from queries)
+      await productRepository.delete(req.params.id);
+      result = { deleted: true, productId: req.params.id, soft: true };
+    }
+
+    return reply.code(200).send({ success: true, ...result });
+  }
+
+  /**
+   * Restore a soft-deleted product
+   * POST /products/:id/restore
+   */
+  async restore(req, reply) {
+    const product = await productRepository.restore(req.params.id);
+    const filtered = filterCostPriceByRole(product, req.user);
+    return reply.code(200).send({ success: true, data: filtered });
+  }
+
+  /**
+   * Get soft-deleted products (admin recovery)
+   * GET /products/deleted
+   */
+  async getDeleted(req, reply) {
+    const rawQuery = req.validated?.query || req.query;
+    const queryParams = queryParser.parseQuery(rawQuery);
+    const options = this._buildContext(req);
+
+    const paginationParams = {
+      ...(queryParams.page !== undefined && { page: queryParams.page }),
+      ...(queryParams.after && { after: queryParams.after }),
+      limit: queryParams.limit,
+    };
+
+    const result = await productRepository.getDeleted(paginationParams, options);
+
+    if (result.docs) {
+      result.docs = filterCostPriceByRole(result.docs, req.user);
+    }
+
+    return reply.code(200).send({ success: true, ...result });
   }
 }
 

@@ -7,13 +7,12 @@ const cmsSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    slug: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      lowercase: true,
-    },
+	    slug: {
+	      type: String,
+	      required: true,
+	      trim: true,
+	      lowercase: true,
+	    },
     status: {
       type: String,
       enum: ['draft', 'published', 'archived'],
@@ -39,8 +38,8 @@ const cmsSchema = new mongoose.Schema(
   }
 );
 
-// Index for fast slug lookups
-cmsSchema.index({ slug: 1 });
+// Unique slug for fast lookups
+cmsSchema.index({ slug: 1 }, { unique: true });
 cmsSchema.index({ status: 1 });
 
 const CMS = mongoose.model('CMS', cmsSchema);

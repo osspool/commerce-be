@@ -19,13 +19,13 @@ class CartController {
   }
 
   async addItem(req, reply) {
-    const { productId, variations, quantity } = req.body;
+    const { productId, variantSku = null, quantity } = req.body;
 
     try {
       const cart = await cartRepository.addItem(
         req.user._id,
         productId,
-        variations,
+        variantSku,
         quantity
       );
       return reply.code(200).send({ success: true, data: cart });

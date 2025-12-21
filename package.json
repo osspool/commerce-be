@@ -1,7 +1,7 @@
 {
-  "name": "fitverse-be",
+  "name": "ecommerce-api",
   "version": "1.0.0",
-  "description": "Backend for Gym Management System Fitverse in Bangladesh",
+  "description": "Configuration-based ecommerce backend API - single tenant, no platform dependencies",
   "type": "module",
   "main": "index.js",
   "imports": {
@@ -20,7 +20,8 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "test:watch": "vitest --watch"
+    "test:watch": "vitest --watch",
+    "seed:categories": "node modules/commerce/category/seed-categories.js"
   },
   "engines": {
     "node": ">=24"
@@ -33,7 +34,7 @@
     "@classytic/bd-areas": "^1.0.0",
     "@classytic/bd-logistics": "^1.0.3",
     "@classytic/media-kit": "^2.0.0",
-    "@classytic/mongokit": "^3.0.0",
+    "@classytic/mongokit": "^3.0.4",
     "@classytic/mongoose-slug-plugin": "^1.0.1",
     "@classytic/notifications": "^0.0.1",
     "@classytic/revenue": "^1.0.0",

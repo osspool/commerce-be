@@ -30,7 +30,6 @@ class OrderRepository extends Repository {
   constructor() {
     super(Order, [
       validationChainPlugin([
-        requireField('customer', ['create']),
         requireField('items', ['create']),
         requireField('totalAmount', ['create']),
       ]),
@@ -62,7 +61,9 @@ class OrderRepository extends Repository {
     // NOTE: Inventory is already decremented atomically in workflow
     this.on('after:create', async ({ result }) => {
       try {
-        await customerStats.onOrderCreated(result.customer, result);
+        if (result.customer) {
+          await customerStats.onOrderCreated(result.customer, result);
+        }
         // productStats.decrementInventory() REMOVED - done atomically in workflow
       } catch (error) {
         console.error('Order after:create event error:', error.message);
@@ -83,13 +84,17 @@ class OrderRepository extends Repository {
           currentPaymentStatus === PAYMENT_STATUS.VERIFIED &&
           (previousStatus !== ORDER_STATUS.DELIVERED || previousPaymentStatus !== PAYMENT_STATUS.VERIFIED)
         ) {
-          await customerStats.onOrderCompleted(result.customer, result.totalAmount);
+          if (result.customer) {
+            await customerStats.onOrderCompleted(result.customer, result.totalAmount);
+          }
           await productStats.onOrderItemsSold(result.items);
         }
         
         // Order cancelled - restore inventory
         if (result.status === ORDER_STATUS.CANCELLED && previousStatus !== ORDER_STATUS.CANCELLED) {
-          await customerStats.onOrderCancelled(result.customer);
+          if (result.customer) {
+            await customerStats.onOrderCancelled(result.customer);
+          }
 
           // Only restore stock if order was fulfilled (stock was actually decremented)
           // For web orders: check if shipping exists and was picked up/in-transit/delivered
@@ -102,7 +107,9 @@ class OrderRepository extends Repository {
 
         // Order refunded - restore inventory and revert stats
         if (currentPaymentStatus === PAYMENT_STATUS.REFUNDED && previousPaymentStatus !== PAYMENT_STATUS.REFUNDED) {
-          await customerStats.onOrderRefunded(result.customer, result.totalAmount);
+          if (result.customer) {
+            await customerStats.onOrderRefunded(result.customer, result.totalAmount);
+          }
 
           // Only restore stock if order was fulfilled
           const wasFulfilled = this._wasOrderFulfilled(result);
@@ -153,13 +160,10 @@ class OrderRepository extends Repository {
 
       let itemPrice = product.currentPrice || product.basePrice;
 
-      // Add variation modifiers
-      if (item.variations?.length) {
-        for (const variation of item.variations) {
-          const prodVar = product.variations.find(v => v.name === variation.name);
-          const option = prodVar?.options.find(o => o.value === variation.option.value);
-          if (option) itemPrice += option.priceModifier || 0;
-        }
+      // Variant SKU modifier
+      if (item.variantSku && product.variants?.length) {
+        const variant = product.variants.find(v => v.sku === item.variantSku);
+        itemPrice += variant?.priceModifier || 0;
       }
 
       subtotal += itemPrice * item.quantity;

@@ -1,18 +1,26 @@
+import mongoose from 'mongoose';
 import { Repository, validationChainPlugin, requireField, cachePlugin } from '@classytic/mongokit';
 import StockEntry from './stockEntry.model.js';
 import StockMovement from './stockMovement.model.js';
 import branchRepository from '../branch/branch.repository.js';
 import { createMemoryCacheAdapter } from '#common/adapters/memoryCache.adapter.js';
+import { syncProduct } from './stockSync.util.js';
 
-// Cache adapter for inventory lookups (shared across requests)
 const inventoryCacheAdapter = createMemoryCacheAdapter({ maxSize: 1000 });
 
 /**
- * Inventory Repository
+ * Inventory Repository (read-focused)
  *
- * Handles stock operations with atomic updates and audit trail.
- * Uses caching for fast barcode/SKU lookups.
- * Integrates with order events for automatic stock updates.
+ * Owns:
+ * - Fast lookup paths (POS scan, branch stock enrich, low stock, audit queries)
+ * - Hot-path caching (local Map) + MongoKit cachePlugin for general queries
+ *
+ * Does not own:
+ * - Writes/mutations (those live in inventory.service.js)
+ *
+ * Important:
+ * - All stock mutations should emit `after:update` on this repository to keep
+ *   caches and Product.quantity projection in sync.
  */
 class InventoryRepository extends Repository {
   constructor() {
@@ -23,424 +31,269 @@ class InventoryRepository extends Repository {
       ]),
       cachePlugin({
         adapter: inventoryCacheAdapter,
-        ttl: 30, // 30 seconds for stock data (balance freshness vs performance)
+        ttl: 30,
         byIdTtl: 60,
-        queryTtl: 15, // Shorter TTL for list queries
+        queryTtl: 15,
       }),
     ]);
 
-    this._barcodeCache = new Map(); // Local cache for barcode lookups
+    this._barcodeCache = new Map();
+    this._productSkuCache = new Map();
+    this._productMetaCache = new Map();
+    this._productSyncTimers = new Map();
     this._setupEvents();
   }
 
-  /**
-   * Setup event handlers for inventory operations
-   */
-  _setupEvents() {
-    // After stock updated - sync product quantity (fire-and-forget)
-    this.on('after:update', async ({ result, context }) => {
-      if (!context?.skipProductSync) {
-        try {
-          const config = (await import('#config/index.js')).default;
-          if (config.inventory?.useStockEntry) {
-            const productStats = await import('../product/product.stats.js');
-            const quantityDelta = context?.quantityDelta || 0;
-            if (quantityDelta !== 0) {
-              productStats.adjustQuantity(result.product, quantityDelta).catch(() => {});
-            }
-          }
-        } catch (error) {
-          // Silent fail - product sync is best effort
-        }
-      }
-    });
+  async _getProductSku(productId) {
+    if (!productId) return null;
+    const id = productId?.toString?.() || String(productId);
+    const cached = this._productSkuCache.get(id);
+    if (cached && cached.expireAt > Date.now()) {
+      return cached.sku;
+    }
 
-    // Low stock alert event
-    this.on('after:update', async ({ result }) => {
-      if (result.quantity <= result.reorderPoint && result.reorderPoint > 0) {
-        this.emit('low-stock', {
-          stockEntry: result,
-          product: result.product,
-          branch: result.branch,
-          currentQuantity: result.quantity,
-          reorderPoint: result.reorderPoint,
-        });
-      }
-    });
-
-    // Out of stock event
-    this.on('after:update', async ({ result, context }) => {
-      if (result.quantity === 0 && context?.previousQuantity > 0) {
-        this.emit('out-of-stock', {
-          stockEntry: result,
-          product: result.product,
-          branch: result.branch,
-        });
-      }
-    });
-  }
-
-  /**
-   * Invalidate barcode/SKU lookup cache
-   * Called after stock modifications
-   */
-  _invalidateLookupCache(code) {
-    if (code) {
-      this._barcodeCache.delete(code);
-    } else {
-      this._barcodeCache.clear();
+    try {
+      const Product = mongoose.model('Product');
+      const doc = await Product.findById(id).select('sku').lean();
+      const sku = doc?.sku?.trim?.() || null;
+      this._productSkuCache.set(id, { sku, expireAt: Date.now() + 10 * 60 * 1000 });
+      return sku;
+    } catch {
+      return null;
     }
   }
 
+  async _getProductMeta(productId) {
+    if (!productId) return { sku: null, barcode: null, variantBarcodeBySku: new Map() };
+    const id = productId?.toString?.() || String(productId);
+
+    const cached = this._productMetaCache.get(id);
+    if (cached && cached.expireAt > Date.now()) {
+      return cached.value;
+    }
+
+    try {
+      const Product = mongoose.model('Product');
+      const doc = await Product.findById(id).select('sku barcode variants.sku variants.barcode').lean();
+
+      const variantBarcodeBySku = new Map();
+      for (const v of doc?.variants || []) {
+        if (!v?.sku || !v?.barcode) continue;
+        variantBarcodeBySku.set(v.sku, v.barcode);
+      }
+
+      const value = {
+        sku: doc?.sku?.trim?.() || null,
+        barcode: doc?.barcode?.trim?.() || null,
+        variantBarcodeBySku,
+      };
+
+      this._productMetaCache.set(id, { value, expireAt: Date.now() + 10 * 60 * 1000 });
+      if (value.sku) this._productSkuCache.set(id, { sku: value.sku, expireAt: Date.now() + 10 * 60 * 1000 });
+      return value;
+    } catch {
+      return { sku: null, barcode: null, variantBarcodeBySku: new Map() };
+    }
+  }
+
+  _getCachedProductSku(productId) {
+    if (!productId) return null;
+    const id = productId?.toString?.() || String(productId);
+    const cached = this._productSkuCache.get(id);
+    if (cached && cached.expireAt > Date.now()) {
+      return cached.sku;
+    }
+    return null;
+  }
+
+  _setupEvents() {
+    // Cache invalidation (supports both repository updates and service-emitted events)
+    this.on('after:update', async ({ result }) => {
+      try {
+        if (!result) return;
+        const productId = result.product?.toString?.() || result.product;
+        const branchId = result.branch?.toString?.() || result.branch;
+
+        // Always invalidate by variant SKU (direct scan path)
+        if (result.variantSku) this._invalidateLookupCache(result.variantSku, branchId);
+
+        // Simple products are often scanned by product-level SKU (not stored on StockEntry),
+        // so invalidate that lookup key too when variantSku is null.
+        // Also invalidate by product barcode and variant barcode (barcode scan path).
+        if (productId) {
+          const meta = await this._getProductMeta(productId);
+          if (meta.sku) this._invalidateLookupCache(meta.sku, branchId);
+          if (meta.barcode) this._invalidateLookupCache(meta.barcode, branchId);
+          if (result.variantSku) {
+            const vbc = meta.variantBarcodeBySku.get(result.variantSku);
+            if (vbc) this._invalidateLookupCache(vbc, branchId);
+          }
+        }
+      } catch {
+        // Best-effort invalidation
+      }
+    });
+
+    // Product quantity sync (fire-and-forget; debounced)
+    this.on('after:update', async ({ result, context }) => {
+      if (context?.skipProductSync) return;
+      try {
+        this._scheduleProductSync(result?.product);
+      } catch {
+        // Best-effort sync scheduling
+      }
+    });
+  }
+
+  _invalidateLookupCache(code, branchId = null) {
+    if (!code) {
+      this._barcodeCache.clear();
+      return;
+    }
+
+    const trimmedCode = code.trim();
+    const trimmedBranchId = branchId?.toString?.() || branchId;
+
+    if (trimmedBranchId) {
+      this._barcodeCache.delete(`${trimmedCode}:${trimmedBranchId}`);
+      return;
+    }
+
+    const prefix = `${trimmedCode}:`;
+    for (const key of this._barcodeCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this._barcodeCache.delete(key);
+      }
+    }
+  }
+
+  invalidateLookupCache(code, branchId = null) {
+    this._invalidateLookupCache(code, branchId);
+  }
+
+  invalidateAllLookupCache() {
+    this._invalidateLookupCache();
+    this._productSkuCache.clear();
+    this._productMetaCache.clear();
+  }
+
+  _scheduleProductSync(productId) {
+    if (!productId) return;
+
+    const id = productId.toString();
+    const existing = this._productSyncTimers.get(id);
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(async () => {
+      this._productSyncTimers.delete(id);
+      try {
+        await syncProduct(id);
+      } catch {
+        // Best-effort sync; periodic jobs can heal drift
+      }
+    }, 250);
+
+    this._productSyncTimers.set(id, timer);
+  }
+
   /**
-   * Get stock entry by barcode or SKU (for POS scanning)
-   * Returns stock entry with product populated.
-   * Falls back to product lookup if no stock entry exists.
+   * POS scan lookup: barcode / variantSku / product sku
    *
-   * Uses two-tier caching:
-   * 1. Local Map cache for hot paths (cleared on stock changes)
-   * 2. MongoKit cachePlugin for general queries
-   *
-   * @param {string} code - Barcode or SKU to search
-   * @param {string} branchId - Branch ID (uses default if not provided)
-   * @returns {Promise<Object|null>} Stock entry with product, or product with fallback
+   * Lookup order:
+   * 1. StockEntry by variantSku (fast path for variant SKU scans)
+   * 2. Product by barcode/SKU/variantSku (covers all barcode scans)
+   * 3. Match to StockEntry with branch stock
    */
-  async getByBarcodeOrSku(code, branchId = null) {
+  async getByBarcodeOrSku(code, branchId = null, options = {}) {
     if (!code) return null;
 
     const trimmedCode = code.trim();
+    const { includeInactive = false } = options;
     const branch = branchId || (await branchRepository.getDefaultBranch())._id;
     const cacheKey = `${trimmedCode}:${branch}`;
 
-    // Check local cache first (hot path for repeated scans)
     const cached = this._barcodeCache.get(cacheKey);
     if (cached && cached.expireAt > Date.now()) {
       return cached.value;
     }
 
-    // Try stock entry lookup
+    // Fast path: Try StockEntry lookup by variantSku only
+    // (Useful when scanning variant SKU directly, e.g., "TSHIRT-S-RED")
     let entry = await this.Model.findOne({
-      $or: [{ barcode: trimmedCode }, { variantSku: trimmedCode }],
+      variantSku: trimmedCode,
       branch,
+      ...(!includeInactive ? { isActive: { $ne: false } } : {}),
     })
-      .populate('product', 'name slug images basePrice sku barcode variations')
+      .populate('product', 'name slug images basePrice sku barcode variants')
       .lean();
 
     if (entry) {
-      // Cache for 30 seconds
-      this._barcodeCache.set(cacheKey, {
-        value: { ...entry, source: 'inventory' },
-        expireAt: Date.now() + 30000,
-      });
-      return { ...entry, source: 'inventory' };
+      const value = { ...entry, source: 'inventory' };
+      this._barcodeCache.set(cacheKey, { value, expireAt: Date.now() + 30000 });
+      return value;
     }
 
-    // Fallback: Search product directly (for products without stock entries)
+    // Main path: Lookup via Product (handles product barcode, SKU, and variant barcodes)
     const productRepository = (await import('../product/product.repository.js')).default;
     const productResult = await productRepository.getByBarcodeOrSku(trimmedCode);
 
     if (productResult?.product) {
+      const desiredVariantSku = productResult.matchedVariant?.sku || null;
+
+      const productId = productResult.product._id?.toString?.() || String(productResult.product._id);
+      const sku = productResult.product.sku?.trim?.() || null;
+      if (productId && sku) {
+        this._productSkuCache.set(productId, { sku, expireAt: Date.now() + 10 * 60 * 1000 });
+      }
+
+      // Find StockEntry with branch stock
+      const resolvedEntry = await this.Model.findOne({
+        product: productResult.product._id,
+        variantSku: desiredVariantSku,
+        branch,
+        ...(!includeInactive ? { isActive: { $ne: false } } : {}),
+      })
+        .populate('product', 'name slug images basePrice sku barcode variants')
+        .lean();
+
+      if (resolvedEntry) {
+        const value = { ...resolvedEntry, source: 'inventory' };
+        this._barcodeCache.set(cacheKey, { value, expireAt: Date.now() + 30000 });
+        return value;
+      }
+
+      // No stock entry yet - return product with 0 quantity
       const fallbackEntry = {
         product: productResult.product,
-        variantSku: productResult.matchedVariant?.option?.sku || null,
-        quantity: productResult.product.quantity || 0,
+        variantSku: desiredVariantSku,
+        quantity: 0,
         matchedVariant: productResult.matchedVariant,
-        source: 'product', // Indicates this came from product, not stock entry
+        source: 'product',
       };
 
-      // Cache fallback result
-      this._barcodeCache.set(cacheKey, {
-        value: fallbackEntry,
-        expireAt: Date.now() + 30000,
-      });
-
+      this._barcodeCache.set(cacheKey, { value: fallbackEntry, expireAt: Date.now() + 30000 });
       return fallbackEntry;
     }
 
     return null;
   }
 
-  /**
-   * Get stock for a product across all branches or specific branch
-   *
-   * @param {string} productId - Product ID
-   * @param {string} branchId - Optional branch ID
-   * @returns {Promise<Array>} Stock entries
-   */
   async getProductStock(productId, branchId = null) {
     const query = { product: productId };
-    if (branchId) {
-      query.branch = branchId;
-    }
-
+    if (branchId) query.branch = branchId;
     return this.Model.find(query)
       .populate('branch', 'code name')
       .sort({ variantSku: 1 })
       .lean();
   }
 
-  /**
-   * Atomic stock decrement for orders
-   * Uses MongoDB's conditional update to prevent overselling
-   *
-   * @param {string} productId - Product ID
-   * @param {string} variantSku - Variant SKU (null for simple products)
-   * @param {string} branchId - Branch ID
-   * @param {number} quantity - Quantity to decrement
-   * @param {Object} reference - Reference document info
-   * @param {string} actorId - User who made the change
-   * @returns {Promise<boolean>} true if successful, false if insufficient stock
-   */
-  async decrementStock(productId, variantSku, branchId, quantity, reference = {}, actorId = null) {
-    const previousEntry = await this.Model.findOne({
-      product: productId,
-      variantSku: variantSku || null,
-      branch: branchId,
-    }).lean();
-
-    const result = await this.Model.findOneAndUpdate(
-      {
-        product: productId,
-        variantSku: variantSku || null,
-        branch: branchId,
-        quantity: { $gte: quantity }, // Atomic check
-      },
-      {
-        $inc: { quantity: -quantity },
-      },
-      { new: true }
-    );
-
-    if (!result) return false;
-
-    // Record movement
-    await StockMovement.create({
-      stockEntry: result._id,
-      product: productId,
-      variantSku: variantSku || null,
-      branch: branchId,
-      type: 'sale',
-      quantity: -quantity,
-      balanceAfter: result.quantity,
-      reference,
-      actor: actorId,
-    });
-
-    // Trigger events with context
-    this.emit('after:update', {
-      result,
-      context: {
-        quantityDelta: -quantity,
-        previousQuantity: previousEntry?.quantity || 0,
-      },
-    });
-
-    // Invalidate cache for this stock entry
-    this._invalidateLookupCache(variantSku);
-    if (result.barcode) this._invalidateLookupCache(result.barcode);
-
-    return true;
-  }
-
-  /**
-   * Restore stock (for cancellations/refunds)
-   *
-   * @param {string} productId - Product ID
-   * @param {string} variantSku - Variant SKU (null for simple products)
-   * @param {string} branchId - Branch ID
-   * @param {number} quantity - Quantity to restore
-   * @param {Object} reference - Reference document info
-   * @param {string} actorId - User who made the change
-   * @returns {Promise<Object>} Updated stock entry
-   */
-  async restoreStock(productId, variantSku, branchId, quantity, reference = {}, actorId = null) {
-    const previousEntry = await this.Model.findOne({
-      product: productId,
-      variantSku: variantSku || null,
-      branch: branchId,
-    }).lean();
-
-    const result = await this.Model.findOneAndUpdate(
-      {
-        product: productId,
-        variantSku: variantSku || null,
-        branch: branchId,
-      },
-      {
-        $inc: { quantity: quantity },
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
-
-    await StockMovement.create({
-      stockEntry: result._id,
-      product: productId,
-      variantSku: variantSku || null,
-      branch: branchId,
-      type: 'return',
-      quantity: quantity,
-      balanceAfter: result.quantity,
-      reference,
-      actor: actorId,
-    });
-
-    // Trigger events with context
-    this.emit('after:update', {
-      result,
-      context: {
-        quantityDelta: quantity,
-        previousQuantity: previousEntry?.quantity || 0,
-      },
-    });
-
-    // Invalidate cache
-    this._invalidateLookupCache(variantSku);
-    if (result.barcode) this._invalidateLookupCache(result.barcode);
-
-    return result;
-  }
-
-  /**
-   * Set stock quantity (for manual adjustments)
-   *
-   * @param {string} productId - Product ID
-   * @param {string} variantSku - Variant SKU (null for simple products)
-   * @param {string} branchId - Branch ID
-   * @param {number} newQuantity - New quantity to set
-   * @param {string} notes - Reason for adjustment
-   * @param {string} actorId - User who made the change
-   * @returns {Promise<Object>} Updated stock entry
-   */
-  async setStock(productId, variantSku, branchId, newQuantity, notes = '', actorId = null) {
-    const oldEntry = await this.Model.findOne({
-      product: productId,
-      variantSku: variantSku || null,
-      branch: branchId,
-    }).lean();
-
-    const oldQuantity = oldEntry?.quantity || 0;
-    const difference = newQuantity - oldQuantity;
-
-    const result = await this.Model.findOneAndUpdate(
-      {
-        product: productId,
-        variantSku: variantSku || null,
-        branch: branchId,
-      },
-      {
-        $set: { quantity: newQuantity },
-        $setOnInsert: {
-          product: productId,
-          variantSku: variantSku || null,
-          branch: branchId,
-        },
-      },
-      { new: true, upsert: true }
-    );
-
-    await StockMovement.create({
-      stockEntry: result._id,
-      product: productId,
-      variantSku: variantSku || null,
-      branch: branchId,
-      type: 'adjustment',
-      quantity: difference,
-      balanceAfter: newQuantity,
-      notes,
-      actor: actorId,
-    });
-
-    // Trigger events with context
-    this.emit('after:update', {
-      result,
-      context: {
-        quantityDelta: difference,
-        previousQuantity: oldQuantity,
-      },
-    });
-
-    // Invalidate cache
-    this._invalidateLookupCache(variantSku);
-    if (result.barcode) this._invalidateLookupCache(result.barcode);
-
-    return result;
-  }
-
-  /**
-   * Sync stock from Product model (migration/import helper)
-   * Creates StockEntry from product.quantity and variant quantities
-   *
-   * @param {Object} product - Product document
-   * @param {string} branchId - Branch ID
-   * @param {string} actorId - User who triggered sync
-   */
-  async syncFromProduct(product, branchId, actorId = null) {
-    const ops = [];
-    const hasVariations = product.variations?.length > 0;
-
-    // Simple product (no variations)
-    if (!hasVariations) {
-      ops.push({
-        updateOne: {
-          filter: { product: product._id, variantSku: null, branch: branchId },
-          update: {
-            $set: {
-              product: product._id,
-              variantSku: null,
-              barcode: product.barcode || null,
-              branch: branchId,
-              quantity: product.quantity || 0,
-            },
-          },
-          upsert: true,
-        },
-      });
-    }
-
-    // Variant-level stock
-    for (const variation of product.variations || []) {
-      for (const option of variation.options || []) {
-        ops.push({
-          updateOne: {
-            filter: { product: product._id, variantSku: option.sku, branch: branchId },
-            update: {
-              $set: {
-                product: product._id,
-                variantSku: option.sku,
-                barcode: option.barcode || null,
-                branch: branchId,
-                quantity: option.quantity || 0,
-              },
-            },
-            upsert: true,
-          },
-        });
-      }
-    }
-
-    if (ops.length) {
-      await this.Model.bulkWrite(ops);
-      // Clear all lookup cache after bulk sync
-      this._invalidateLookupCache();
-    }
-  }
-
-  /**
-   * Get low stock items for a branch
-   *
-   * @param {string} branchId - Branch ID (uses default if not provided)
-   * @param {number} threshold - Quantity threshold (default: use reorderPoint)
-   * @returns {Promise<Array>} Low stock entries
-   */
   async getLowStock(branchId = null, threshold = null) {
     const branch = branchId || (await branchRepository.getDefaultBranch())._id;
-
-    const query = { branch };
+    const query = { branch, isActive: { $ne: false } };
 
     if (threshold !== null) {
       query.quantity = { $lte: threshold, $gt: 0 };
     } else {
-      // Use reorderPoint from each entry
       query.$expr = {
         $and: [
           { $gt: ['$reorderPoint', 0] },
@@ -455,13 +308,6 @@ class InventoryRepository extends Repository {
       .lean();
   }
 
-  /**
-   * Get stock movements for audit trail
-   *
-   * @param {Object} filters - Query filters
-   * @param {Object} options - Pagination options
-   * @returns {Promise<Object>} Paginated movements
-   */
   async getMovements(filters = {}, options = {}) {
     const { page = 1, limit = 50 } = options;
     const skip = (page - 1) * limit;
@@ -501,64 +347,69 @@ class InventoryRepository extends Repository {
     };
   }
 
-  /**
-   * Update barcode on stock entry
-   *
-   * @param {string} productId - Product ID
-   * @param {string} variantSku - Variant SKU (null for simple products)
-   * @param {string} branchId - Branch ID
-   * @param {string} barcode - New barcode value
-   */
-  async updateStockEntryBarcode(productId, variantSku, branchId, barcode) {
-    await this.Model.updateOne(
-      {
-        product: productId,
-        variantSku: variantSku || null,
-        branch: branchId,
-      },
-      { $set: { barcode } },
-      { upsert: false }
-    );
+  async getBatchBranchStock(productIds, branchId, options = {}) {
+    if (!productIds?.length || !branchId) return new Map();
+    const { includeInactive = false } = options;
 
-    // Invalidate cache
-    this._invalidateLookupCache(barcode);
-    if (variantSku) this._invalidateLookupCache(variantSku);
+    const entries = await this.Model.find({
+      product: { $in: productIds },
+      branch: branchId,
+      ...(!includeInactive ? { isActive: { $ne: false } } : {}),
+    })
+      .select('product variantSku quantity reservedQuantity barcode costPrice reorderPoint isActive')
+      .lean();
+
+    const stockMap = new Map();
+    for (const entry of entries) {
+      const key = `${entry.product}_${entry.variantSku || 'null'}`;
+      stockMap.set(key, entry);
+    }
+
+    return stockMap;
   }
 
-  /**
-   * Archive old stock movements to reduce database size
-   * Keeps recent movements in hot storage for quick access
-   *
-   * @param {Object} options - Archive options
-   * @param {number} options.olderThanDays - Archive movements older than X days (default: 365)
-   * @param {string} options.branchId - Optional branch filter
-   * @param {number} options.ttlDays - How long to keep archives (default: 730 = 2 years)
-   * @returns {Promise<Object>} Archive result with count and file info
-   */
+  async getBranchStockSummary(branchId) {
+    const [summary] = await this.Model.aggregate([
+      { $match: { branch: branchId, isActive: { $ne: false } } },
+      {
+        $group: {
+          _id: null,
+          totalItems: { $sum: 1 },
+          totalQuantity: { $sum: '$quantity' },
+          lowStockCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gt: ['$reorderPoint', 0] }, { $lte: ['$quantity', '$reorderPoint'] }] },
+                1,
+                0,
+              ],
+            },
+          },
+          outOfStockCount: {
+            $sum: { $cond: [{ $eq: ['$quantity', 0] }, 1, 0] },
+          },
+        },
+      },
+    ]);
+
+    return summary || { totalItems: 0, totalQuantity: 0, lowStockCount: 0, outOfStockCount: 0 };
+  }
+
   async archiveOldMovements(options = {}) {
     const { olderThanDays = 365, branchId = null, ttlDays = 730 } = options;
 
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
-    const match = {
-      createdAt: { $lt: cutoffDate },
-    };
+    const match = { createdAt: { $lt: cutoffDate } };
+    if (branchId) match.branch = branchId;
 
-    if (branchId) {
-      match.branch = branchId;
-    }
-
-    // Count records to be archived
     const count = await StockMovement.countDocuments(match);
-
     if (count === 0) {
       return { archived: 0, message: 'No old movements to archive' };
     }
 
-    // Use archive repository
     const archiveRepository = (await import('#modules/archive/archive.repository.js')).default;
-
     const archiveResult = await archiveRepository.runArchive({
       type: 'stock_movement',
       organizationId: branchId || 'all',
@@ -575,11 +426,6 @@ class InventoryRepository extends Repository {
     };
   }
 
-  /**
-   * Get stock movement statistics for monitoring
-   *
-   * @returns {Promise<Object>} Movement stats
-   */
   async getMovementStats() {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);

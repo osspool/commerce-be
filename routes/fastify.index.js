@@ -17,6 +17,7 @@ import cmsRoutes from '#modules/cms/cms.plugin.js';
 // ============ FINANCIAL ============
 import transactionRoutes from '#modules/transaction/routes.js';
 import analyticsRoutes from '#modules/analytics/analytics.plugin.js';
+import financeRoutes from '#modules/finance/finance.plugin.js';
 
 export default async function fastifyRoutes(fastify, opts) {
   // ============ CORE ============
@@ -37,6 +38,7 @@ export default async function fastifyRoutes(fastify, opts) {
 
   // ============ FINANCIAL ============
   await fastify.register(transactionRoutes);
+  await fastify.register(financeRoutes);
 
   // ============ ANALYTICS ============
   await fastify.register(analyticsRoutes, { prefix: '/analytics' });

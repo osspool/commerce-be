@@ -5,6 +5,35 @@
  */
 
 import { vi } from 'vitest';
+import Fastify from 'fastify';
+import app from '../../app.js';
+
+/**
+ * Create a Fastify test server instance
+ * Registers the main app plugin but doesn't start listening
+ */
+export async function createTestServer() {
+  // Ensure required env vars are set for testing
+  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-secret-key-123456789';
+  if (!process.env.COOKIE_SECRET) process.env.COOKIE_SECRET = 'test-cookie-secret-key-1234567890123456';
+  if (!process.env.REDX_API_KEY) process.env.REDX_API_KEY = 'test-redx-key';
+  
+  // Set MONGO_URI if available (e.g. from global setup)
+  if (globalThis.__MONGO_URI__) {
+    process.env.MONGO_URI = globalThis.__MONGO_URI__;
+  }
+
+  const server = Fastify({
+    logger: false, // Disable logger for cleaner test output
+    trustProxy: true,
+    ajv: { customOptions: { coerceTypes: true, useDefaults: true, removeAdditional: false } },
+  });
+
+  await server.register(app);
+  await server.ready();
+
+  return server;
+}
 
 /**
  * Wait for a condition to be true
@@ -26,14 +55,26 @@ export async function waitFor(condition, timeout = 5000, interval = 100) {
 /**
  * Create a spy for event emissions
  * Returns a promise that resolves when event is emitted
+ * Uses 'once' instead of on/off for better compatibility
  */
 export function createEventSpy(emitter, eventName) {
   return new Promise((resolve) => {
-    const handler = (data) => {
-      emitter.off(eventName, handler);
-      resolve(data);
-    };
-    emitter.on(eventName, handler);
+    // Use 'once' for cleaner one-time listening
+    // Fallback to manual removal if 'once' not available
+    if (typeof emitter.once === 'function') {
+      emitter.once(eventName, resolve);
+    } else {
+      const handler = (data) => {
+        // Try removeListener (Node.js EventEmitter) or off (modern EventEmitter)
+        if (typeof emitter.removeListener === 'function') {
+          emitter.removeListener(eventName, handler);
+        } else if (typeof emitter.off === 'function') {
+          emitter.off(eventName, handler);
+        }
+        resolve(data);
+      };
+      emitter.on(eventName, handler);
+    }
   });
 }
 
@@ -45,16 +86,6 @@ export function mockRedXApi() {
 
   const mock = vi.fn().mockImplementation((url, options) => {
     // Mock RedX API responses based on URL
-    if (url.includes('/parcel')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({
-          tracking_id: 'TRK-12345',
-          message: 'Parcel created successfully',
-        }),
-      });
-    }
-
     if (url.includes('/parcel/info/')) {
       return Promise.resolve({
         ok: true,
@@ -94,6 +125,16 @@ export function mockRedXApi() {
               time: new Date().toISOString(),
             },
           ],
+        }),
+      });
+    }
+
+    if (url.includes('/parcel')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          tracking_id: 'TRK-12345',
+          message: 'Parcel created successfully',
         }),
       });
     }

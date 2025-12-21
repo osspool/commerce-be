@@ -10,7 +10,6 @@ export const productSchemaOptions = {
     numReviews: { systemManaged: true },
     slug: { systemManaged: true },
     quantity: { systemManaged: true }, // Managed by inventory system
-    'variations.options.quantity': { systemManaged: true }, // Variant quantities
     'stats.viewCount': { systemManaged: true },
     'stats.totalQuantitySold': { systemManaged: true },
   },
@@ -29,4 +28,3 @@ export const productSchemaOptions = {
 const { crudSchemas } = buildCrudSchemasFromModel(Product, productSchemaOptions);
 
 export default crudSchemas;
-

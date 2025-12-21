@@ -2,6 +2,7 @@ import fp from 'fastify-plugin';
 import { createRoutes } from '#routes/utils/createRoutes.js';
 import cartController from './cart.controller.js';
 import { addItemSchema, updateItemSchema, removeItemSchema } from './cart.schemas.js';
+import permissions from '#config/permissions.js';
 
 async function cartPlugin(fastify) {
   fastify.register((instance, _opts, done) => {
@@ -10,14 +11,14 @@ async function cartPlugin(fastify) {
         method: 'GET',
         url: '/',
         summary: 'Get user cart',
-        authRoles: ['user', 'admin'],
+        authRoles: permissions.cart.access,
         handler: cartController.getCart,
       },
       {
         method: 'POST',
         url: '/items',
         summary: 'Add item to cart',
-        authRoles: ['user', 'admin'],
+        authRoles: permissions.cart.access,
         handler: cartController.addItem,
         schema: addItemSchema,
       },
@@ -25,7 +26,7 @@ async function cartPlugin(fastify) {
         method: 'PATCH',
         url: '/items/:itemId',
         summary: 'Update cart item quantity',
-        authRoles: ['user', 'admin'],
+        authRoles: permissions.cart.access,
         handler: cartController.updateItem,
         schema: updateItemSchema,
       },
@@ -33,7 +34,7 @@ async function cartPlugin(fastify) {
         method: 'DELETE',
         url: '/items/:itemId',
         summary: 'Remove item from cart',
-        authRoles: ['user', 'admin'],
+        authRoles: permissions.cart.access,
         handler: cartController.removeItem,
         schema: removeItemSchema,
       },
@@ -41,7 +42,7 @@ async function cartPlugin(fastify) {
         method: 'DELETE',
         url: '/',
         summary: 'Clear cart',
-        authRoles: ['user', 'admin'],
+        authRoles: permissions.cart.access,
         handler: cartController.clearCart,
       },
     ], {

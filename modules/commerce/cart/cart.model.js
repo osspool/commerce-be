@@ -8,7 +8,10 @@ const cartItemSchema = new Schema({
     ref: 'Product',
     required: true,
   },
-  variations: Schema.Types.Mixed, // [{ Color: 'Red', Size: 'M' }]
+  variantSku: {
+    type: String,
+    default: null,
+  },
   quantity: {
     type: Number,
     default: 1,

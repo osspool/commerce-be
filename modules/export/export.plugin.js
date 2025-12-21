@@ -3,6 +3,8 @@ import { createRoutes } from '#routes/utils/createRoutes.js';
 import permissions from '#config/permissions.js';
 import { stringify as csvStringify } from 'csv-stringify/sync';
 import ExcelJS from 'exceljs';
+import { canViewCostPrice, filterCostPriceByRole } from '#modules/commerce/product/product.utils.js';
+import { filterOrderCostPriceByUser } from '#modules/commerce/order/order.costPrice.utils.js';
 
 /**
  * Repository mapping for MongoKit-based exports
@@ -21,24 +23,28 @@ const REPOSITORY_MAP = {
  * Apply role-based field filtering
  * Removes sensitive fields based on user role
  */
-function filterSensitiveFields(docs, collection, userRole) {
-  if (collection === 'product' && userRole !== 'admin' && userRole !== 'store-manager') {
-    // Remove cost price for non-admin users
+function filterSensitiveFields(docs, collection, user) {
+  if (!Array.isArray(docs) || docs.length === 0) return docs;
+
+  if (collection === 'product') {
+    return filterCostPriceByRole(docs, user);
+  }
+
+  if (collection === 'order') {
+    return filterOrderCostPriceByUser(docs, user);
+  }
+
+  // Inventory exports can expose cost; hide unless user has explicit view permission.
+  if ((collection === 'stockEntry' || collection === 'stockMovement') && !canViewCostPrice(user)) {
     return docs.map(doc => {
-      const filtered = { ...doc };
-      delete filtered.costPrice;
-      if (filtered.variations) {
-        filtered.variations = filtered.variations.map(v => ({
-          ...v,
-          options: v.options?.map(o => {
-            const { costPrice, ...rest } = o;
-            return rest;
-          }),
-        }));
-      }
-      return filtered;
+      if (!doc || typeof doc !== 'object') return doc;
+      const next = { ...doc };
+      delete next.costPrice;    // StockEntry.costPrice
+      delete next.costPerUnit;  // StockMovement.costPerUnit
+      return next;
     });
   }
+
   return docs;
 }
 
@@ -54,7 +60,7 @@ async function exportPlugin(fastify, opts) {
   /**
    * Fetch data using MongoKit repository with proper field filtering
    */
-  const fetchData = async (collection, filter, userRole) => {
+  const fetchData = async (collection, filter) => {
     const repoPath = REPOSITORY_MAP[collection];
     if (!repoPath) {
       throw new Error(`Export not supported for collection: ${collection}. Supported: ${Object.keys(REPOSITORY_MAP).join(', ')}`);
@@ -86,13 +92,13 @@ async function exportPlugin(fastify, opts) {
     if (!collection) return reply.code(400).send({ message: 'collection is required' });
 
     const criteria = filter ? JSON.parse(filter) : {};
-    const userRole = request.user?.role;
+    const user = request.user;
 
     try {
-      let docs = await fetchData(collection, criteria, userRole);
+      let docs = await fetchData(collection, criteria);
 
       // Apply role-based filtering
-      docs = filterSensitiveFields(docs, collection, userRole);
+      docs = filterSensitiveFields(docs, collection, user);
 
       // Apply field selection if specified
       const fields = select ? select.split(',') : undefined;
@@ -128,13 +134,13 @@ async function exportPlugin(fastify, opts) {
     if (!collection) return reply.code(400).send({ message: 'collection is required' });
 
     const criteria = filter ? JSON.parse(filter) : {};
-    const userRole = request.user?.role;
+    const user = request.user;
 
     try {
-      let docs = await fetchData(collection, criteria, userRole);
+      let docs = await fetchData(collection, criteria);
 
       // Apply role-based filtering
-      docs = filterSensitiveFields(docs, collection, userRole);
+      docs = filterSensitiveFields(docs, collection, user);
 
       // Apply field selection if specified
       const fields = select ? select.split(',') : undefined;
@@ -224,5 +230,4 @@ async function exportPlugin(fastify, opts) {
 }
 
 export default fp(exportPlugin, { name: 'export-plugin' });
-
 

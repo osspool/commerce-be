@@ -28,7 +28,7 @@ lerna-debug.log*
 *.launch
 .settings/
 *.sublime-workspace
-/docs/.fe
+# /docs/.fe
 /lib
 /lib/*
 
@@ -66,8 +66,8 @@ syncline-*.json
 config/google-sheets-credentials.json
 
 # Documentation
-/docs
-/docs/**/*
+# /docs
+# /docs/**/*
 
 # Environment variables
 .env

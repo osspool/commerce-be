@@ -1,19 +1,31 @@
-import { Repository } from '@classytic/mongokit';
+import { Repository, cachePlugin } from '@classytic/mongokit';
 import PlatformConfig from './platform.model.js';
+import { getSharedCacheAdapter } from '#common/adapters/memoryCache.adapter.js';
+import { clearVatConfigCache } from '#modules/commerce/order/vat.utils.js';
+
+const platformCacheAdapter = getSharedCacheAdapter({ maxSize: 200 });
 
 class PlatformConfigRepository extends Repository {
   constructor() {
-    super(PlatformConfig, [], {});
+    super(PlatformConfig, [
+      cachePlugin({
+        adapter: platformCacheAdapter,
+        ttl: 300,
+        byIdTtl: 600,
+        queryTtl: 300,
+      }),
+    ], {});
   }
 
-  async getConfig(select = null) {
-    const query = PlatformConfig.findOne({ isSingleton: true });
-    if (select) query.select(select);
-    
-    let config = await query.lean();
+  async getConfig(select = null, options = {}) {
+    const { lean = true, skipCache = false } = options;
+    let config = await this.getByQuery(
+      { isSingleton: true },
+      { select, lean, skipCache }
+    );
     if (!config) {
-      config = await PlatformConfig.create({
-        platformName: 'Big Boss Retail',
+      config = await this.create({
+        platformName: process.env.PLATFORM_NAME || 'My Store',
         isSingleton: true,
         payment: { cash: { enabled: true } },
         deliveryOptions: [],
@@ -23,7 +35,12 @@ class PlatformConfigRepository extends Repository {
   }
 
   async updateConfig(updates) {
-    return PlatformConfig.updateConfig(updates);
+    const config = await PlatformConfig.updateConfig(updates);
+    if (typeof this.invalidateAllCache === 'function') {
+      await this.invalidateAllCache();
+    }
+    clearVatConfigCache();
+    return config;
   }
 
   // ============ Delivery Options Helpers ============

@@ -92,7 +92,13 @@ export const updateUserBody = {
 /**
  * User CRUD Schemas with Field Rules
  */
-const { crudSchemas } = buildCrudSchemasFromModel(User, {
+const {
+  createBody,
+  updateBody,
+  params,
+  listQuery,
+  crudSchemas,
+} = buildCrudSchemasFromModel(User, {
   fieldRules: {
     password: { systemManaged: true },
     roles: { systemManaged: true },
@@ -111,6 +117,14 @@ const { crudSchemas } = buildCrudSchemasFromModel(User, {
   },
 });
 
+const resolvedCrudSchemas = crudSchemas || {
+  create: { body: createBody },
+  update: { body: updateBody, params },
+  get: { params },
+  list: { query: listQuery },
+  remove: { params },
+};
+
 // Export schema options for controller
 export const userSchemaOptions = {
   query: {
@@ -125,7 +139,7 @@ export const userSchemaOptions = {
 };
 
 // Re-export shapes expected by auth routes
-export const userCreateBody = crudSchemas.create.body;
-export const userUpdateBody = crudSchemas.update.body;
-export const userGetParams = crudSchemas.get.params;
-export const userListQuery = crudSchemas.list.query;
+export const userCreateBody = resolvedCrudSchemas.create.body;
+export const userUpdateBody = resolvedCrudSchemas.update.body;
+export const userGetParams = resolvedCrudSchemas.get.params;
+export const userListQuery = resolvedCrudSchemas.list.query;

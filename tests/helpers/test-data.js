@@ -4,58 +4,111 @@
  * Helper functions to create test data for integration tests
  */
 
+import jwt from 'jsonwebtoken';
+
+export function createTestUser(app, overrides = {}) {
+  const userId = overrides._id || '507f1f77bcf86cd799439011';
+  const roles = overrides.roles || (overrides.role ? [overrides.role] : ['user']);
+  const name = overrides.name || 'Test User';
+  const email = overrides.email || 'test@example.com';
+  
+  const token = jwt.sign(
+    { id: userId, roles, name, email },
+    process.env.JWT_SECRET || 'test-secret',
+    { expiresIn: '1h' }
+  );
+
+  return {
+    user: {
+      _id: userId,
+      name,
+      email,
+      roles,
+      ...overrides
+    },
+    token
+  };
+}
+
 export function createTestProduct(overrides = {}) {
+  const uniqueSku = `TEST-PROD-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const uniqueBarcode = `BAR-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return {
     name: 'Test Product',
-    slug: 'test-product',
     basePrice: 1000,
     quantity: 100,
-    sku: 'TEST-PROD-001',
-    barcode: '1234567890',
+    sku: uniqueSku,
+    barcode: uniqueBarcode,
     category: 'test-category',
     isActive: true,
     ...overrides,
   };
 }
 
-export function createTestProductWithVariants(overrides = {}) {
+/**
+ * Create test product with NEW explicit variants structure
+ * Backend auto-generates variants from variationAttributes
+ */
+export function createTestProductWithExplicitVariants(overrides = {}) {
+  const uniqueSku = `TEST-VAR-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return {
-    name: 'Test Variant Product',
-    slug: 'test-variant-product',
+    name: 'Test Explicit Variant Product',
     basePrice: 500,
-    quantity: 0, // Will be synced from variants
+    costPrice: 250,
+    quantity: 0,
     category: 'test-category',
     isActive: true,
-    variations: [
-      {
-        name: 'Size',
-        options: [
-          {
-            value: 'Small',
-            sku: 'VAR-S',
-            barcode: 'BAR-S',
-            priceModifier: 0,
-            quantity: 50,
-          },
-          {
-            value: 'Medium',
-            sku: 'VAR-M',
-            barcode: 'BAR-M',
-            priceModifier: 100,
-            quantity: 30,
-          },
-          {
-            value: 'Large',
-            sku: 'VAR-L',
-            barcode: 'BAR-L',
-            priceModifier: 200,
-            quantity: 20,
-          },
-        ],
-      },
+    sku: uniqueSku,
+    variationAttributes: [
+      { name: 'Size', values: ['S', 'M', 'L'] },
+      { name: 'Color', values: ['Red', 'Blue'] },
+    ],
+    // Optional: Initial variant overrides (priceModifiers, costPrices)
+    variants: [
+      { attributes: { size: 'l', color: 'red' }, priceModifier: 50 },
+      { attributes: { size: 'l', color: 'blue' }, priceModifier: 50 },
     ],
     ...overrides,
   };
+}
+
+/**
+ * Create stock entries for a product with explicit variants
+ */
+export async function createTestStockForVariants(app, { product, branch, quantities = {} }) {
+  const StockEntry = mongoose.models.StockEntry;
+  const entries = [];
+
+  // Simple product stock (no variants)
+  if (!product.variants?.length) {
+    const stock = await StockEntry.create({
+      product: product._id,
+      branch,
+      variantSku: null,
+      quantity: quantities.default || 50,
+      reorderPoint: 10,
+      costPrice: product.costPrice || 500,
+      isActive: true,
+    });
+    entries.push(stock);
+    return entries;
+  }
+
+  // Variant stock
+  for (const variant of product.variants) {
+    const stock = await StockEntry.create({
+      product: product._id,
+      branch,
+      variantSku: variant.sku,
+      quantity: quantities[variant.sku] || 20,
+      reorderPoint: 5,
+      costPrice: variant.costPrice || product.costPrice || 500,
+      isActive: variant.isActive !== false,
+    });
+    entries.push(stock);
+  }
+
+  return entries;
 }
 
 export function createTestBranch(overrides = {}) {
@@ -78,6 +131,22 @@ export function createTestStockEntry(productId, branchId, overrides = {}) {
     reorderPoint: 10,
     ...overrides,
   };
+}
+
+import mongoose from 'mongoose';
+
+export async function createTestStock(app, { product, branch, quantity, variantSku = null }) {
+  // Use mongoose directly if app.mongo.models is not available
+  const StockEntry = mongoose.models.StockEntry;
+  const stock = await StockEntry.create({
+    product,
+    branch,
+    variantSku,
+    quantity,
+    reorderPoint: 10,
+    costPrice: 500
+  });
+  return stock;
 }
 
 export function createTestOrder(customerId, productId, overrides = {}) {
@@ -133,44 +202,57 @@ export function createTestOrder(customerId, productId, overrides = {}) {
 }
 
 export function createTestShipment(orderId, overrides = {}) {
+  const delivery = overrides.delivery || overrides.parcel?.delivery;
   return {
     order: orderId,
     provider: 'redx',
     trackingId: `TRK-${Date.now()}`,
     status: 'pickup-requested',
+
     parcel: {
       weight: 500,
       value: 2000,
       itemCount: 1,
+      description: 'Test parcel',
+      ...overrides.parcel,
     },
+
     pickup: {
       storeId: 123,
+      ...overrides.pickup,
     },
+
     delivery: {
-      customerName: 'John Doe',
-      customerPhone: '01712345678',
-      address: 'House 12, Road 5, Mohammadpur, Dhaka',
-      areaId: 1,
-      areaName: 'Mohammadpur',
+      customerName: delivery?.customerName || 'John Doe',
+      customerPhone: delivery?.customerPhone || '01712345678',
+      address: delivery?.address || 'House 12, Road 5, Mohammadpur, Dhaka',
+      areaId: delivery?.areaId ?? 1,
+      areaName: delivery?.areaName || 'Mohammadpur',
+      ...overrides.delivery,
     },
+
     cashCollection: {
       amount: 2000,
-      isCod: true,
+      collected: false,
+      ...overrides.cashCollection,
     },
+
     charges: {
       deliveryCharge: 60,
       codCharge: 20,
       totalCharge: 80,
+      ...overrides.charges,
     },
-    timeline: [
+
+    timeline: overrides.timeline || [
       {
         status: 'pickup-requested',
         message: 'Shipment created',
         timestamp: new Date(),
       },
     ],
-    webhookCount: 0,
-    ...overrides,
+
+    webhookCount: overrides.webhookCount ?? 0,
   };
 }
 

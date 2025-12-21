@@ -8,17 +8,19 @@ const orderItemSchema = new Schema({
   product: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
   productName: { type: String, required: true },
   productSlug: String, // Historical record (product ID is source of truth)
+
+  // Variant snapshot (for variant products)
   variantSku: String,  // SKU of the specific variant for inventory tracking
-  variations: [{
-    name: { type: String, required: true },
-    option: {
-      value: { type: String, required: true },
-      priceModifier: { type: Number, default: 0 },
-    },
-  }],
+  variantAttributes: { type: Map, of: String },  // e.g., { size: "M", color: "Red" }
+  variantPriceModifier: { type: Number, default: 0 }, // Snapshot of variant.priceModifier at order time
+
   quantity: { type: Number, default: 1, min: 1 },
   price: { type: Number, required: true },
   costPriceAtSale: { type: Number, min: 0 }, // Snapshot cost at order time for profit tracking
+
+  // VAT per item (for category-specific rates)
+  vatRate: { type: Number, default: 0 },      // VAT rate applied to this item
+  vatAmount: { type: Number, default: 0 },    // VAT amount for this line item
 }, { _id: true });
 
 // Order item virtuals for profit calculation
@@ -30,6 +32,19 @@ orderItemSchema.virtual('profit').get(function() {
 orderItemSchema.virtual('profitMargin').get(function() {
   if (!this.costPriceAtSale || this.price === 0) return null;
   return ((this.price - this.costPriceAtSale) / this.price) * 100;
+});
+
+// Line total including VAT
+orderItemSchema.virtual('lineTotal').get(function() {
+  return this.price * this.quantity;
+});
+
+// Line total excluding VAT (for reporting)
+orderItemSchema.virtual('lineTotalExVat').get(function() {
+  if (!this.vatRate) return this.price * this.quantity;
+  // If price includes VAT, extract the net amount
+  const lineTotal = this.price * this.quantity;
+  return lineTotal / (1 + this.vatRate / 100);
 });
 
 orderItemSchema.set('toJSON', { virtuals: true });
@@ -89,7 +104,6 @@ const addressSchema = new Schema({
   division: String,               // divisionName
   postalCode: String,             // postCode
   country: { type: String, default: 'Bangladesh' },
-  phone: String,                  // @deprecated use recipientPhone
 }, { _id: false });
 
 const couponAppliedSchema = new Schema({
@@ -98,6 +112,50 @@ const couponAppliedSchema = new Schema({
   discountType: { type: String, enum: ['percentage', 'fixed'] },
   discountValue: Number, // Original coupon value (e.g., 10 for 10%, or 50 for ৳50 fixed)
   discountAmount: Number, // Actual discount applied to order (e.g., 26.5)
+}, { _id: false });
+
+/**
+ * VAT/Tax Breakdown Schema
+ * Captures VAT at order time for accurate reporting
+ *
+ * Bangladesh VAT reporting requires:
+ * - VAT amount shown separately
+ * - VAT rate applied
+ * - Whether prices were VAT-inclusive
+ * - BIN of seller (captured from platform config)
+ */
+const vatBreakdownSchema = new Schema({
+  // Whether VAT was applicable to this order
+  applicable: { type: Boolean, default: false },
+
+  // VAT rate applied (snapshot at order time)
+  rate: { type: Number, default: 0 },
+
+  // VAT amount (calculated)
+  amount: { type: Number, default: 0 },
+
+  // Were item prices VAT-inclusive?
+  pricesIncludeVat: { type: Boolean, default: true },
+
+  // Taxable amount (subtotal before VAT if exclusive, or net amount if inclusive)
+  taxableAmount: { type: Number, default: 0 },
+
+  // Seller's BIN at order time (for VAT invoice compliance)
+  sellerBin: String,
+
+  // Supplementary Duty (if applicable)
+  supplementaryDuty: {
+    rate: { type: Number, default: 0 },
+    amount: { type: Number, default: 0 },
+  },
+
+  // Invoice number (for VAT-registered businesses)
+  invoiceNumber: String,
+
+  // Invoice issuance metadata (branch+day based)
+  invoiceIssuedAt: { type: Date, default: null },
+  invoiceBranch: { type: Schema.Types.ObjectId, ref: 'Branch', default: null },
+  invoiceDateKey: { type: String, default: null }, // YYYYMMDD (Asia/Dhaka)
 }, { _id: false });
 
 const SHIPPING_PROVIDERS = ['redx', 'pathao', 'steadfast', 'paperfly', 'sundarban', 'sa_paribahan', 'dhl', 'fedex', 'other'];
@@ -139,7 +197,8 @@ const ORDER_STATUSES = ['pending', 'processing', 'confirmed', 'shipped', 'delive
  * - userId: Link to user account (if customer is logged in)
  */
 const orderSchema = new Schema({
-  customer: { type: Schema.Types.ObjectId, ref: 'Customer', required: true },
+  // Web orders always have a customer; POS orders may be walk-in (no customer record)
+  customer: { type: Schema.Types.ObjectId, ref: 'Customer' },
   customerName: { type: String, required: true },
   customerPhone: String,
   customerEmail: String,
@@ -148,6 +207,11 @@ const orderSchema = new Schema({
   
   subtotal: Number,
   discountAmount: { type: Number, default: 0 },
+  deliveryCharge: { type: Number, default: 0 }, // Explicit delivery charge field
+
+  // VAT/Tax breakdown (Bangladesh NBR compliant)
+  vat: vatBreakdownSchema,
+
   totalAmount: { type: Number, required: true },
   
   delivery: deliverySchema,
@@ -169,6 +233,12 @@ const orderSchema = new Schema({
   branch: { type: Schema.Types.ObjectId, ref: 'Branch' },   // Store location
   terminalId: String,                                        // POS terminal identifier
   cashier: { type: Schema.Types.ObjectId, ref: 'User' },     // Staff member who processed
+  // Idempotency key for POS/API retries (recommended to be provided by client)
+  idempotencyKey: { type: String },
+
+  // Web checkout reservation (prevents overselling before fulfillment)
+  stockReservationId: { type: String, index: true },
+  stockReservationExpiresAt: { type: Date },
 
   // Payment tracking - uses library schema
   // Contains: transactionId, amount, status, method, reference, verifiedAt, verifiedBy
@@ -192,6 +262,7 @@ orderSchema.index({ customer: 1 }); // User's orders
 orderSchema.index({ status: 1, createdAt: -1 }); // Admin dashboard
 orderSchema.index({ createdAt: -1, _id: -1 }); // Pagination
 orderSchema.index({ branch: 1, createdAt: -1 }); // Branch-based queries
+orderSchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
 
 // Timeline audit plugin
 orderSchema.plugin(timelineAuditPlugin, {
@@ -216,6 +287,22 @@ orderSchema.virtual('paymentStatus').get(function() {
 
 orderSchema.virtual('paymentMethod').get(function() {
   return this.currentPayment?.method || 'cash';
+});
+
+// VAT amount from breakdown (for templates)
+orderSchema.virtual('vatAmount').get(function() {
+  return this.vat?.amount || 0;
+});
+
+// Net amount (total excluding VAT)
+orderSchema.virtual('netAmount').get(function() {
+  if (!this.vat?.applicable) return this.totalAmount;
+  return this.vat.taxableAmount || (this.totalAmount - (this.vat.amount || 0));
+});
+
+// Gross amount (same as totalAmount, for clarity)
+orderSchema.virtual('grossAmount').get(function() {
+  return this.totalAmount;
 });
 
 orderSchema.set('toJSON', { virtuals: true });

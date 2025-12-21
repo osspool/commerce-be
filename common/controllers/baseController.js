@@ -70,7 +70,6 @@ class BaseController {
     return {
       context: {
         user: req.user,
-        organizationId: req.context?.organizationId,
         ...req.context,
       },
       user: req.user,

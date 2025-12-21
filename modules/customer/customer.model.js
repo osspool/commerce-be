@@ -18,7 +18,6 @@ const addressSchema = new Schema({
   division: String,         // divisionName
   postalCode: String,       // postCode
   country: { type: String, default: 'Bangladesh' },
-  phone: String,            // @deprecated - use recipientPhone
   isDefault: { type: Boolean, default: false },
   areaId: Number,           // internalId from @classytic/bd-areas
   areaName: String,         // area name for display

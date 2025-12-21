@@ -10,39 +10,54 @@ function isCompleteDimensions(dimensionsCm) {
 }
 
 /**
- * Best-effort variant SKU resolution based on selected variations.
+ * Find variant by SKU
  *
- * Current product data model stores `sku` per variation option; for a multi-variation
- * product, the combination may not be uniquely represented. This function matches the
- * existing behavior used in checkout item building (first found option SKU).
+ * @param {Object} product - Product object
+ * @param {string} variantSku - Variant SKU to find
+ * @returns {Object|null} Variant object or null
  */
-export function getCartItemVariantSku(product, selectedVariations = []) {
-  if (!product?.variations?.length || !selectedVariations?.length) return null;
+export function findVariantBySku(product, variantSku) {
+  if (!variantSku || !product || !product.variants) return null;
 
-  for (const selection of selectedVariations) {
-    const productVariation = product.variations.find(v => v.name === selection.name);
-    const option = productVariation?.options?.find(o => o.value === selection.option?.value);
-    if (option?.sku) return option.sku;
-  }
-
-  return null;
+  return product.variants.find(v => v.sku === variantSku) || null;
 }
 
-function findVariantOptionBySku(product, variantSku) {
-  if (!variantSku || !product?.variations?.length) return null;
-  for (const variation of product.variations) {
-    const option = variation.options?.find(o => o.sku === variantSku);
-    if (option) return option;
-  }
-  return null;
+/**
+ * Get variant price modifier by SKU
+ */
+export function getVariantPriceModifier(product, variantSku) {
+  const variant = findVariantBySku(product, variantSku);
+  return variant?.priceModifier || 0;
 }
 
-function resolveProductShipping(product, { variantSku, selectedVariations } = {}) {
-  const resolvedVariantSku = variantSku || getCartItemVariantSku(product, selectedVariations);
+/**
+ * Get variant cost price by SKU
+ */
+export function getVariantCostPrice(product, variantSku) {
+  const variant = findVariantBySku(product, variantSku);
+  return variant?.costPrice;
+}
 
-  const variantOption = findVariantOptionBySku(product, resolvedVariantSku);
-  const variantShipping = variantOption?.shipping;
+/**
+ * Normalize variant SKU input
+ *
+ * @param {string|null} variantSku - Variant SKU
+ * @returns {string|null} Variant SKU or null
+ */
+export function getCartItemVariantSku(_product, variantSku = null) {
+  return typeof variantSku === 'string' && variantSku.trim() ? variantSku.trim() : null;
+}
 
+/**
+ * Resolve product shipping attributes
+ * Checks variant shipping first, falls back to product shipping
+ */
+function resolveProductShipping(product, variantSkuOrSelections = null) {
+  const resolvedVariantSku = getCartItemVariantSku(product, variantSkuOrSelections);
+
+  const variant = resolvedVariantSku ? findVariantBySku(product, resolvedVariantSku) : null;
+
+  const variantShipping = variant?.shipping;
   const productShipping = product?.shipping;
 
   const resolvedWeightGrams = isNonNegativeNumber(variantShipping?.weightGrams)
@@ -54,26 +69,24 @@ function resolveProductShipping(product, { variantSku, selectedVariations } = {}
     : (isCompleteDimensions(productShipping?.dimensionsCm) ? productShipping.dimensionsCm : undefined);
 
   return {
-    variantSku: resolvedVariantSku || null,
+    variantSku: resolvedVariantSku,
     weightGrams: resolvedWeightGrams,
     dimensionsCm: resolvedDimensionsCm,
   };
 }
 
 /**
- * Resolve per-item shipping attributes from:
- * 1) Variant option shipping override (if resolvable)
- * 2) Product shipping fields
+ * Resolve per-item shipping attributes from variant or product
  */
-export function resolveCartItemShipping(product, selectedVariations = []) {
-  return resolveProductShipping(product, { selectedVariations });
+export function resolveCartItemShipping(product, variantSkuOrSelections = null) {
+  return resolveProductShipping(product, variantSkuOrSelections);
 }
 
 /**
  * Resolve per-item shipping attributes for POS line items where `variantSku` is explicit.
  */
 export function resolvePosItemShipping(product, variantSku = null) {
-  return resolveProductShipping(product, { variantSku });
+  return resolveProductShipping(product, variantSku);
 }
 
 /**
@@ -108,9 +121,9 @@ export function calculateOrderParcelMetrics(cartItems = []) {
   for (const cartItem of cartItems) {
     const quantity = Math.max(1, parseInt(cartItem?.quantity, 10) || 1);
     const product = cartItem?.product;
-    const selectedVariations = cartItem?.variations || [];
+    const variantSkuOrSelections = cartItem?.variantSku ?? null;
 
-    const { weightGrams, dimensionsCm } = resolveCartItemShipping(product, selectedVariations);
+    const { weightGrams, dimensionsCm } = resolveCartItemShipping(product, variantSkuOrSelections);
 
     if (isNonNegativeNumber(weightGrams)) {
       totalWeightGrams += weightGrams * quantity;

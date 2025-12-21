@@ -33,8 +33,8 @@ export const paymentDataSchema = {
   properties: {
     type: {
       type: 'string',
-      description: 'Payment method (cash, bkash, nagad, rocket, bank, card)',
-      examples: ['cash', 'bkash', 'nagad', 'rocket', 'bank', 'card'],
+      description: 'Payment method (cash, bkash, nagad, rocket, bank_transfer, card)',
+      examples: ['cash', 'bkash', 'nagad', 'rocket', 'bank_transfer', 'card'],
     },
     gateway: {
       type: 'string',
@@ -103,12 +103,18 @@ export const createOrderSchema = {
     // Items come from cart server-side; FE only sends delivery/payment/coupon
     required: ['deliveryAddress', 'delivery'],
     properties: {
+      idempotencyKey: {
+        type: 'string',
+        description: 'Optional idempotency key for safely retrying checkout without creating duplicate orders',
+        maxLength: 200,
+      },
       deliveryAddress: {
         type: 'object',
-        required: ['addressLine1', 'areaId', 'areaName', 'zoneId', 'city', 'recipientPhone'],
+        // Dev strictness: logistics requires recipient info for delivery labels.
+        required: ['addressLine1', 'areaId', 'areaName', 'zoneId', 'city', 'recipientPhone', 'recipientName'],
         properties: {
           label: { type: 'string' },
-          recipientName: { type: 'string', description: 'Recipient name (for gift orders)' },
+          recipientName: { type: 'string', minLength: 2, description: 'Recipient name (required for delivery)' },
           recipientPhone: { type: 'string', pattern: '^01[0-9]{9}$', description: 'Recipient phone (for gift orders)' },
           addressLine1: { type: 'string', minLength: 5 },
           addressLine2: { type: 'string' },
@@ -128,7 +134,6 @@ export const createOrderSchema = {
           division: { type: 'string', description: 'Area.divisionName' },
           postalCode: { type: 'string' },
           country: { type: 'string', default: 'Bangladesh' },
-          phone: { type: 'string', pattern: '^01[0-9]{9}$', description: '@deprecated use recipientPhone' },
         },
       },
       delivery: {
@@ -142,7 +147,7 @@ export const createOrderSchema = {
       },
       paymentMethod: {
         type: 'string',
-        description: 'Payment method (cash, bkash, nagad, rocket, bank)',
+        description: 'Payment method (cash, bkash, nagad, rocket, bank_transfer)',
         default: 'cash',
       },
       paymentData: paymentDataSchema,
@@ -154,6 +159,14 @@ export const createOrderSchema = {
       couponCode: {
         type: 'string',
         description: 'Coupon code to apply',
+      },
+      branchId: {
+        type: 'string',
+        description: 'Preferred branch ID for fulfillment (optional). Used for cost price lookup and fulfillment routing. If not specified, default branch is used during fulfillment.',
+      },
+      branchSlug: {
+        type: 'string',
+        description: 'Preferred branch slug for fulfillment (alternative to branchId)',
       },
       notes: {
         type: 'string',
@@ -255,6 +268,13 @@ export const fulfillOrderSchema = {
       notes: { type: 'string', description: 'Fulfillment notes' },
       shippedAt: { type: 'string', format: 'date-time', description: 'Shipping date' },
       estimatedDelivery: { type: 'string', format: 'date-time', description: 'Estimated delivery date' },
+      branchId: { type: 'string', description: 'Branch ID for inventory decrement (overrides order.branch)' },
+      branchSlug: { type: 'string', description: 'Branch slug (alternative to branchId)' },
+      recordCogs: {
+        type: 'boolean',
+        default: false,
+        description: 'Record COGS expense transaction. Default: false (profit tracked in order via costPriceAtSale). Set true for explicit double-entry accounting.',
+      },
     },
   },
 };

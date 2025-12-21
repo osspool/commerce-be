@@ -2,6 +2,7 @@ import fp from 'fastify-plugin';
 import createCrudRouter from '#routes/utils/createCrudRouter.js';
 import branchController from './branch.controller.js';
 import branchSchemas from './branch.schemas.js';
+import permissions from '#config/permissions.js';
 
 async function branchPlugin(fastify) {
   fastify.register((instance, _opts, done) => {
@@ -9,20 +10,14 @@ async function branchPlugin(fastify) {
       tag: 'Branches',
       basePath: '/api/v1/branches',
       schemas: branchSchemas,
-      auth: {
-        list: ['admin', 'store-manager'],
-        get: ['admin', 'store-manager'],
-        create: ['admin'],
-        update: ['admin'],
-        remove: ['admin'],
-      },
+      auth: permissions.branches,
       additionalRoutes: [
         {
           method: 'GET',
           path: '/code/:code',
           summary: 'Get branch by code',
           handler: branchController.getByCode,
-          authRoles: ['admin', 'store-manager'],
+          authRoles: permissions.branches.byCode,
           response: 'get',
           schemas: {
             params: {
@@ -39,7 +34,7 @@ async function branchPlugin(fastify) {
           path: '/default',
           summary: 'Get default branch (auto-creates if none exists)',
           handler: branchController.getDefault,
-          authRoles: ['admin', 'store-manager'],
+          authRoles: permissions.branches.default,
           response: 'get',
         },
         {
@@ -47,7 +42,7 @@ async function branchPlugin(fastify) {
           path: '/:id/set-default',
           summary: 'Set branch as default',
           handler: branchController.setDefault,
-          authRoles: ['admin'],
+          authRoles: permissions.branches.setDefault,
           response: 'get',
           schemas: {
             params: {
@@ -59,14 +54,7 @@ async function branchPlugin(fastify) {
             },
           },
         },
-        {
-          method: 'GET',
-          path: '/active',
-          summary: 'Get all active branches (simple list)',
-          handler: branchController.getActive,
-          authRoles: ['admin', 'store-manager'],
-          isList: true,
-        },
+        // Note: For active branches, use GET /branches?isActive=true
       ],
     });
 

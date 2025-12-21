@@ -12,6 +12,7 @@ import {
   cancelOrderWorkflow,
 } from '../workflows/index.js';
 import orderRepository from '../order.repository.js';
+import { filterOrderCostPriceByUser } from '../order.costPrice.utils.js';
 
 /**
  * Refund Order Handler
@@ -39,7 +40,7 @@ export async function refundOrderHandler(request, reply) {
 
     return reply.send({
       success: true,
-      data: result.order,
+      data: filterOrderCostPriceByUser(result.order, request.user),
       refundTransaction: result.refundTransaction?._id,
       isPartialRefund: result.isPartialRefund,
       message: result.isPartialRefund ? 'Partial refund processed' : 'Full refund processed',
@@ -56,6 +57,13 @@ export async function refundOrderHandler(request, reply) {
 /**
  * Fulfill Order Handler
  * Admin endpoint to mark order as shipped
+ *
+ * User-controlled COGS recording:
+ * - recordCogs: false (default) → Only decrements stock
+ * - recordCogs: true → Also creates COGS expense transaction
+ *
+ * Default is false because profit is already tracked in order via costPriceAtSale.
+ * COGS transactions are for explicit double-entry accounting needs.
  */
 export async function fulfillOrderHandler(request, reply) {
   try {
@@ -66,6 +74,9 @@ export async function fulfillOrderHandler(request, reply) {
       notes = null,
       shippedAt = null,
       estimatedDelivery = null,
+      branchId = null,
+      branchSlug = null,
+      recordCogs = false,
     } = request.body;
 
     // Validate order exists using repository
@@ -83,12 +94,20 @@ export async function fulfillOrderHandler(request, reply) {
       notes,
       shippedAt,
       estimatedDelivery,
+      branchId,
+      branchSlug,
+      recordCogs,
       request,
     });
 
     return reply.send({
       success: true,
-      data: result.order,
+      data: filterOrderCostPriceByUser(result.order, request.user),
+      cogsTransaction: result.cogsTransaction ? {
+        _id: result.cogsTransaction._id,
+        amount: result.cogsTransaction.amount,
+        category: result.cogsTransaction.category,
+      } : null,
       message: 'Order fulfilled successfully',
     });
   } catch (error) {
@@ -120,13 +139,26 @@ export async function cancelOrderHandler(request, reply) {
 
     // Check permission: owner or admin
     const userId = request.user._id;
-    const isAdmin = request.user.role === 'admin';
-    
-    if (!isAdmin && order.customer.toString() !== userId.toString()) {
+    const roles = Array.isArray(request.user.roles) ? request.user.roles : [];
+    const isAdmin = roles.includes('admin') || roles.includes('superadmin');
+
+    // Walk-in/POS orders may not have a customer - restrict to admins only
+    if (!order.customer) {
+      if (!isAdmin) {
+        return reply.code(403).send({
+          success: false,
+          message: 'Access denied',
+        });
+      }
+      // Admin can cancel walk-in order
+    } else {
+      const isOwner = (order.userId && order.userId.toString() === userId.toString());
+      if (!isAdmin && !isOwner) {
       return reply.code(403).send({
         success: false,
         message: 'Access denied',
       });
+      }
     }
 
     const result = await cancelOrderWorkflow(orderId, {
@@ -137,7 +169,7 @@ export async function cancelOrderHandler(request, reply) {
 
     return reply.send({
       success: true,
-      data: result.order,
+      data: filterOrderCostPriceByUser(result.order, request.user),
       refund: result.refund ? {
         transactionId: result.refund.transaction?._id,
         amount: result.refund.amount,

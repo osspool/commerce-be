@@ -53,15 +53,17 @@ export {
 /**
  * Payment Methods (App-specific)
  * Defines the payment methods available in Bangladesh
+ *
+ * Note: Use same values as order.enums.js PAYMENT_METHODS for consistency
  */
 export const PAYMENT_METHOD = {
+  CASH: 'cash',
   BKASH: 'bkash',
   NAGAD: 'nagad',
   ROCKET: 'rocket',
-  BANK: 'bank',
+  BANK_TRANSFER: 'bank_transfer',
   CARD: 'card',
   ONLINE: 'online',
-  CASH: 'cash',
 };
 
 export const PAYMENT_METHOD_VALUES = Object.values(PAYMENT_METHOD);
@@ -69,14 +71,71 @@ export const PAYMENT_METHOD_VALUES = Object.values(PAYMENT_METHOD);
 /**
  * Transaction Categories (App-specific)
  * Maps to revenue package categoryMappings in bootstrap/revenue.js
+ *
+ * Categories:
+ * - Sales/Revenue: ORDER_*, ENROLLMENT_*, *_SUBSCRIPTION
+ * - Inventory: INVENTORY_* (user-triggered only, see inventory-management.plugin.js)
+ * - COGS: Cost of goods sold (optional, at fulfillment)
+ *
+ * Industry Standard Categories (inspired by AWS/GCP accounting):
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ INCOME                          │ EXPENSE                       │
+ * ├─────────────────────────────────┼───────────────────────────────┤
+ * │ order_purchase (POS/Web sales)  │ inventory_purchase (stock)    │
+ * │ wholesale_sale (B2B sales)      │ purchase_return (refund recv) │
+ * │ capital_injection               │ cogs (cost of goods sold)     │
+ * │ retained_earnings               │ rent, utilities, equipment... │
+ * │ other_income                    │ inventory_loss                │
+ * │ tip_income (optional)           │ marketing, maintenance...     │
+ * └─────────────────────────────────┴───────────────────────────────┘
  */
 export const TRANSACTION_CATEGORY = {
-  PLATFORM_SUBSCRIPTION: 'platform_subscription',
-  CREATOR_SUBSCRIPTION: 'creator_subscription',
+  // ============ REVENUE CATEGORIES ============
+  // Sales from customers (POS + Web)
   ORDER_PURCHASE: 'order_purchase',
   ORDER_SUBSCRIPTION: 'order_subscription',
+
+  // B2B / Wholesale sales (optional - for businesses selling to other retailers)
+  WHOLESALE_SALE: 'wholesale_sale',
+
+  // Platform/Creator subscriptions
+  PLATFORM_SUBSCRIPTION: 'platform_subscription',
+  CREATOR_SUBSCRIPTION: 'creator_subscription',
+
+  // Course/Enrollment sales
   ENROLLMENT_PURCHASE: 'enrollment_purchase',
   ENROLLMENT_SUBSCRIPTION: 'enrollment_subscription',
+
+  // ============ INVENTORY CATEGORIES ============
+  // Stock purchases from suppliers (expense - actual money out)
+  INVENTORY_PURCHASE: 'inventory_purchase',
+
+  // Supplier returns - credit received for returned stock (income)
+  PURCHASE_RETURN: 'purchase_return',
+
+  // Stock loss - damaged/lost/expired (expense)
+  INVENTORY_LOSS: 'inventory_loss',
+
+  // Stock adjustments - corrections (±)
+  INVENTORY_ADJUSTMENT: 'inventory_adjustment',
+
+  // Cost of goods sold - recorded at fulfillment (expense, optional)
+  COGS: 'cogs',
+
+  // ============ OPERATIONAL EXPENSES ============
+  RENT: 'rent',
+  UTILITIES: 'utilities',
+  EQUIPMENT: 'equipment',
+  SUPPLIES: 'supplies',
+  MAINTENANCE: 'maintenance',
+  MARKETING: 'marketing',
+  OTHER_EXPENSE: 'other_expense',
+
+  // ============ OPERATIONAL INCOME ============
+  CAPITAL_INJECTION: 'capital_injection',
+  RETAINED_EARNINGS: 'retained_earnings',
+  TIP_INCOME: 'tip_income',           // Tips from customers (optional)
+  OTHER_INCOME: 'other_income',
 };
 
 export const TRANSACTION_CATEGORY_VALUES = Object.values(TRANSACTION_CATEGORY);

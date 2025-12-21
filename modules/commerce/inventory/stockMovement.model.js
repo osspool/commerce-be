@@ -75,7 +75,7 @@ const stockMovementSchema = new Schema({
   reference: {
     model: {
       type: String,
-      enum: ['Order', 'Transfer', 'PurchaseOrder', 'Manual'],
+      enum: ['Order', 'Transfer', 'PurchaseOrder', 'Manual', 'Challan'],
     },
     id: Schema.Types.ObjectId,
   },
@@ -99,6 +99,13 @@ stockMovementSchema.index({ stockEntry: 1, createdAt: -1 });
 stockMovementSchema.index({ product: 1, branch: 1, createdAt: -1 });
 stockMovementSchema.index({ type: 1, createdAt: -1 });
 stockMovementSchema.index({ 'reference.model': 1, 'reference.id': 1 });
+
+// TTL index - automatically delete movements older than 2 years
+// MongoDB's TTL monitor runs every 60 seconds and removes expired documents
+stockMovementSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: 63072000 } // 2 years = 730 days = 63,072,000 seconds
+);
 
 const StockMovement = mongoose.models.StockMovement || mongoose.model('StockMovement', stockMovementSchema);
 export default StockMovement;

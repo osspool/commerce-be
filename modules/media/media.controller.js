@@ -60,7 +60,7 @@ class MediaController extends BaseController {
   }
 
   async uploadMultiple(req, reply) {
-    const parts = req.files();
+    const parts = req.parts();
     const files = [];
     let formData = {};
 

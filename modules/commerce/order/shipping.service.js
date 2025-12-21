@@ -62,15 +62,35 @@ class ShippingService {
       throw this._error('Order not found', 404);
     }
 
+    const { status, note, metadata } = statusData;
+
+    // Allow system integrations (webhooks) to bootstrap shipping even if the
+    // order has no shipping object yet (provider can send updates out of order).
     if (!order.shipping) {
-      throw this._error('No shipping data found for this order');
+      if (!context.allowBootstrap) {
+        throw this._error('No shipping data found for this order');
+      }
+
+      const provider = metadata?.provider || 'other';
+      const trackingNumber = metadata?.trackingNumber || metadata?.trackingId;
+      order.shipping = {
+        provider,
+        status,
+        trackingNumber,
+        metadata,
+        history: [],
+      };
+      this._updateTimestamps(order.shipping, status);
     }
 
-    const { status, note, metadata } = statusData;
     const currentStatus = order.shipping.status;
 
     if (!this._isValidTransition(currentStatus, status)) {
-      throw this._error(`Invalid status transition: ${currentStatus} → ${status}`);
+      // When bootstrapping we may not know intermediate states; accept the new
+      // state as source-of-truth from provider and record it.
+      if (!context.allowBootstrap) {
+        throw this._error(`Invalid status transition: ${currentStatus} → ${status}`);
+      }
     }
 
     order.shipping.status = status;
@@ -81,6 +101,7 @@ class ShippingService {
 
     this._updateTimestamps(order.shipping, status);
 
+    order.shipping.history = order.shipping.history || [];
     order.shipping.history.push({
       status,
       note: note || `Status updated to ${status}`,

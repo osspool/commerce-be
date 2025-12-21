@@ -6,6 +6,7 @@
  */
 
 import orderRepository from '../order.repository.js';
+import { filterOrderCostPriceByUser } from '../order.costPrice.utils.js';
 
 /**
  * Get My Orders Handler
@@ -33,7 +34,7 @@ export async function getMyOrdersHandler(request, reply) {
     // Return paginated docs in top-level for list endpoint
     return reply.send({
       success: true,
-      ...result, // docs, total, page, pages, hasNext, hasPrev, limit
+      ...filterOrderCostPriceByUser(result, request.user), // docs, total, page, pages, hasNext, hasPrev, limit
     });
   } catch (error) {
     request.log.error(error);
@@ -79,7 +80,7 @@ export async function getMyOrderHandler(request, reply) {
 
     return reply.send({
       success: true,
-      data: order,
+      data: filterOrderCostPriceByUser(order, request.user),
     });
   } catch (error) {
     request.log.error(error);

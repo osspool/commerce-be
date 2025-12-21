@@ -11,7 +11,7 @@ import fp from 'fastify-plugin';
 import createCrudRouter from '#routes/utils/createCrudRouter.js';
 import orderController from './order.controller.js';
 import orderSchemas, { createOrderSchema, cancelOrderSchema, cancelRequestSchema, updateStatusSchema, refundOrderSchema, fulfillOrderSchema } from './order.schemas.js';
-import orderPresets from './order.presets.js';
+import permissions from '#config/permissions.js';
 
 // Import handlers
 import {
@@ -31,24 +31,14 @@ async function orderPlugin(fastify) {
   fastify.register((instance, _opts, done) => {
     createCrudRouter(instance, orderController, {
       tag: 'Orders',
+      // NOTE: app mounts all routes under `/api/v1`, so basePath here should be
+      // route-local. This is only used for OpenAPI doc registration.
       basePath: '/orders',
       schemas: {
         ...orderSchemas,
         create: createOrderSchema, // Use custom schema with paymentData
       },
-      auth: {
-        list: ['admin'],
-        get: ['user', 'admin'],
-        create: ['user'], // Customers only - checkout
-        update: ['admin'],
-        remove: ['admin'],
-      },
-      middlewares: {
-        list: orderPresets.adminOnly(instance),
-        get: orderPresets.authenticatedUser(instance),
-        update: orderPresets.adminOnly(instance),
-        remove: orderPresets.adminOnly(instance),
-      },
+      auth: permissions.orders,
       additionalRoutes: [
         // ============ Customer Routes ============
         
@@ -58,7 +48,7 @@ async function orderPlugin(fastify) {
           path: '/my',
           summary: 'Get my orders',
           handler: getMyOrdersHandler,
-          authRoles: ['user'],
+          authRoles: permissions.orders.my,
           isList: true, // Uses shared paginateWrapper from responseSchemas
         },
         
@@ -68,7 +58,7 @@ async function orderPlugin(fastify) {
           path: '/my/:id',
           summary: 'Get my order detail',
           handler: getMyOrderHandler,
-          authRoles: ['user'],
+          authRoles: permissions.orders.my,
         },
         
         // Cancel order - customer/admin can cancel
@@ -77,7 +67,7 @@ async function orderPlugin(fastify) {
           path: '/:id/cancel',
           summary: 'Cancel order',
           handler: cancelOrderHandler,
-          authRoles: ['user', 'admin'],
+          authRoles: permissions.orders.cancel,
           schemas: cancelOrderSchema,
         },
         // Request cancellation (queue for admin)
@@ -86,7 +76,7 @@ async function orderPlugin(fastify) {
           path: '/:id/cancel-request',
           summary: 'Request cancellation (await admin review)',
           handler: requestCancelHandler,
-          authRoles: ['user', 'admin'],
+          authRoles: permissions.orders.cancelRequest,
           schemas: cancelRequestSchema,
         },
         
@@ -98,7 +88,7 @@ async function orderPlugin(fastify) {
           path: '/:id/status',
           summary: 'Update order status',
           handler: updateStatusHandler,
-          authRoles: ['admin'],
+          authRoles: permissions.orders.updateStatus,
           schemas: updateStatusSchema,
         },
         
@@ -108,7 +98,7 @@ async function orderPlugin(fastify) {
           path: '/:id/fulfill',
           summary: 'Fulfill order (mark as shipped)',
           handler: fulfillOrderHandler,
-          authRoles: ['admin'],
+          authRoles: permissions.orders.fulfill,
           schemas: fulfillOrderSchema,
         },
         
@@ -118,7 +108,7 @@ async function orderPlugin(fastify) {
           path: '/:id/refund',
           summary: 'Refund order payment',
           handler: refundOrderHandler,
-          authRoles: ['admin'],
+          authRoles: permissions.orders.refund,
           schemas: refundOrderSchema,
         },
         
@@ -129,7 +119,7 @@ async function orderPlugin(fastify) {
           path: '/:id/shipping',
           summary: 'Request shipping pickup',
           handler: requestShippingHandler,
-          authRoles: ['admin'],
+          authRoles: permissions.orders.shippingAdmin,
         },
         
         {
@@ -137,7 +127,7 @@ async function orderPlugin(fastify) {
           path: '/:id/shipping',
           summary: 'Update shipping status',
           handler: updateShippingStatusHandler,
-          authRoles: ['admin'],
+          authRoles: permissions.orders.shippingAdmin,
         },
         
         {
@@ -145,7 +135,7 @@ async function orderPlugin(fastify) {
           path: '/:id/shipping',
           summary: 'Get shipping info',
           handler: getShippingInfoHandler,
-          authRoles: ['user', 'admin'],
+          authRoles: permissions.orders.shippingGet,
         },
       ],
     });

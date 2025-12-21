@@ -2,146 +2,96 @@ import fp from 'fastify-plugin';
 import { createRoutes } from '#routes/utils/createRoutes.js';
 import posController from './pos.controller.js';
 import { inventoryController } from '../inventory/index.js';
-import { branchController } from '../branch/index.js';
+import permissions from '#config/permissions.js';
 import {
+  posProductsSchema,
   lookupSchema,
   createOrderSchema,
   receiptSchema,
-  getProductStockSchema,
-  setStockSchema,
-  lowStockSchema,
-  movementsSchema,
-  bulkAdjustSchema,
-  updateBarcodeSchema,
-  labelDataSchema,
+  adjustStockSchema,
 } from './pos.schemas.js';
 
 /**
- * POS Plugin
+ * POS Plugin - Simplified
  *
- * Registers POS-specific routes using createRoutes utility.
- * Uses controllers from branch and inventory modules to avoid duplication.
+ * 5 Essential Endpoints for POS Operations:
  *
- * All POS routes require staff authentication (admin or store-manager role)
+ * CATALOG:
+ *   GET  /pos/products      - Browse products with branch stock (supports category, search, lowStock filter)
+ *   GET  /pos/lookup        - Fast barcode/SKU scan
+ *
+ * ORDERS:
+ *   POST /pos/orders        - Create order
+ *   GET  /pos/orders/:id/receipt - Get receipt
+ *
+ * STOCK:
+ *   POST /pos/stock/adjust  - Adjust stock (single or bulk)
+ *
+ * Note: For branch management, use /api/v1/branches/* (see branch-api.ts)
  */
 async function posPlugin(fastify) {
   // ============================================
-  // POS ORDER & LOOKUP ROUTES
+  // CATALOG - Browse & Search
   // ============================================
   createRoutes(fastify, [
     {
       method: 'GET',
-      url: '/api/v1/pos/lookup',
-      summary: 'Lookup product by barcode or SKU',
-      authRoles: ['admin', 'store-manager'],
+      url: '/pos/products',
+      summary: 'Browse products with branch stock',
+      description: 'Main POS catalog. Filter by category, search, inStockOnly, lowStockOnly. Returns products with branchStock.',
+      authRoles: permissions.pos.access,
+      schema: posProductsSchema,
+      handler: inventoryController.getPosProducts,
+    },
+    {
+      method: 'GET',
+      url: '/pos/lookup',
+      summary: 'Barcode/SKU lookup',
+      description: 'Fast lookup by barcode or SKU. Use for scanner input.',
+      authRoles: permissions.pos.access,
       schema: lookupSchema,
       handler: inventoryController.lookup,
     },
+  ], { tag: 'POS' });
+
+  // ============================================
+  // ORDERS - Checkout & Receipt
+  // ============================================
+  createRoutes(fastify, [
     {
       method: 'POST',
-      url: '/api/v1/pos/orders',
-      summary: 'Create POS order (cart-free)',
-      authRoles: ['admin', 'store-manager'],
+      url: '/pos/orders',
+      summary: 'Create POS order',
+      description: 'Cart-free checkout. Supports pickup (immediate) or delivery.',
+      authRoles: permissions.pos.access,
       schema: createOrderSchema,
       handler: posController.createOrder,
     },
     {
       method: 'GET',
-      url: '/api/v1/pos/orders/:orderId/receipt',
-      summary: 'Get order receipt data',
-      authRoles: ['admin', 'store-manager'],
+      url: '/pos/orders/:orderId/receipt',
+      summary: 'Get receipt',
+      authRoles: permissions.pos.access,
       schema: receiptSchema,
       handler: posController.getReceipt,
     },
-  ], { tag: 'POS', basePath: '/api/v1/pos' });
+  ], { tag: 'POS' });
 
   // ============================================
-  // INVENTORY ROUTES (within POS context)
+  // STOCK - Adjustment
   // ============================================
   createRoutes(fastify, [
-    {
-      method: 'GET',
-      url: '/api/v1/pos/inventory/:productId',
-      summary: 'Get stock levels for a product',
-      authRoles: ['admin', 'store-manager'],
-      schema: getProductStockSchema,
-      handler: inventoryController.getProductStock,
-    },
-    {
-      method: 'PUT',
-      url: '/api/v1/pos/inventory/:productId',
-      summary: 'Set stock quantity',
-      authRoles: ['admin', 'store-manager'],
-      schema: setStockSchema,
-      handler: inventoryController.setStock,
-    },
-    {
-      method: 'GET',
-      url: '/api/v1/pos/inventory/alerts/low-stock',
-      summary: 'Get low stock items',
-      authRoles: ['admin', 'store-manager'],
-      schema: lowStockSchema,
-      handler: inventoryController.getLowStock,
-    },
-    {
-      method: 'GET',
-      url: '/api/v1/pos/inventory/movements',
-      summary: 'Get stock movement history',
-      authRoles: ['admin', 'store-manager'],
-      schema: movementsSchema,
-      handler: inventoryController.getMovements,
-    },
-    // ============================================
-    // BULK OPERATIONS (Square/Odoo-inspired)
-    // ============================================
     {
       method: 'POST',
-      url: '/api/v1/pos/inventory/adjust',
-      summary: 'Bulk stock adjustment (set/add/remove)',
-      description: 'Process multiple stock adjustments atomically. Modes: set (absolute), add (receive), remove (damage/shrinkage)',
-      authRoles: ['admin', 'store-manager'],
-      schema: bulkAdjustSchema,
+      url: '/pos/stock/adjust',
+      summary: 'Adjust stock',
+      description: 'Set, add, or remove stock. Supports single item or bulk (up to 500).',
+      authRoles: permissions.inventory.adjust,
+      schema: adjustStockSchema,
       handler: inventoryController.bulkImport,
     },
-    {
-      method: 'PATCH',
-      url: '/api/v1/pos/inventory/barcode',
-      summary: 'Update barcode for product/variant',
-      description: 'Assign or update barcode. Validates uniqueness across all products.',
-      authRoles: ['admin', 'store-manager'],
-      schema: updateBarcodeSchema,
-      handler: inventoryController.updateBarcode,
-    },
-    {
-      method: 'GET',
-      url: '/api/v1/pos/inventory/labels',
-      summary: 'Get label data for barcode printing',
-      description: 'Returns formatted data for FE to render barcode labels. FE uses JsBarcode or similar.',
-      authRoles: ['admin', 'store-manager'],
-      schema: labelDataSchema,
-      handler: inventoryController.getLabelData,
-    },
-  ], { tag: 'POS', basePath: '/api/v1/pos' });
+  ], { tag: 'POS' });
 
-  // ============================================
-  // BRANCH ROUTES (within POS context)
-  // ============================================
-  createRoutes(fastify, [
-    {
-      method: 'GET',
-      url: '/api/v1/pos/branches',
-      summary: 'List all active branches',
-      authRoles: ['admin', 'store-manager'],
-      handler: branchController.getActive,
-    },
-    {
-      method: 'GET',
-      url: '/api/v1/pos/branches/default',
-      summary: 'Get default branch (auto-creates if none exists)',
-      authRoles: ['admin', 'store-manager'],
-      handler: branchController.getDefault,
-    },
-  ], { tag: 'POS', basePath: '/api/v1/pos' });
 }
 
 export default fp(posPlugin, {

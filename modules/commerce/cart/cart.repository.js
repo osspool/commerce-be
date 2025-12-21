@@ -14,7 +14,7 @@ class CartRepository extends Repository {
     let cart = await this.Model.findOne({ user: userId })
       .populate({
         path: 'items.product',
-        select: 'name images variations discount basePrice slug shipping',
+        select: 'name images basePrice currentPrice discount slug shipping productType variants variationAttributes',
       })
       .exec();
 
@@ -23,7 +23,7 @@ class CartRepository extends Repository {
       cart = await this.Model.findById(cart._id)
         .populate({
           path: 'items.product',
-          select: 'name images variations discount basePrice slug shipping',
+          select: 'name images basePrice currentPrice discount slug shipping productType variants variationAttributes',
         })
         .exec();
     }
@@ -31,13 +31,13 @@ class CartRepository extends Repository {
     return cart;
   }
 
-  async addItem(userId, productId, variations, quantity) {
+  async addItem(userId, productId, variantSku = null, quantity) {
     const product = await Product.findById(productId);
     if (!product) {
       throw new Error('Product not found');
     }
 
-    this.validateQuantity(product, variations, quantity);
+    this.validateQuantity(product, variantSku, quantity);
 
     let cart = await this.Model.findOne({ user: userId });
     if (!cart) {
@@ -47,13 +47,13 @@ class CartRepository extends Repository {
     const existingItemIndex = cart.items.findIndex(
       (item) =>
         item.product.toString() === productId &&
-        JSON.stringify(item.variations) === JSON.stringify(variations)
+        item.variantSku === variantSku
     );
 
     if (existingItemIndex > -1) {
       cart.items[existingItemIndex].quantity += quantity;
     } else {
-      cart.items.push({ product: productId, variations, quantity });
+      cart.items.push({ product: productId, variantSku, quantity });
     }
 
     await cart.save();
@@ -72,7 +72,7 @@ class CartRepository extends Repository {
     }
 
     const product = await Product.findById(item.product);
-    this.validateQuantity(product, item.variations, quantity);
+    this.validateQuantity(product, item.variantSku, quantity);
 
     item.quantity = quantity;
     await cart.save();
@@ -106,37 +106,39 @@ class CartRepository extends Repository {
     return this.getOrCreateCart(userId);
   }
 
-  validateQuantity(product, variations, quantity) {
-    if (product.quantity < quantity) {
-      throw new Error('Insufficient product quantity');
+  validateQuantity(product, variantSku, quantity) {
+    if (quantity < 1) {
+      throw new Error('Quantity must be at least 1');
     }
 
-    if (variations && variations.length > 0) {
-      for (const userVariation of variations) {
-        const productVariation = product.variations.find(
-          (v) => v.name === userVariation.name
-        );
-
-        if (!productVariation) {
-          throw new Error(`Invalid variation: ${userVariation.name}`);
-        }
-
-        const selectedOption = productVariation.options.find(
-          (opt) => opt.value === userVariation.option.value
-        );
-
-        if (!selectedOption) {
-          throw new Error(
-            `Invalid option for variation ${userVariation.name}: ${userVariation.option.value}`
-          );
-        }
-
-        if (selectedOption.quantity < quantity) {
-          throw new Error(
-            `Insufficient quantity for variation ${userVariation.name} with option ${selectedOption.value}. Available: ${selectedOption.quantity}, Requested: ${quantity}`
-          );
-        }
+    // For simple products
+    if (product.productType === 'simple') {
+      if (variantSku) {
+        throw new Error('Simple products cannot have variant SKU');
       }
+      // Basic quantity check (detailed stock check happens at checkout)
+      if (product.quantity < quantity) {
+        throw new Error('Insufficient product quantity');
+      }
+      return;
+    }
+
+    // For variant products
+    if (product.productType === 'variant') {
+      if (!variantSku) {
+        throw new Error('Variant products require variantSku');
+      }
+
+      const variant = product.variants?.find(v => v.sku === variantSku);
+      if (!variant) {
+        throw new Error(`Invalid variant SKU: ${variantSku}`);
+      }
+
+      if (!variant.isActive) {
+        throw new Error(`Variant ${variantSku} is not available`);
+      }
+
+      // Stock validation happens at checkout via StockEntry
     }
   }
 }

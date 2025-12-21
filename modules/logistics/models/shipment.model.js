@@ -24,8 +24,9 @@ const shipmentSchema = new Schema({
   order: {
     type: Schema.Types.ObjectId,
     ref: 'Order',
-    required: true,
+    default: null,
     index: true,
+    sparse: true,
   },
 
   // Provider info

@@ -1,42 +1,48 @@
 /**
- * POS Schemas
+ * POS Schemas - Simplified
  *
- * Centralized schema definitions for all POS routes.
- * Organized by domain: orders, inventory, branches.
+ * 6 endpoints, clean and focused.
  */
 
 // ============================================
-// COMMON SCHEMAS
+// CATALOG SCHEMAS
 // ============================================
 
-const productIdParam = {
-  type: 'object',
-  properties: {
-    productId: { type: 'string' },
+export const posProductsSchema = {
+  querystring: {
+    type: 'object',
+    properties: {
+      // Branch selection
+      branchId: { type: 'string', description: 'Branch ID (uses default if omitted)' },
+
+      // Filtering
+      category: { type: 'string', description: 'Filter by category' },
+      search: { type: 'string', description: 'Search name, SKU, or barcode' },
+      inStockOnly: { type: 'boolean', description: 'Only products with stock > 0' },
+      lowStockOnly: { type: 'boolean', description: 'Only products at/below reorder point' },
+
+      // Pagination (MongoKit)
+      after: { type: 'string', description: 'Cursor for next page (keyset)' },
+      limit: { type: 'number', description: 'Items per page (default: 50, max: 100)' },
+      sort: { type: 'string', description: 'Sort: name, -createdAt, basePrice' },
+    },
   },
-  required: ['productId'],
 };
 
-const branchIdQuery = {
-  type: 'object',
-  properties: {
-    branchId: { type: 'string' },
+export const lookupSchema = {
+  querystring: {
+    type: 'object',
+    properties: {
+      code: { type: 'string', description: 'Barcode or SKU' },
+      branchId: { type: 'string', description: 'Branch for stock check' },
+    },
+    required: ['code'],
   },
 };
 
 // ============================================
 // ORDER SCHEMAS
 // ============================================
-
-export const lookupSchema = {
-  querystring: {
-    type: 'object',
-    properties: {
-      code: { type: 'string', description: 'Barcode or SKU to search' },
-    },
-    required: ['code'],
-  },
-};
 
 export const createOrderSchema = {
   body: {
@@ -47,18 +53,22 @@ export const createOrderSchema = {
         items: {
           type: 'object',
           properties: {
-            productId: { type: 'string' },
+            // Accept ObjectId-like objects (tests/internal callers) but FE should send string
+            productId: { anyOf: [{ type: 'string' }, { type: 'object' }] },
             variantSku: { type: 'string' },
             quantity: { type: 'number', minimum: 1 },
+            // Client may send for UI display; server computes and persists price.
             price: { type: 'number' },
           },
-          required: ['productId', 'quantity', 'price'],
+          required: ['productId', 'quantity'],
         },
+        minItems: 1,
       },
+      branchId: { anyOf: [{ type: 'string' }, { type: 'object' }], description: 'Branch ID' },
       customer: {
         type: 'object',
         properties: {
-          id: { type: 'string' },
+          id: { anyOf: [{ type: 'string' }, { type: 'object' }] },
           name: { type: 'string' },
           phone: { type: 'string' },
         },
@@ -71,10 +81,21 @@ export const createOrderSchema = {
           reference: { type: 'string' },
         },
       },
-      discount: { type: 'number' },
+      discount: { type: 'number', default: 0 },
+      deliveryMethod: { type: 'string', enum: ['pickup', 'delivery'], default: 'pickup' },
+      deliveryPrice: { type: 'number' },
+      deliveryAddress: {
+        type: 'object',
+        properties: {
+          recipientName: { type: 'string' },
+          addressLine1: { type: 'string' },
+          city: { type: 'string' },
+          recipientPhone: { type: 'string' },
+        },
+      },
       notes: { type: 'string' },
-      branchId: { type: 'string' },
       terminalId: { type: 'string' },
+      idempotencyKey: { type: 'string', description: 'Optional idempotency key for safely retrying create-order', maxLength: 200 },
     },
     required: ['items'],
   },
@@ -91,125 +112,49 @@ export const receiptSchema = {
 };
 
 // ============================================
-// INVENTORY SCHEMAS
+// STOCK ADJUSTMENT SCHEMA
 // ============================================
 
-export const getProductStockSchema = {
-  params: productIdParam,
-  querystring: branchIdQuery,
-};
-
-export const setStockSchema = {
-  params: productIdParam,
+export const adjustStockSchema = {
   body: {
     type: 'object',
     properties: {
-      variantSku: { type: 'string' },
-      branchId: { type: 'string' },
-      quantity: { type: 'number', minimum: 0 },
-      notes: { type: 'string' },
-    },
-    required: ['quantity'],
-  },
-};
+      // Single item adjustment
+      productId: { type: 'string', description: 'Product ID (for single adjustment)' },
+      variantSku: { type: 'string', description: 'Variant SKU (optional)' },
+      quantity: { type: 'number', description: 'Quantity (for single adjustment)' },
+      mode: { type: 'string', enum: ['set', 'add', 'remove'], default: 'set' },
 
-export const lowStockSchema = {
-  querystring: {
-    type: 'object',
-    properties: {
-      branchId: { type: 'string' },
-      threshold: { type: 'number' },
-    },
-  },
-};
-
-export const movementsSchema = {
-  querystring: {
-    type: 'object',
-    properties: {
-      productId: { type: 'string' },
-      branchId: { type: 'string' },
-      type: { type: 'string' },
-      startDate: { type: 'string' },
-      endDate: { type: 'string' },
-      page: { type: 'number' },
-      limit: { type: 'number' },
-    },
-  },
-};
-
-export const bulkAdjustSchema = {
-  body: {
-    type: 'object',
-    properties: {
+      // Bulk adjustments
       adjustments: {
         type: 'array',
+        description: 'Bulk adjustments (use instead of single fields)',
         items: {
           type: 'object',
           properties: {
-            productId: { type: 'string', description: 'Product ID' },
-            variantSku: { type: 'string', description: 'Variant SKU (optional for simple products)' },
-            quantity: { type: 'number', description: 'Quantity to set/add/remove' },
+            productId: { type: 'string' },
+            variantSku: { type: 'string' },
+            quantity: { type: 'number' },
             mode: { type: 'string', enum: ['set', 'add', 'remove'], default: 'set' },
-            reason: { type: 'string', description: 'Reason for adjustment' },
-            barcode: { type: 'string', description: 'Barcode to assign (optional)' },
+            reason: { type: 'string' },
           },
           required: ['productId', 'quantity'],
         },
         maxItems: 500,
       },
-      branchId: { type: 'string', description: 'Target branch (uses default if not specified)' },
-      reason: { type: 'string', description: 'Default reason for all adjustments' },
-    },
-    required: ['adjustments'],
-  },
-};
 
-export const updateBarcodeSchema = {
-  body: {
-    type: 'object',
-    properties: {
-      productId: { type: 'string' },
-      variantSku: { type: 'string', description: 'Variant SKU (optional for simple products)' },
-      barcode: { type: 'string' },
-    },
-    required: ['productId', 'barcode'],
-  },
-};
-
-export const labelDataSchema = {
-  querystring: {
-    type: 'object',
-    properties: {
-      productIds: { type: 'string', description: 'Comma-separated product IDs' },
-      variantSkus: { type: 'string', description: 'Comma-separated variant SKUs' },
-      branchId: { type: 'string' },
+      // Common fields
+      branchId: { anyOf: [{ type: 'string' }, { type: 'object' }], description: 'Branch ID (uses default if omitted)' },
+      reason: { type: 'string', description: 'Reason for adjustment' },
     },
   },
-};
-
-// ============================================
-// GROUPED EXPORTS
-// ============================================
-
-export const orderSchemas = {
-  lookup: lookupSchema,
-  create: createOrderSchema,
-  receipt: receiptSchema,
-};
-
-export const inventorySchemas = {
-  getStock: getProductStockSchema,
-  setStock: setStockSchema,
-  lowStock: lowStockSchema,
-  movements: movementsSchema,
-  bulkAdjust: bulkAdjustSchema,
-  updateBarcode: updateBarcodeSchema,
-  labelData: labelDataSchema,
 };
 
 export default {
-  order: orderSchemas,
-  inventory: inventorySchemas,
+  posProductsSchema,
+  lookupSchema,
+  createOrderSchema,
+  receiptSchema,
+  adjustStockSchema,
 };
 

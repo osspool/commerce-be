@@ -101,23 +101,12 @@ modules/example/
 
 **Repository Pattern**:
 ```javascript
-import { Repository, organizationScopePlugin } from '#common/repositories';
+import { Repository } from '#common/repositories';
 
 class ExampleRepository extends Repository {
   constructor() {
-    super(ExampleModel, [organizationScopePlugin()]);
+    super(ExampleModel);
   }
-}
-```
-
-**Guard Usage**:
-```javascript
-import { ownershipGuard } from '#common/guards';
-
-middlewares: {
-  update: [
-    ownershipGuard({ Model, orgField: 'organizationId' })
-  ]
 }
 ```
 
@@ -128,7 +117,7 @@ export const schemaOptions = {
   strictAdditionalProperties: true, // Reject unknown fields
   fieldRules: {
     protectedField: { systemManaged: true }, // Omit from create/update
-    organizationId: { immutable: true }, // Omit from update only
+    status: { immutable: true }, // Omit from update only
   }
 };
 ```
@@ -179,7 +168,7 @@ PORT=3000
 NODE_ENV=development
 
 # Database
-MONGODB_URI=mongodb://localhost:27017/fitverse
+MONGO_URI=mongodb://localhost:27017/fitverse
 
 # Authentication
 JWT_SECRET=your-secret-key

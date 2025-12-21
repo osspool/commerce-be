@@ -5,3 +5,16 @@ export { default as inventoryController } from './inventory.controller.js';
 export { default as inventoryService } from './inventory.service.js';
 export { default as stockSyncUtil } from './stockSync.util.js';
 export * from './stockSync.util.js';
+export * from './inventory.handlers.js';
+
+// Transfer/Challan Module
+export * from './transfer/index.js';
+
+// Purchase Module
+export * from './purchase/index.js';
+
+// Stock Request Module
+export * from './stock-request/index.js';
+
+// Plugin
+export { default as inventoryManagementPlugin } from './inventory-management.plugin.js';

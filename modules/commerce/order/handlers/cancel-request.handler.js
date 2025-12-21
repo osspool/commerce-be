@@ -12,8 +12,14 @@ export async function requestCancelHandler(request, reply) {
     }
 
     // Only owner or admin can request cancellation
-    const isAdmin = request.user?.role === 'admin';
-    if (!isAdmin && order.customer.toString() !== userId.toString()) {
+    const roles = Array.isArray(request.user?.roles) ? request.user.roles : [];
+    const isAdmin = roles.includes('admin') || roles.includes('superadmin');
+    const customerId = request.user?.customer || request.user?.customerId;
+    const isOwner =
+      (order.userId && userId && order.userId.toString() === userId.toString()) ||
+      (customerId && order.customer?.toString() === customerId.toString());
+
+    if (!isAdmin && !isOwner) {
       return reply.code(403).send({ success: false, message: 'Access denied' });
     }
 

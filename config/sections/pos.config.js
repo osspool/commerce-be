@@ -21,11 +21,6 @@ export default {
     separator: process.env.SKU_SEPARATOR || '-',
   },
 
-  // Inventory Configuration
-  inventory: {
-    // Use StockEntry model for inventory (recommended)
-    // When true: StockEntry is source of truth
-    // When false: product.quantity is used (legacy)
-    useStockEntry: parseBoolean(process.env.INVENTORY_USE_STOCK_ENTRY, true),
-  },
+  // Inventory Configuration (StockEntry is the source of truth)
+  inventory: {},
 };

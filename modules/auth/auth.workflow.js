@@ -89,12 +89,39 @@ export async function loginUser({ email, password }) {
   // Generate tokens
   const { token, refreshToken } = generateTokens(user);
 
+  // Get primary branch
+  const primaryBranch = user.getPrimaryBranch?.();
+  const branchData = primaryBranch ? {
+    branchId: primaryBranch.branchId?.toString?.() || primaryBranch.branchId,
+    branchCode: primaryBranch.branchCode,
+    branchName: primaryBranch.branchName,
+    branchRole: primaryBranch.branchRole,
+    roles: primaryBranch.roles || [],
+  } : null;
+
+  // Map branches array with consistent structure for dashboard/branch switching
+  const branches = (user.branches || []).map(b => ({
+    branchId: b.branchId?.toString?.() || b.branchId,
+    branchCode: b.branchCode,
+    branchName: b.branchName,
+    branchRole: b.branchRole,
+    roles: b.roles || [],
+    isPrimary: b.isPrimary || false,
+  }));
+
   // Build user response
   const userData = {
     id: user._id,
     name: user.name,
     email: user.email,
     roles: user.roles,
+    // Branch info
+    branch: branchData,             // Primary/active branch
+    branches,                       // All assigned branches with roles
+    branchIds: user.getBranchIds?.() || [],
+    // Employee flags
+    isAdmin: user.isAdmin?.() || false,
+    isWarehouseStaff: user.isWarehouseStaff?.() || false,
   };
 
   return { token, refreshToken, user: userData };

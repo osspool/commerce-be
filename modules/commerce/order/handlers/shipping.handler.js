@@ -130,7 +130,36 @@ export async function updateShippingStatusHandler(request, reply) {
 export async function getShippingInfoHandler(request, reply) {
   try {
     const orderId = request.params.id;
-    const shipping = await shippingService.getShippingInfo(orderId);
+    // Security: users should only see shipping for their own orders.
+    // Admins can view any order shipping.
+    const order = await orderRepository.getById(orderId);
+
+    if (!order) {
+      return reply.code(404).send({
+        success: false,
+        message: 'Order not found',
+      });
+    }
+
+    const roles = Array.isArray(request.user?.roles) ? request.user.roles : [];
+    const isAdmin = roles.includes('admin') || roles.includes('superadmin');
+
+    if (!isAdmin) {
+      const userId = request.user?._id;
+      const customerId = request.user?.customer || request.user?.customerId;
+      const isOwner =
+        (order.userId && userId && order.userId.toString() === userId.toString()) ||
+        (customerId && order.customer?.toString() === customerId.toString());
+
+      if (!isOwner) {
+        return reply.code(403).send({
+          success: false,
+          message: 'Access denied',
+        });
+      }
+    }
+
+    const shipping = order.shipping || null;
 
     return reply.send({
       success: true,

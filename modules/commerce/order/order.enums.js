@@ -31,6 +31,7 @@ export const PAYMENT_METHODS = {
   NAGAD: 'nagad',
   ROCKET: 'rocket',
   BANK_TRANSFER: 'bank_transfer',
+  CARD: 'card',
 };
 
 export const SHIPPING_PROVIDER = {

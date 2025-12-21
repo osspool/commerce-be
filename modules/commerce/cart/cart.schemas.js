@@ -14,7 +14,7 @@ export const addItemSchema = {
     type: 'object',
     properties: {
       productId: { type: 'string' },
-      variations: { type: 'array' },
+      variantSku: { type: 'string', nullable: true },
       quantity: { type: 'number', minimum: 1 },
     },
     required: ['productId', 'quantity'],
