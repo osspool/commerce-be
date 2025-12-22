@@ -65,6 +65,7 @@ export const createOrderSchema = {
         minItems: 1,
       },
       branchId: { anyOf: [{ type: 'string' }, { type: 'object' }], description: 'Branch ID' },
+      branchSlug: { type: 'string', description: 'Branch slug (takes priority over branchId)' },
       customer: {
         type: 'object',
         properties: {
@@ -84,13 +85,17 @@ export const createOrderSchema = {
       discount: { type: 'number', default: 0 },
       deliveryMethod: { type: 'string', enum: ['pickup', 'delivery'], default: 'pickup' },
       deliveryPrice: { type: 'number' },
+      deliveryAreaId: { type: 'number', description: 'Logistics area id (optional)' },
       deliveryAddress: {
         type: 'object',
         properties: {
           recipientName: { type: 'string' },
           addressLine1: { type: 'string' },
+          addressLine2: { type: 'string' },
+          areaName: { type: 'string' },
           city: { type: 'string' },
           recipientPhone: { type: 'string' },
+          postalCode: { type: 'string' },
         },
       },
       notes: { type: 'string' },

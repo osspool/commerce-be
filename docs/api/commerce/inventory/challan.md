@@ -37,15 +37,21 @@ The server auto-detects the format and routes appropriately.
 
   "items": [
     {
+      "_id": "item_id",
       "product": "product_id",
       "productName": "Cotton T-Shirt",
+      "productSku": "TSHIRT-001",
       "variantSku": "TSHIRT-M-RED",
+      "variantAttributes": { "size": "M", "color": "Red" },
       "quantity": 10,
       "quantityReceived": 0,
-      "costPrice": 250
+      "costPrice": 250,
+      "notes": "Handle with care"
     }
   ],
 
+  "totalItems": 1,
+  "totalQuantity": 10,
   "totalValue": 2500,
 
   "transport": {
@@ -61,14 +67,76 @@ The server auto-detects the format and routes appropriately.
     { "status": "dispatched", "timestamp": "...", "actor": "user_id", "notes": null }
   ],
 
+  "createdBy": "user_id",
+  "approvedBy": "user_id",
+  "approvedAt": "2025-12-15T09:00:00.000Z",
+  "dispatchedBy": "user_id",
+  "dispatchedAt": "2025-12-15T10:30:00.000Z",
+  "receivedBy": null,
+  "receivedAt": null,
+
   "dispatchMovements": ["movement_id_1", "movement_id_2"],
   "receiveMovements": [],
 
   "remarks": "Weekly replenishment",
+  "internalNotes": "Priority shipment",
   "createdAt": "2025-12-15T08:00:00.000Z",
-  "updatedAt": "2025-12-15T10:30:00.000Z"
+  "updatedAt": "2025-12-15T10:30:00.000Z",
+
+  "isComplete": false,
+  "canEdit": false,
+  "canApprove": false,
+  "canDispatch": false,
+  "canReceive": true,
+  "canCancel": false
 }
 ```
+
+## Transfer Fields Reference
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `challanNumber` | string | Unique challan number (CHN-YYYYMM-NNNN) |
+| `transferType` | string | `head_to_sub`, `sub_to_sub`, `sub_to_head` |
+| `status` | string | Current status (see Status Flow) |
+| `documentType` | string | `delivery_challan`, `dispatch_note`, `delivery_slip` |
+| `senderBranch` | ObjectId | Sender branch reference |
+| `receiverBranch` | ObjectId | Receiver branch reference |
+| `items` | array | Transfer line items |
+| `totalItems` | number | Count of line items |
+| `totalQuantity` | number | Sum of all item quantities |
+| `totalValue` | number | Sum of (quantity × costPrice) for all items |
+| `transport` | object | Vehicle and driver details |
+| `statusHistory` | array | Audit trail of status changes |
+| `dispatchMovements` | array | StockMovement IDs for sender decrements |
+| `receiveMovements` | array | StockMovement IDs for receiver increments |
+| `remarks` | string | Public remarks |
+| `internalNotes` | string | Internal notes (not shown to external parties) |
+
+**Item Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `product` | ObjectId | Product reference |
+| `productName` | string | Product name (snapshot) |
+| `productSku` | string | Product SKU (snapshot) |
+| `variantSku` | string | Variant SKU (null for simple products) |
+| `variantAttributes` | Map | Variant attributes (e.g., `{ "size": "M", "color": "Red" }`) |
+| `quantity` | number | Quantity to transfer |
+| `quantityReceived` | number | Quantity actually received (for partial receipt) |
+| `costPrice` | number | Cost price per unit |
+| `notes` | string | Item-level notes |
+
+**Virtual Fields (computed):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `isComplete` | boolean | True if status is `received` |
+| `canEdit` | boolean | True if status is `draft` |
+| `canApprove` | boolean | True if status is `draft` |
+| `canDispatch` | boolean | True if status is `approved` |
+| `canReceive` | boolean | True if status is `dispatched` or `in_transit` |
+| `canCancel` | boolean | True if status is `draft` or `approved` |
 
 ## Status Flow
 

@@ -32,6 +32,7 @@ Detailed inventory subsystem documentation:
 | API | Description |
 |-----|-------------|
 | [Auth](auth.md) | Registration, login, password reset, JWT tokens |
+| [Customer](customer.md) | Customer profiles, addresses, POS lookup |
 
 ## Platform APIs
 

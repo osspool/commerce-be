@@ -24,6 +24,7 @@ export const registerBody = {
     name: { type: 'string', minLength: 1 },
     email: { type: 'string', format: 'email' },
     password: { type: 'string', minLength: 6 },
+    phone: { type: 'string' },
   },
   required: ['name', 'email', 'password'],
   additionalProperties: false,

@@ -39,13 +39,22 @@ GET /api/v1/inventory/movements
 
 ```json
 {
+  "success": true,
   "docs": [
     {
       "_id": "movement_id",
       "stockEntry": "stock_entry_id",
-      "product": "product_id",
+      "product": {
+        "_id": "product_id",
+        "name": "Cotton T-Shirt",
+        "slug": "cotton-tshirt"
+      },
       "variantSku": "SKU-RED-M",
-      "branch": "branch_id",
+      "branch": {
+        "_id": "branch_id",
+        "code": "DHK",
+        "name": "Dhaka Store"
+      },
       "type": "sale",
       "quantity": -5,
       "balanceAfter": 45,
@@ -54,7 +63,11 @@ GET /api/v1/inventory/movements
         "model": "Order",
         "id": "order_id"
       },
-      "actor": "user_id",
+      "actor": {
+        "_id": "user_id",
+        "name": "John Doe",
+        "email": "john@example.com"
+      },
       "notes": "POS sale",
       "createdAt": "2025-01-15T10:30:00.000Z"
     }
@@ -69,6 +82,8 @@ GET /api/v1/inventory/movements
   }
 }
 ```
+
+> **Note:** `product`, `branch`, and `actor` fields may be populated with full objects or remain as ObjectId strings depending on query options.
 
 ## Reference Models
 

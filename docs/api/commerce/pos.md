@@ -154,9 +154,10 @@ POST /api/v1/pos/orders
 | customer | | { name?, phone?, id? } |
 | terminalId | | Optional POS terminal identifier (used for idempotency key generation) |
 | idempotencyKey | | Prevents duplicate orders on retry |
+| notes | | Order notes |
 
 **Delivery address fields (when `deliveryMethod=delivery`):**
-- `deliveryAddress.recipientName`
+- `deliveryAddress.recipientName` **required**
 - `deliveryAddress.recipientPhone` **required**, format: `01XXXXXXXXX` (Bangladesh 11-digit)
 - `deliveryAddress.addressLine1`, `city`, etc.
 
@@ -183,6 +184,7 @@ POST /api/v1/pos/orders
 ### Payment Notes
 
 - If `payment` is omitted, the server treats the order as `cash` and sets amount to the order total.
+- `currentPayment.amount` in the order response is stored in **paisa** (smallest unit). Convert to BDT for display.
 
 ### Stock Validation
 
@@ -194,6 +196,51 @@ Before checkout, the server validates stock availability:
 **Delivery Methods:**
 - `pickup`: Inventory decremented immediately, status = `delivered`
 - `delivery`: Inventory decremented immediately, status = `processing`
+
+### Create Order Response
+
+**Success Response (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "order_id",
+    "source": "pos",
+    "status": "delivered",
+    "branch": "branch_id",
+    "terminalId": "POS-01",
+    "cashier": "user_id",
+    "customerName": "John",
+    "customerPhone": "01712345678",
+    "items": [...],
+    "subtotal": 1000,
+    "discountAmount": 50,
+    "deliveryCharge": 0,
+    "totalAmount": 950,
+    "vat": { "applicable": true, "amount": 123.91, ... },
+    "currentPayment": {
+      "amount": 95000,
+      "method": "bkash",
+      "reference": "TRX123456",
+      "status": "verified"
+    },
+    "createdAt": "2024-01-15T10:30:00Z"
+  },
+  "message": "Order created successfully"
+}
+```
+
+**Idempotent Response (200):**
+```json
+{
+  "success": true,
+  "data": { /* same order object */ },
+  "message": "Order already exists (idempotent)",
+  "cached": true
+}
+```
+
+> **Note:** `currentPayment.amount` is in paisa (smallest unit). Use `amount / 100` for BDT display.
 
 ---
 
@@ -212,16 +259,20 @@ GET /api/v1/pos/orders/:orderId/receipt
     "orderId": "xxx",
     "orderNumber": "A1B2C3D4",
     "date": "2024-01-15T10:30:00Z",
-    "branch": { "name": "Dhaka Main", "phone": "01712345678" },
+    "status": "delivered",
+    "invoiceNumber": null,
+    "branch": { "name": "Dhaka Main", "address": {...}, "phone": "01712345678" },
     "cashier": "John",
     "customer": { "name": "Walk-in", "phone": null },
     "items": [
-      { "name": "T-Shirt", "variant": "M", "quantity": 2, "unitPrice": 500, "total": 1000 }
+      { "name": "T-Shirt", "variant": "M", "quantity": 2, "unitPrice": 500, "total": 1000, "vatRate": 0, "vatAmount": 0 }
     ],
     "subtotal": 1000,
     "discount": 50,
     "deliveryCharge": 0,
     "total": 950,
+    "vat": { "applicable": false },
+    "delivery": { "method": "pickup", "address": null },
     "payment": { "method": "bkash", "amount": 950, "reference": "TRX123456" }
   }
 }
@@ -233,7 +284,7 @@ When VAT is enabled, receipts include:
 
 ```json
 {
-  "invoiceNumber": "INV-2024-000001",
+  "invoiceNumber": "INV-DHK-20240115-0001",
   "items": [
     {
       "name": "T-Shirt",
@@ -335,11 +386,103 @@ Important rules (server enforced):
 }
 ```
 
+**With expense transaction (for inventory loss):**
+```json
+{
+  "productId": "xxx",
+  "quantity": 5,
+  "mode": "remove",
+  "branchId": "xxx",
+  "reason": "Damaged items",
+  "lostAmount": 2500,
+  "transactionData": {
+    "paymentMethod": "cash",
+    "reference": "LOSS-2024-001"
+  }
+}
+```
+
+### Stock Adjust Request Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| productId | string | Product ID (for single adjustment) |
+| variantSku | string | Variant SKU (optional) |
+| quantity | number | New quantity (for `set`) or delta (for `add`/`remove`) |
+| mode | string | `set` (default), `add`, or `remove` |
+| adjustments | array | Bulk adjustments (alternative to single fields) |
+| branchId | string | Branch ID (uses default if omitted) |
+| reason | string | Reason for adjustment |
+| lostAmount | number | Optional: amount in BDT to record as expense transaction |
+| transactionData | object | Optional: payment details for expense transaction |
+
+### transactionData Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| paymentMethod | string | Payment method (cash, bkash, nagad, bank, etc.) |
+| reference | string | Transaction reference ID |
+| walletNumber | string | Mobile wallet number (for MFS payments) |
+| walletType | string | Wallet type (personal/merchant) |
+| bankName | string | Bank name (for bank transfers) |
+| accountNumber | string | Bank account number |
+| accountName | string | Account holder name |
+| proofUrl | string | URL to payment proof document |
+
+### Stock Adjust Response
+
+**Single item:**
+```json
+{
+  "success": true,
+  "data": {
+    "productId": "xxx",
+    "variantSku": "TSHIRT-M",
+    "newQuantity": 95
+  },
+  "message": "Stock updated",
+  "transaction": {
+    "_id": "txn_id",
+    "amount": 250000,
+    "category": "inventory_loss"
+  }
+}
+```
+
+**Bulk:**
+```json
+{
+  "success": true,
+  "data": {
+    "processed": 5,
+    "failed": 1,
+    "results": {
+      "success": [
+        { "productId": "xxx", "variantSku": null, "newQuantity": 100 },
+        { "productId": "yyy", "variantSku": "SKU-M", "newQuantity": 45 }
+      ],
+      "failed": [
+        { "productId": "zzz", "quantity": 10, "error": "Product not found" }
+      ]
+    }
+  },
+  "message": "Processed 5, failed 1",
+  "transaction": {
+    "_id": "txn_id",
+    "amount": 500000,
+    "category": "inventory_loss"
+  }
+}
+```
+
+> **Note:** `transaction` is only included when `lostAmount` is provided. Amount is in paisa.
+
 ---
 
 ## Authentication
 
-All endpoints require a **store staff** role (POS access).
+POS endpoints require a **store staff** role (POS access).
+`POST /api/v1/pos/stock/adjust` additionally requires inventory adjustment permission and follows branch role restrictions (head office vs sub-branch).
 
 ```
 Authorization: Bearer <token>

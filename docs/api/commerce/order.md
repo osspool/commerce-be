@@ -15,7 +15,7 @@ Quick reference for frontend integration with the Order API.
 | `GET` | `/api/v1/orders/my/:id` | User | Get my order detail |
 | `POST` | `/api/v1/orders/:id/cancel` | User/Admin | Cancel order (owner or admin) |
 | `POST` | `/api/v1/orders/:id/cancel-request` | User/Admin | Request cancellation (await admin review) |
-| `GET` | `/api/v1/orders/:id` | User/Admin | Get order by ID |
+| `GET` | `/api/v1/orders/:id` | Authenticated | Get order by ID |
 | `PATCH` | `/api/v1/orders/:id` | Admin | Update order (admin CRUD) |
 | `DELETE` | `/api/v1/orders/:id` | Admin | Delete order (admin CRUD) |
 | `GET` | `/api/v1/orders` | Admin | List all orders |
@@ -244,6 +244,7 @@ Authorization: Bearer <token>
 ```json
 {
   "deliveryAddress": {
+    "recipientName": "Karim Ahmed",
     "recipientPhone": "01712345678",
     "addressLine1": "House 45, Road 12",
     "areaId": 2,
@@ -269,6 +270,7 @@ Authorization: Bearer <token>
 ```json
 {
   "deliveryAddress": {
+    "recipientName": "Karim Ahmed",
     "recipientPhone": "01712345678",
     "addressLine1": "House 45, Road 12",
     "areaId": 2,
@@ -345,7 +347,7 @@ Authorization: Bearer <token>
 | `branchSlug` | string | No | Preferred fulfillment branch slug (alternative to `branchId`) |
 | `notes` | string | No | Order notes |
 | `paymentData` | object | No | Payment information (defaults to `cash` if omitted) |
-| `paymentData.type` | string | Yes | Payment type: `cash`, `bkash`, `nagad`, `rocket`, `bank_transfer`, `card` |
+| `paymentData.type` | string | Yes* | Payment type: `cash`, `bkash`, `nagad`, `rocket`, `bank_transfer`, `card` |
 | `paymentData.reference` | string | No | Customer's payment TrxID (recommended for verification) |
 | `paymentData.senderPhone` | string | Yes (wallets) | Sender phone for mobile wallet payments (`01XXXXXXXXX`) |
 
@@ -355,6 +357,7 @@ Authorization: Bearer <token>
 > - Backend calculates all prices (product + variant modifier + delivery - coupon)
 > - FE passes delivery method + price from platform config
 > - Cart is cleared automatically after successful order
+> - `paymentData.type` is required **only if** `paymentData` is provided. If `paymentData` is omitted, backend treats it as `cash`.
 
 ---
 
@@ -394,9 +397,25 @@ Result:
 - Transaction → `failed` (stores reason)
 - Order payment → `failed` (timeline event recorded)
 
-#### Response
+**Reject Response:**
+```json
+{
+  "success": true,
+  "message": "Payment rejected",
+  "data": {
+    "transactionId": "txn_id",
+    "status": "failed",
+    "failedAt": "2025-01-12T10:00:00.000Z",
+    "failureReason": "Invalid bKash TrxID"
+  }
+}
+```
 
-**Response:**
+---
+
+### Create Order Response
+
+**Success Response (201):**
 ```json
 {
   "success": true,
@@ -410,13 +429,21 @@ Result:
       "method": "bkash",
       "reference": "BGH3K5L90P"
     },
+    "subtotal": 1500,
+    "discountAmount": 0,
+    "deliveryCharge": 60,
     "totalAmount": 1560,
     "items": [...]
   },
   "transaction": "txn_id",
+  "paymentIntent": null,
   "message": "Order created successfully"
 }
 ```
+
+> **Note:** `paymentIntent` is returned for automated payment gateways (Stripe, SSLCommerz). For manual payments it's `null`.
+> **Note:** `currentPayment.amount` is stored in **paisa** (smallest unit). Convert to BDT for display.
+> **Note:** If the same `idempotencyKey` is reused with identical payload, backend returns **200** with `{ cached: true }` instead of creating a new order.
 
 ---
 
@@ -664,7 +691,7 @@ POS ORDER:
 ```typescript
 interface Order {
   _id: string;
-  source: 'web' | 'pos';          // Order channel
+  source: 'web' | 'pos' | 'api';  // Order channel
   branch?: string;                // Branch ID for fulfillment (set at checkout or fulfillment)
   customer: string;
   customerName: string;           // Snapshot: Buyer's name at order time
@@ -673,10 +700,19 @@ interface Order {
   userId?: string;                // Link to user account (if logged in)
   status: 'pending' | 'processing' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
 
+  // POS-specific fields
+  terminalId?: string;            // POS terminal identifier
+  cashier?: string;               // Staff member who processed (User ID)
+  idempotencyKey?: string;        // Idempotency key for retries
+
+  // Stock reservation (web checkout)
+  stockReservationId?: string;    // Reservation ID for stock hold
+  stockReservationExpiresAt?: Date;
+
   // Payment info
   currentPayment: {
     transactionId: string;
-    amount: number;        // In paisa (smallest unit)
+    amount: number;        // In BDT
     status: 'pending' | 'verified' | 'failed' | 'refunded' | 'partially_refunded' | 'cancelled';
     method: string;
     reference?: string;    // Customer's payment TrxID (e.g., bKash: BGH3K5L90P)
@@ -742,6 +778,27 @@ interface Order {
   };
   isGift: boolean;                  // True if ordering on behalf of someone
 
+  // Coupon applied (if any)
+  couponApplied?: {
+    coupon: string;               // Coupon ID
+    code: string;                 // Coupon code used
+    discountType: 'percentage' | 'fixed';
+    discountValue: number;        // Original coupon value (e.g., 10 for 10%)
+    discountAmount: number;       // Actual discount applied to order
+  };
+
+  // Parcel metrics (for delivery estimation)
+  parcel?: {
+    weightGrams: number;          // Total weight in grams
+    dimensionsCm?: {
+      length: number;
+      width: number;
+      height: number;
+    };
+    missingWeightItems: number;   // Items without weight data
+    missingDimensionItems: number;
+  };
+
   // Cancellation request
   cancellationRequest?: {
     requested: boolean;
@@ -796,10 +853,21 @@ PATCH /api/v1/orders/:id/status
 Authorization: Bearer <admin_token>
 ```
 
+**Request:**
 ```json
 {
   "status": "confirmed",
   "note": "Payment received via bKash"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": { /* updated order object */ },
+  "previousStatus": "pending",
+  "message": "Order status updated to confirmed"
 }
 ```
 
@@ -847,6 +915,22 @@ Use `recordCogs: true` for explicit double-entry accounting if your finance syst
 **Payment rule:**
 - COD (`currentPayment.method = cash`) can be fulfilled even if payment is still `pending` (cash is collected at delivery).
 - Non-COD orders must have `currentPayment.status = verified` before fulfillment.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": { /* updated order object */ },
+  "cogsTransaction": {
+    "_id": "txn_id",
+    "amount": 50000,
+    "category": "cogs"
+  },
+  "message": "Order fulfilled successfully"
+}
+```
+
+> **Note:** `cogsTransaction` is only included when `recordCogs: true` is passed in the request. Otherwise it's `null`.
 
 ### Refund Order
 
@@ -901,6 +985,7 @@ POST /api/v1/orders/:id/shipping
 Authorization: Bearer <admin_token>
 ```
 
+**Request:**
 ```json
 {
   "provider": "redx",
@@ -908,6 +993,53 @@ Authorization: Bearer <admin_token>
   "trackingUrl": "https://track.redx.com.bd/REDX123456789"
 }
 ```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": { /* shipping object */ },
+  "message": "Shipping requested via redx"
+}
+```
+
+### Option 1b: Create Shipment via Provider API (Inline)
+
+Alternatively, use the `useProviderApi` flag to create a shipment via the logistics provider API directly:
+
+```http
+POST /api/v1/orders/:id/shipping
+Authorization: Bearer <admin_token>
+```
+
+**Request:**
+```json
+{
+  "provider": "redx",
+  "useProviderApi": true,
+  "weight": 500,
+  "instructions": "Handle with care"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "shipping": { /* order.shipping object */ },
+    "shipment": {
+      "_id": "shipment_id",
+      "trackingId": "21A427TU4BN3R",
+      "provider": "redx",
+      "status": "pending"
+    }
+  },
+  "message": "Shipment created via redx API"
+}
+```
+
+> **Note:** When `useProviderApi: true`, payment must be verified before shipping can be requested.
 
 ### Option 2: Create Shipment via Logistics API (RedX)
 
@@ -1112,9 +1244,16 @@ Content-Type: application/json
   "success": true,
   "message": "Payment verified successfully",
   "data": {
-    "transactionId": "...",
+    "transactionId": "txn_id",
     "status": "verified",
-    "verifiedAt": "2025-01-12T10:00:00.000Z"
+    "amount": 156000,
+    "category": "sales",
+    "verifiedAt": "2025-01-12T10:00:00.000Z",
+    "verifiedBy": "admin_user_id",
+    "entity": {
+      "referenceModel": "Order",
+      "referenceId": "order_id"
+    }
   }
 }
 ```
@@ -1149,10 +1288,10 @@ Content-Type: application/json
 ### General
 
 1. **Cart-first checkout:** Always use cart as source of items; cart auto-clears on order success
-2. **Amount conversion:** API uses paisa (×100). Display: `amount / 100` BDT
+2. **Amounts in BDT:** Order amounts (`totalAmount`, `subtotal`, `deliveryCharge`) are in BDT. No conversion needed.
 3. **VAT calculation:** Backend auto-calculates VAT from product/category/platform cascade - frontend just displays `order.vat.amount`
 4. **Polling for status:** Poll `/my/:id` every 30s on order confirmation page
-5. **Cancellation:** Disable cancel button when `status !== 'pending'`
+5. **Cancellation:** Allow cancel when `status` is not `cancelled` or `delivered` (backend allows cancellation from `pending`, `processing`, `confirmed`)
 6. **Payment pending:** Show payment instructions when `currentPayment.status === 'pending'`
 7. **Gift orders:** Set `isGift: true` and use `deliveryAddress.recipientName` for gift recipient
 8. **Customer data:** Orders now include `customerName`, `customerPhone`, `customerEmail` (no populate needed)
@@ -1161,17 +1300,23 @@ Content-Type: application/json
 ### Checkout Page Setup
 
 ```javascript
-
-// Build order payload
+// Build order payload (all required fields per schema)
 function buildOrderPayload(address, deliveryOption, paymentInfo, couponCode, notes) {
   return {
     deliveryAddress: {
+      // Required fields
+      recipientName: address.recipientName,
+      recipientPhone: address.recipientPhone,
       addressLine1: address.addressLine1,
+      areaId: address.areaId,       // From bd-areas
+      areaName: address.areaName,   // From bd-areas
+      zoneId: address.zoneId,       // From bd-areas (1-6)
       city: address.city,
-      phone: address.phone,
+      // Optional fields
       addressLine2: address.addressLine2,
-      state: address.state,
-      postalCode: address.postalCode
+      division: address.division,
+      postalCode: address.postalCode,
+      providerAreaIds: address.providerAreaIds,
     },
     delivery: {
       method: deliveryOption.name,
@@ -1214,8 +1359,15 @@ function buildOrderPayload(address, deliveryOption, paymentInfo, couponCode, not
 ```javascript
 // Validate before submitting
 const validateCheckout = (address, delivery, paymentData) => {
-  if (!address?.addressLine1 || !address?.city || !address?.phone) {
+  // Required address fields (per schema)
+  if (!address?.recipientName || !address?.recipientPhone) {
+    return 'Please provide recipient name and phone';
+  }
+  if (!address?.addressLine1 || !address?.city) {
     return 'Please provide complete delivery address';
+  }
+  if (!address?.areaId || !address?.areaName || !address?.zoneId) {
+    return 'Please select a valid delivery area';
   }
   if (!delivery?.method || delivery?.price === undefined) {
     return 'Please select a delivery method';
@@ -1223,14 +1375,19 @@ const validateCheckout = (address, delivery, paymentData) => {
   if (!paymentData?.type) {
     return 'Please select payment method';
   }
-  
+
+  // Phone validation
+  if (!/^01[0-9]{9}$/.test(address.recipientPhone)) {
+    return 'Please enter valid recipient phone number (01XXXXXXXXX)';
+  }
+
   const { type, senderPhone } = paymentData;
   if (['bkash', 'nagad', 'rocket'].includes(type)) {
     if (!senderPhone || !/^01[0-9]{9}$/.test(senderPhone)) {
-      return 'Please enter valid phone number (01XXXXXXXXX)';
+      return 'Please enter valid sender phone number (01XXXXXXXXX)';
     }
   }
-  
+
   return null; // Valid
 };
 ```

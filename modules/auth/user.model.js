@@ -95,6 +95,10 @@ const userSchema = new Schema(
         message: (props) => `${props.value} is not a valid email!`,
       },
     },
+    phone: {
+      type: String,
+      trim: true,
+    },
     password: {
       type: String,
       required: true,

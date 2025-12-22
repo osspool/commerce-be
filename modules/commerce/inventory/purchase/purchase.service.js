@@ -22,12 +22,13 @@ class PurchaseService {
   /**
    * Record a purchase (stock entry)
    *
-   * User-controlled transaction creation:
-   * - createTransaction: false (default) → Only creates StockEntry + StockMovement
-   * - createTransaction: true → Also creates expense transaction for accounting
+   * Smart transaction creation (ensures no cashflow events are missed):
+   * - If supplier info provided (supplierName or supplierInvoice) → auto-creates expense transaction
+   * - If no supplier info → no transaction (manufacturing/homemade products)
+   * - User can explicitly override with createTransaction: true/false
    *
-   * Manufacturing/homemade products typically use createTransaction: false
-   * since cost price is for profit calculation only, not actual expense.
+   * Manufacturing/homemade products typically have no supplier info,
+   * so they won't create transactions (cost is for profit calculation only).
    *
    * @param {Object} data - Purchase data
    * @param {string} actorId - User recording the purchase
@@ -41,9 +42,13 @@ class PurchaseService {
       supplierName,
       supplierInvoice,
       notes,
-      createTransaction = false,
+      createTransaction,
       transactionData = {},
     } = data;
+
+    // Smart default: auto-create transaction if supplier info is provided
+    // User can explicitly override with createTransaction: true/false
+    const shouldCreateTransaction = createTransaction ?? Boolean(supplierName || supplierInvoice);
 
     // Resolve branch - must be head office
     let branch;
@@ -257,13 +262,13 @@ class PurchaseService {
       supplierName,
       itemCount: results.length,
       errorCount: errors.length,
-      createTransaction,
+      shouldCreateTransaction,
     }, 'Purchase recorded');
 
-    // Optionally create expense transaction for accounting
-    // Default: false (manufacturing/homemade products skip this)
+    // Create expense transaction for accounting
+    // Smart default: auto-creates if supplier info provided, skip for manufacturing/homemade
     let transaction = null;
-    if (createTransaction && results.length > 0 && summary.totalValue > 0) {
+    if (shouldCreateTransaction && results.length > 0 && summary.totalValue > 0) {
       try {
         transaction = await createVerifiedOperationalExpenseTransaction({
           amountBdt: summary.totalValue,

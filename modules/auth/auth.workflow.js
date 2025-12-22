@@ -27,9 +27,10 @@ const NotFoundError = createError('NOT_FOUND', '%s', 404);
  * @param {string} data.name - User name
  * @param {string} data.email - User email
  * @param {string} data.password - User password
+ * @param {string} [data.phone] - User phone (optional, format: 01XXXXXXXXX)
  * @returns {Promise<Object>} Created user with linked customer
  */
-export async function registerUser({ name, email, password }) {
+export async function registerUser({ name, email, password, phone }) {
   // Check if user already exists
   const exists = await userRepository.emailExists(email);
   if (exists) {
@@ -41,6 +42,7 @@ export async function registerUser({ name, email, password }) {
     name,
     email: email.toLowerCase().trim(),
     password,
+    phone: phone?.trim() || undefined,
     roles: ['user'],
   });
 
