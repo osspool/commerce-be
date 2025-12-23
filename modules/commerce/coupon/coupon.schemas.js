@@ -33,6 +33,6 @@ export const validateCouponSchema = {
   },
 };
 
-const { crudSchemas } = buildCrudSchemasFromModel(Coupon, couponSchemaOptions);
+const crudSchemas = buildCrudSchemasFromModel(Coupon, couponSchemaOptions);
 
 export default crudSchemas;

@@ -20,35 +20,49 @@ import logger from '#common/utils/logger.js';
  */
 
 /**
- * Sync product quantity from StockEntry totals
- * Updates product.quantity with sum of all branch quantities
- *
- * For simple products: sum of variantSku: null entries
- * For variant-only products: sum of all variants
+ * Sync product stock projection from StockEntry totals
+ * Updates product.quantity (total) and product.stockProjection.variants
  *
  * @param {string} productId - Product ID to sync
- * @returns {Promise<{ synced: boolean, totalQuantity: number, error?: string }>}
+ * @returns {Promise<{ synced: boolean, totalQuantity: number, variantQuantities: Array, error?: string }>}
  */
 export async function syncProductQuantity(productId) {
   try {
     const Product = mongoose.model('Product');
 
-    const [result] = await StockEntry.aggregate([
+    const results = await StockEntry.aggregate([
       { $match: { product: new mongoose.Types.ObjectId(productId), isActive: { $ne: false } } },
-      { $group: { _id: null, total: { $sum: '$quantity' } } },
+      { $group: { _id: '$variantSku', total: { $sum: '$quantity' } } },
     ]);
 
-    const totalQuantity = result?.total || 0;
+    let totalQuantity = 0;
+    const variantQuantities = [];
+
+    for (const row of results) {
+      const quantity = row?.total || 0;
+      totalQuantity += quantity;
+      if (row?._id) {
+        variantQuantities.push({ sku: row._id, quantity });
+      }
+    }
 
     await Product.updateOne(
       { _id: productId },
-      { $set: { quantity: totalQuantity } }
+      {
+        $set: {
+          quantity: totalQuantity,
+          stockProjection: {
+            variants: variantQuantities,
+            syncedAt: new Date(),
+          },
+        },
+      }
     );
 
-    return { synced: true, totalQuantity };
+    return { synced: true, totalQuantity, variantQuantities };
   } catch (error) {
     logger.error({ err: error, productId }, 'Failed to sync product quantity');
-    return { synced: false, totalQuantity: 0, error: error.message };
+    return { synced: false, totalQuantity: 0, variantQuantities: [], error: error.message };
   }
 }
 
@@ -74,6 +88,7 @@ export async function syncProduct(productId) {
       productId,
       synced: !hasError,
       totalQuantity: simpleResult.totalQuantity,
+      variantQuantities: simpleResult.variantQuantities || [],
       errors: hasError ? [simpleResult.error].filter(Boolean) : [],
     };
   } catch (error) {
@@ -82,6 +97,7 @@ export async function syncProduct(productId) {
       productId,
       synced: false,
       totalQuantity: 0,
+      variantQuantities: [],
       errors: [error.message],
     };
   }

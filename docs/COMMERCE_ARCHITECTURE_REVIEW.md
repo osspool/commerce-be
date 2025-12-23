@@ -84,8 +84,11 @@ POS Order:  Created → DELIVERED (immediate for pickup)
 **Current Endpoints (Optimized 15-endpoint inventory API):**
 
 ```
-POST   /inventory/purchases              # Record stock entry
-GET    /inventory/purchases/history      # View purchase history
+POST   /inventory/purchases              # Create purchase invoice
+GET    /inventory/purchases              # List purchase invoices
+GET    /inventory/purchases/:id          # Get purchase invoice
+PATCH  /inventory/purchases/:id          # Update draft purchase
+POST   /inventory/purchases/:id/action   # receive|pay|cancel
 
 POST   /inventory/transfers              # Create challan
 GET    /inventory/transfers              # List transfers

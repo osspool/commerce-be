@@ -15,6 +15,60 @@ Inventory supports a Bangladesh retail flow where **Head Office** owns stock ent
 
 All endpoints are under: `/api/v1/inventory`
 
+## Related Docs (FE Quick Links)
+
+- [Purchases](inventory/purchases.md)
+- [Challan (Transfers)](inventory/challan.md)
+- [Stock Movements](inventory/stock-movements.md)
+- [Suppliers (Vendor)](inventory/vendor.md)
+
+## Response Conventions (Uniform)
+
+### Single Resource
+```json
+{
+  "success": true,
+  "data": { "..." : "..." }
+}
+```
+
+### List Responses (MongoKit Pagination)
+
+**Offset pagination (use `page`):**
+```json
+{
+  "success": true,
+  "method": "offset",
+  "docs": [],
+  "total": 120,
+  "pages": 6,
+  "page": 1,
+  "limit": 20,
+  "hasNext": true,
+  "hasPrev": false
+}
+```
+
+**Keyset pagination (use `after`/`cursor`):**
+```json
+{
+  "success": true,
+  "method": "keyset",
+  "docs": [],
+  "limit": 20,
+  "hasMore": true,
+  "next": "eyJ2IjoxLCJ0Ijoi..."
+}
+```
+
+### Error
+```json
+{
+  "success": false,
+  "error": "Human readable message"
+}
+```
+
 ## System Architecture: Supply Chain Management
 
 To build a robust retail management system, follow this strict flow of goods:
@@ -41,23 +95,70 @@ To build a robust retail management system, follow this strict flow of goods:
 > Instead of multiple endpoints (`/approve`, `/dispatch`, `/receive`), we use a single action endpoint:
 > `POST /api/v1/inventory/transfers/:id/action` with `{ action: 'approve' | 'dispatch' | 'in-transit' | 'receive' | 'cancel' }`
 
-### Purchases (Head Office stock entry)
+> **Idempotency:** For action endpoints, you may send the `Idempotency-Key` header to make retries safe.
+> If the same key + payload is retried, the API returns the cached result and does not repeat side-effects.
+
+### Purchases (Supplier invoices)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/v1/inventory/purchases` | Record purchase (single or batch via `items[]`) |
-| GET | `/api/v1/inventory/purchases/history` | Purchase movement history |
+| POST | `/api/v1/inventory/purchases` | Create purchase invoice (draft) |
+| GET | `/api/v1/inventory/purchases` | List purchase invoices |
+| GET | `/api/v1/inventory/purchases/:id` | Get purchase invoice |
+| PATCH | `/api/v1/inventory/purchases/:id` | Update draft purchase |
+| POST | `/api/v1/inventory/purchases/:id/action` | State transitions (receive/pay/cancel) |
 
-**Smart transaction creation (ensures no cashflow events are missed):**
-- If `supplierName` or `supplierInvoice` provided → auto-creates expense transaction
-- If no supplier info → no transaction (manufacturing/homemade products)
-- User can explicitly override with `createTransaction: true/false`
+**Full reference:** [Purchases API](inventory/purchases.md)
 
-Manufacturing/homemade products typically have no supplier info, so they won't create transactions (cost is for profit calculation only, not actual expense).
+**Action endpoint:** `POST /api/v1/inventory/purchases/:id/action`
+```json
+{ "action": "receive" }
+{ "action": "pay", "amount": 1000, "method": "cash" }
+{ "action": "cancel", "reason": "Supplier cancelled order" }
+```
 
-**Request body (supplier purchase - auto-creates transaction):**
+**Idempotent action call example:**
+```http
+POST /api/v1/inventory/purchases/:id/action
+Idempotency-Key: purchase-pay-2025-001
+```
+
+**Smart receive:** `receive` auto-approves draft purchases before stock entry.
+
+**Payment behavior:**
+- `pay` creates an expense transaction linked to the purchase invoice.
+- Supports partial payments; `paymentStatus` becomes `partial` until fully paid.
+
+**Pay action request:**
 ```json
 {
+  "action": "pay",
+  "amount": 1000,
+  "method": "cash",
+  "reference": "TRX123456"
+}
+```
+
+**Pay action response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "purchase_id",
+    "paymentStatus": "partial",
+    "paidAmount": 1000,
+    "dueAmount": 1500
+  }
+}
+```
+
+**Create purchase invoice (draft):**
+```json
+{
+  "supplierId": "supplier_id",
+  "purchaseOrderNumber": "PO-2025-001",
+  "paymentTerms": "credit",
+  "creditDays": 15,
   "items": [
     {
       "productId": "product_id",
@@ -66,13 +167,49 @@ Manufacturing/homemade products typically have no supplier info, so they won't c
       "costPrice": 250
     }
   ],
-  "branchId": "head_office_branch_id",
-  "purchaseOrderNumber": "PO-2025-001",
-  "supplierName": "ABC Supplier",
-  "supplierInvoice": "INV-12345",
   "notes": "Monthly stock replenishment",
-  "transactionData": {
-    "paymentMethod": "bank_transfer",
+  "autoApprove": true,
+  "autoReceive": false
+}
+```
+
+**Purchase Status Enum:**
+| Value | Description |
+|-------|-------------|
+| `draft` | Created, editable |
+| `approved` | Approved (implicit when receiving) |
+| `received` | Stock received at head office |
+| `cancelled` | Cancelled before receipt |
+
+**Payment Status Enum:**
+| Value | Description |
+|-------|-------------|
+| `unpaid` | No payments recorded |
+| `partial` | Partially paid |
+| `paid` | Fully settled |
+
+**Payment Terms Enum:**
+| Value | Description |
+|-------|-------------|
+| `cash` | Immediate payment |
+| `credit` | Payable based on credit days |
+
+**Action Enum (`/purchases/:id/action`):**
+| Value | Description |
+|-------|-------------|
+| `receive` | Auto-approve draft and receive stock |
+| `pay` | Record payment |
+| `cancel` | Cancel draft/approved purchase |
+
+**Optional payment at creation:**
+```json
+{
+  "items": [
+    { "productId": "product_id", "quantity": 10, "costPrice": 250 }
+  ],
+  "payment": {
+    "amount": 2500,
+    "method": "bank_transfer",
     "reference": "TRX123456",
     "accountNumber": "1234567890",
     "walletNumber": "01712345678"
@@ -80,78 +217,118 @@ Manufacturing/homemade products typically have no supplier info, so they won't c
 }
 ```
 
-**Request body (manufacturing/homemade - no transaction):**
-```json
-{
-  "items": [
-    {
-      "productId": "product_id",
-      "variantSku": "SKU-RED-M",
-      "quantity": 10,
-      "costPrice": 150
-    }
-  ],
-  "notes": "Homemade batch - cost for profit calculation only"
-}
-```
-
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `items` | array | Yes | Items to add to stock |
+| `items` | array | Yes | Items to add to purchase |
 | `items[].productId` | string | Yes | Product ID |
 | `items[].variantSku` | string | No | Variant SKU (null for simple products) |
-| `items[].quantity` | integer | Yes | Quantity to add (0 allowed for cost-only correction) |
-| `items[].costPrice` | number | No | Cost price per unit (updates weighted average) |
-| `branchId` | string | No | Head office branch ID (defaults to configured head office) |
-| `purchaseOrderNumber` | string | No | Purchase order reference |
-| `supplierName` | string | No | Supplier name |
-| `supplierInvoice` | string | No | Supplier invoice number |
-| `notes` | string | No | Additional notes |
-| `createTransaction` | boolean | No | Override auto-detection (default: true if supplier info provided) |
-| `transactionData` | object | No | Transaction details (used when transaction is created) |
-| `transactionData.paymentMethod` | string | No | `cash`, `bkash`, `nagad`, `rocket`, `bank_transfer`, `card` |
-| `transactionData.reference` | string | No | Payment reference (e.g., bank transfer ID) |
-| `transactionData.accountNumber` | string | No | Bank account number (for bank transfers) |
-| `transactionData.walletNumber` | string | No | Mobile wallet number (for MFS payments) |
+| `items[].quantity` | number | Yes | Quantity to purchase |
+| `items[].costPrice` | number | Yes | Cost price per unit |
+| `supplierId` | string | No | Supplier ID (recommended) |
+| `branchId` | string | No | Head office branch ID (defaults to head office) |
+| `paymentTerms` | string | No | `cash` or `credit` (defaults from supplier) |
+| `creditDays` | number | No | Credit days for payable |
+| `dueDate` | string | No | Override due date (ISO date) |
+| `autoApprove` | boolean | No | Auto-approve after create |
+| `autoReceive` | boolean | No | Auto-receive after approve |
+| `payment` | object | No | Optional payment to record immediately |
 
-**Response (201 or 207):**
+**Response (create):**
 ```json
 {
   "success": true,
-  "branch": { "_id": "branch_id", "code": "HO", "name": "Head Office" },
-  "items": [
-    {
-      "productId": "product_id",
-      "variantSku": "SKU-RED-M",
-      "quantity": 10,
-      "costPrice": 250,
-      "newTotalQuantity": 50
-    }
-  ],
-  "summary": {
-    "totalItems": 1,
-    "totalQuantity": 10,
-    "errors": 0
-  },
-  "errors": [],
-  "transaction": {
-    "_id": "txn_id",
-    "amount": 250000
-  },
-  "message": "1 items added to stock"
+  "data": {
+    "_id": "purchase_id",
+    "invoiceNumber": "PINV-202512-0001",
+    "supplier": "supplier_id",
+    "branch": "head_office_branch_id",
+    "status": "draft",
+    "paymentStatus": "unpaid",
+    "grandTotal": 2500,
+    "paidAmount": 0,
+    "dueAmount": 2500,
+    "items": [
+      {
+        "product": "product_id",
+        "productName": "Cotton T-Shirt",
+        "variantSku": "SKU-RED-M",
+        "quantity": 10,
+        "costPrice": 250
+      }
+    ],
+    "createdAt": "2025-12-20T10:00:00.000Z"
+  }
 }
 ```
 
-**Cost-only correction (no stock change):**
-- You can send `items[].quantity: 0` with a new `items[].costPrice` to correct cost without changing quantity.
-- This updates `StockEntry.costPrice` (weighted average logic) and the product/variant cost snapshot used for fast reads.
-
-**Partial success behavior:**
-- If some items fail validation, the API returns **207 Multi-Status** with an `errors[]` list.
+**Payment status:**
+- `unpaid` → no payments recorded
+- `partial` → partial payment recorded
+- `paid` → fully settled
 
 **Money units note:**
-- API inputs like `items[].costPrice` and summaries are in BDT.
-- If a Transaction is created, `transaction.amount` is stored in the smallest unit (paisa) per the Transaction model.
+- API inputs like `costPrice` and totals are in BDT.
+- Transaction amounts are stored in the smallest unit (paisa) per the Transaction model.
+
+### Suppliers (Vendors)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/inventory/suppliers` | Create supplier |
+| GET | `/api/v1/inventory/suppliers` | List suppliers |
+| GET | `/api/v1/inventory/suppliers/:id` | Get supplier |
+| PATCH | `/api/v1/inventory/suppliers/:id` | Update supplier |
+| DELETE | `/api/v1/inventory/suppliers/:id` | Deactivate supplier |
+
+> For full vendor/supplier reference and examples, see [Vendor API](inventory/vendor.md).
+
+**Supplier fields (core):**
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Supplier name |
+| `code` | string | Optional code (auto-generated if omitted) |
+| `type` | string | `local`, `import`, `manufacturer`, `wholesaler` |
+| `paymentTerms` | string | `cash` or `credit` |
+| `creditDays` | number | Credit days (for payables) |
+| `creditLimit` | number | Credit limit in BDT |
+| `isActive` | boolean | Active/inactive supplier |
+
+**Supplier Type Enum:**
+| Value | Description |
+|-------|-------------|
+| `local` | Local supplier |
+| `import` | Import supplier |
+| `manufacturer` | Manufacturer |
+| `wholesaler` | Wholesaler |
+
+**Create Supplier Example:**
+```json
+{
+  "name": "ABC Supplier",
+  "type": "local",
+  "paymentTerms": "credit",
+  "creditDays": 15,
+  "phone": "01712345678",
+  "address": "Dhaka"
+}
+```
+
+**Response (create):**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "supplier_id",
+    "name": "ABC Supplier",
+    "code": "SUP-0001",
+    "type": "local",
+    "paymentTerms": "credit",
+    "creditDays": 15,
+    "isActive": true,
+    "createdAt": "2025-12-20T10:00:00.000Z"
+  }
+}
+```
 
 ### Transfers (inter-branch movement)
 
@@ -164,13 +341,15 @@ Manufacturing/homemade products typically have no supplier info, so they won't c
 | POST | `/api/v1/inventory/transfers/:id/action` | State transitions (see below) |
 | GET | `/api/v1/inventory/transfers/stats` | Transfer statistics (counts by status, pending actions) |
 
+**List response:** uses MongoKit pagination (see Response Conventions above).
+
 **List Query Parameters:**
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `senderBranch` | string | Filter by sender branch ID |
 | `receiverBranch` | string | Filter by receiver branch ID |
-| `status` | string | Filter by status (`draft`, `approved`, `dispatched`, `in_transit`, `received`, `cancelled`) |
+| `status` | string | Filter by status (`draft`, `approved`, `dispatched`, `in_transit`, `partial_received`, `received`, `cancelled`) |
 | `challanNumber` | string | Search by challan number |
 | `documentType` | string | Filter by document type (`delivery_challan`, `dispatch_note`, `delivery_slip`) |
 | `startDate` | ISO date | Filter by date range start |
@@ -186,6 +365,12 @@ Manufacturing/homemade products typically have no supplier info, so they won't c
 { "action": "in-transit" }                 // Mark package in transit
 { "action": "receive", "items": [...] }    // Increment receiver (optional partial)
 { "action": "cancel", "reason": "..." }    // Cancel (draft/approved only)
+```
+
+**Idempotent action call example:**
+```http
+POST /api/v1/inventory/transfers/:id/action
+Idempotency-Key: transfer-dispatch-2025-001
 ```
 
 **Transfer Status Flow:**
@@ -235,6 +420,8 @@ draft → approved → dispatched → in_transit → received
 | GET | `/api/v1/inventory/requests/:id` | Request details |
 | POST | `/api/v1/inventory/requests/:id/action` | State transitions (see below) |
 
+**List response:** uses MongoKit pagination (see Response Conventions above).
+
 **List Query Parameters:**
 
 | Param | Type | Description |
@@ -277,6 +464,12 @@ Example: `REQ-202512-0042` (42nd request of December 2025)
 
 // Cancel request
 { "action": "cancel", "reason": "No longer needed" }
+```
+
+**Idempotent action call example:**
+```http
+POST /api/v1/inventory/requests/:id/action
+Idempotency-Key: stock-request-approve-2025-001
 ```
 
 **Create Request Body:**
@@ -523,6 +716,9 @@ Optional partial receipt:
   ]
 }
 ```
+
+**Multi-step receiving:** You can call `receive` multiple times for the same challan (e.g. 4 today, 6 tomorrow).  
+`quantityReceived` is treated as the **quantity received in this call** (delta), not a cumulative total.
 
 On receive:
 

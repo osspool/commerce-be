@@ -53,6 +53,7 @@ Quick reference for frontend integration with the Order API.
 ```
 
 > **Stock behavior (web checkout):** Stock is **reserved** at checkout (in `StockEntry.reservedQuantity`) to prevent oversells, then **committed/decremented** when an admin fulfills the order. Reservations auto-expire if not fulfilled.
+> **Payment init failure:** If payment initialization fails, the backend cancels the order, marks payment as `failed`, and releases the reservation immediately.
 
 ### Frontend Checkout Flow
 
@@ -71,13 +72,15 @@ const { data: config } = await configRes.json();
 const activePayments = config.paymentMethods.filter(pm => pm.isActive !== false);
 
 // Group payments by type for UI
-const mfsPayments = activePayments.filter(pm => pm.type === 'mfs');  // bKash, Nagad, Rocket
+const mfsPayments = activePayments.filter(pm => pm.type === 'mfs');  // Providers: bkash, nagad, rocket, upay
 const bankPayments = activePayments.filter(pm => pm.type === 'bank_transfer');
 
 // 3. User enters/selects delivery address, delivery method, payment info
 
 // 4. Submit order payload
-// NOTE: For MFS payments, use 'provider' as paymentData.type (e.g., 'bkash', not 'mfs')
+// NOTE: For MFS payments, use 'provider' as paymentData.type (e.g., 'bkash', not 'mfs').
+// Only send providers supported by backend payment enums (bkash, nagad, rocket, bank_transfer, card, cash).
+// If you add a new provider (e.g., upay), ask backend to add it to PAYMENT_METHOD_VALUES.
 const orderPayload = {
   idempotencyKey: crypto.randomUUID(), // Optional: prevents duplicate orders on retry
   deliveryAddress: {
@@ -92,7 +95,7 @@ const orderPayload = {
   },
   couponCode: appliedCoupon?.code || null,
   paymentData: {
-    type: 'bkash', // 'cash', 'bkash', 'nagad', 'rocket', 'bank_transfer', 'card'
+    type: 'bkash', // From platform config provider/type
     reference: trxId, // Optional
     senderPhone: '01712345678', // Required for wallets
     paymentDetails: { ... } // Optional
@@ -691,6 +694,7 @@ POS ORDER:
 ```typescript
 interface Order {
   _id: string;
+  orderNumber?: string;            // Virtual: last 8 chars of _id (uppercase)
   source: 'web' | 'pos' | 'api';  // Order channel
   branch?: string;                // Branch ID for fulfillment (set at checkout or fulfillment)
   customer: string;
@@ -712,7 +716,7 @@ interface Order {
   // Payment info
   currentPayment: {
     transactionId: string;
-    amount: number;        // In BDT
+    amount: number;        // In paisa (smallest unit)
     status: 'pending' | 'verified' | 'failed' | 'refunded' | 'partially_refunded' | 'cancelled';
     method: string;
     reference?: string;    // Customer's payment TrxID (e.g., bKash: BGH3K5L90P)

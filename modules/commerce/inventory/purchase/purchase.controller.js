@@ -1,69 +1,30 @@
-import purchaseService from './purchase.service.js';
+import BaseController from '#common/controllers/baseController.js';
+import purchaseInvoiceService from './purchase-invoice.service.js';
+import { purchaseSchemaOptions } from './purchase.schemas.js';
 
-/**
- * Purchase Controller
- *
- * HTTP handlers for stock purchase (entry) operations.
- * All purchases are recorded at head office only.
- */
-class PurchaseController {
-  /**
-   * Record a purchase (batch stock entry)
-   * POST /inventory/purchases
-   */
+class PurchaseController extends BaseController {
+  constructor() {
+    super(purchaseInvoiceService, purchaseSchemaOptions);
+  }
+
   async create(req, reply) {
     try {
-      const result = await purchaseService.recordPurchase(req.body, req.user._id);
-
-      const statusCode = result.errors?.length ? 207 : 201; // 207 = Multi-Status
-      return reply.code(statusCode).send({
-        success: result.success,
-        ...result,
-        message: result.success
-          ? `${result.summary.totalItems} items added to stock`
-          : `${result.summary.totalItems} items added, ${result.summary.errors} errors`,
-      });
+      const result = await purchaseInvoiceService.createPurchase(req.body, req.user._id);
+      return reply.code(201).send({ success: true, data: result });
     } catch (error) {
-      return reply.code(400).send({
+      return reply.code(error.statusCode || 400).send({
         success: false,
         error: error.message,
       });
     }
   }
 
-  /**
-   * Add stock for a single item
-   * POST /inventory/purchases/single
-   */
-  async addStock(req, reply) {
+  async update(req, reply) {
     try {
-      const result = await purchaseService.addStock(req.body, req.user._id);
-      return reply.code(201).send({
-        success: true,
-        ...result,
-      });
+      const result = await purchaseInvoiceService.updateDraftPurchase(req.params.id, req.body, req.user._id);
+      return reply.code(200).send({ success: true, data: result });
     } catch (error) {
-      return reply.code(400).send({
-        success: false,
-        error: error.message,
-      });
-    }
-  }
-
-  /**
-   * Get purchase history
-   * GET /inventory/purchases/history
-   */
-  async getHistory(req, reply) {
-    try {
-      const { page, limit, ...filters } = req.query;
-      const result = await purchaseService.getPurchaseHistory(filters, { page, limit });
-      return reply.send({
-        success: true,
-        ...result,
-      });
-    } catch (error) {
-      return reply.code(500).send({
+      return reply.code(error.statusCode || 400).send({
         success: false,
         error: error.message,
       });

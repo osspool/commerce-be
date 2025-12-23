@@ -7,7 +7,7 @@ const idempotencyRecordSchema = new Schema({
   hash: { type: String, required: true },
   status: { type: String, enum: ['pending', 'completed', 'failed'], required: true, index: true },
 
-  expiresAt: { type: Date, required: true, index: true },
+  expiresAt: { type: Date, required: true },
 
   result: { type: Schema.Types.Mixed, default: null },
   error: { type: String, default: null },

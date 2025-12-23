@@ -4,6 +4,7 @@ import Transfer, { TransferStatus } from '../transfer/transfer.model.js';
 import StockEntry from '../stockEntry.model.js';
 import branchRepository from '../../branch/branch.repository.js';
 import transferService from '../transfer/transfer.service.js';
+import stockRequestRepository from './stock-request.repository.js';
 import logger from '#common/utils/logger.js';
 
 /**
@@ -307,13 +308,16 @@ class StockRequestService {
    * @returns {Promise<Object>}
    */
   async getById(requestId) {
-    return StockRequest.findById(requestId)
-      .populate('requestingBranch', 'code name address')
-      .populate('fulfillingBranch', 'code name')
-      .populate('requestedBy', 'name email')
-      .populate('reviewedBy', 'name email')
-      .populate('transfer', 'challanNumber status')
-      .lean();
+    return stockRequestRepository.getById(requestId, {
+      populate: [
+        { path: 'requestingBranch', select: 'code name address' },
+        { path: 'fulfillingBranch', select: 'code name' },
+        { path: 'requestedBy', select: 'name email' },
+        { path: 'reviewedBy', select: 'name email' },
+        { path: 'transfer', select: 'challanNumber status' },
+      ],
+      lean: true,
+    });
   }
 
   /**
@@ -342,25 +346,19 @@ class StockRequestService {
     const { page = 1, limit = 20, sort = '-createdAt' } = options;
     const skip = (page - 1) * limit;
 
-    const [docs, total] = await Promise.all([
-      StockRequest.find(query)
-        .populate('requestingBranch', 'code name')
-        .populate('fulfillingBranch', 'code name')
-        .populate('requestedBy', 'name')
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      StockRequest.countDocuments(query),
-    ]);
-
-    return {
-      docs,
-      total,
+    return stockRequestRepository.getAll({
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
-    };
+      sort,
+      filters: query,
+    }, {
+      populate: [
+        { path: 'requestingBranch', select: 'code name' },
+        { path: 'fulfillingBranch', select: 'code name' },
+        { path: 'requestedBy', select: 'name' },
+      ],
+      lean: true,
+    });
   }
 
   /**

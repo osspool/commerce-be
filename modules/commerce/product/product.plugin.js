@@ -92,6 +92,22 @@ async function productPlugin(fastify) {
             },
           },
         },
+        {
+          method: 'POST',
+          path: '/:id/sync-stock',
+          summary: 'Sync product quantity from inventory',
+          handler: productController.syncStock,
+          authRoles: permissions.products.syncStock,
+          schemas: {
+            params: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+              },
+              required: ['id'],
+            },
+          },
+        },
       ],
     });
 
@@ -103,4 +119,3 @@ export default fp(productPlugin, {
   name: 'product',
   dependencies: ['register-core-plugins'],
 });
-

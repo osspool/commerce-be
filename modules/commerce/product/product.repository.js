@@ -110,12 +110,25 @@ class ProductRepository extends Repository {
     this.on('before:update', async (context) => {
       const data = context.data;
 
-      const isTouchingVariants = data.variationAttributes !== undefined || Array.isArray(data.variants);
-      if (!isTouchingVariants) return;
-
-      // Get existing product for context (needed for sync + diffing)
+      // Always load current product so we can derive productType safely.
       const existing = await this.Model.findById(context.id).lean();
       if (!existing) return;
+
+      context._existingProduct = existing;
+
+      // Derive productType from next state (source of truth: variationAttributes/variants).
+      const nextVariationAttributes = data.variationAttributes !== undefined
+        ? data.variationAttributes
+        : existing.variationAttributes;
+      const nextVariants = data.variants !== undefined
+        ? data.variants
+        : existing.variants;
+      const hasVariants = Array.isArray(nextVariants) && nextVariants.length > 0;
+      const hasVariationAttributes = Array.isArray(nextVariationAttributes) && nextVariationAttributes.length > 0;
+      data.productType = hasVariants || hasVariationAttributes ? 'variant' : 'simple';
+
+      const isTouchingVariants = data.variationAttributes !== undefined || Array.isArray(data.variants);
+      if (!isTouchingVariants) return;
 
       // If variationAttributes are being updated, sync the full variant set
       if (data.variationAttributes !== undefined) {
@@ -234,7 +247,9 @@ class ProductRepository extends Repository {
     // Track category changes for count updates
     this.on('before:update', async (context) => {
       if (context.data.category !== undefined) {
-        const existing = await this.Model.findById(context.id).select('category').lean();
+        const existing = context._existingProduct
+          ? { category: context._existingProduct.category }
+          : await this.Model.findById(context.id).select('category').lean();
         context._previousCategory = existing?.category;
       }
     });

@@ -34,17 +34,20 @@ class PurchaseService {
    * @param {string} actorId - User recording the purchase
    * @returns {Promise<Object>}
    */
-  async recordPurchase(data, actorId) {
+  async recordPurchase(data, actorId, options = {}) {
     const {
       items,
       branchId,
       purchaseOrderNumber,
+      purchaseId,
       supplierName,
       supplierInvoice,
       notes,
       createTransaction,
       transactionData = {},
     } = data;
+    const { session = null, emitEvents = true } = options || {};
+    const sessionOptions = session ? { session } : {};
 
     // Smart default: auto-create transaction if supplier info is provided
     // User can explicitly override with createTransaction: true/false
@@ -74,6 +77,9 @@ class PurchaseService {
     const results = [];
     const errors = [];
     const purchaseRefId = purchaseOrderNumber ? new mongoose.Types.ObjectId() : null;
+    const purchaseReference = purchaseId
+      ? { model: 'Purchase', id: new mongoose.Types.ObjectId(purchaseId) }
+      : (purchaseRefId ? { model: 'PurchaseOrder', id: purchaseRefId } : null);
 
     for (const item of items) {
       try {
@@ -198,15 +204,15 @@ class PurchaseService {
             },
             { $unset: ['_oldQty', '_oldCost', '_inQty', '_inCost'] },
           ],
-          { new: true, upsert: true, setDefaultsOnInsert: true, updatePipeline: true }
+          { new: true, upsert: true, setDefaultsOnInsert: true, updatePipeline: true, ...sessionOptions }
         );
 
         // Sync a denormalized snapshot for faster reads/fallback.
         // Source of truth remains head office StockEntry.costPrice.
-        await setProductCostPriceSnapshot(productId, variantSku || null, entry.costPrice || 0);
+        await setProductCostPriceSnapshot(productId, variantSku || null, entry.costPrice || 0, { session });
 
         // Create movement record
-        await StockMovement.create({
+        const movementPayload = {
           stockEntry: entry._id,
           product: productId,
           variantSku: variantSku || null,
@@ -215,10 +221,7 @@ class PurchaseService {
           quantity: normalizedQuantity,
           balanceAfter: entry.quantity,
           costPerUnit: normalizedCostPrice ?? 0,
-          reference: {
-            model: 'PurchaseOrder',
-            id: purchaseRefId,
-          },
+          ...(purchaseReference ? { reference: purchaseReference } : {}),
           actor: actorId,
           notes: [
             supplierName && `Supplier: ${supplierName}`,
@@ -226,7 +229,17 @@ class PurchaseService {
             purchaseOrderNumber && `PO: ${purchaseOrderNumber}`,
             notes,
           ].filter(Boolean).join('. ') || 'Stock purchase',
-        });
+        };
+
+        if (session) {
+          await StockMovement.create([movementPayload], { session });
+        } else {
+          await StockMovement.create(movementPayload);
+        }
+
+        const lineValue = normalizedCostPrice === null
+          ? 0
+          : normalizedQuantity * normalizedCostPrice;
 
         results.push({
           productId,
@@ -235,24 +248,28 @@ class PurchaseService {
           quantity: normalizedQuantity,
           newBalance: entry.quantity,
           costPrice: entry.costPrice || 0,
+          inputCostPrice: normalizedCostPrice,
+          lineValue,
         });
       } catch (error) {
         errors.push({ item, error: error.message });
       }
     }
 
-    // Emit event for cache invalidation
-    if (results.length > 0) {
-      await inventoryRepository.emitAsync('after:update', {
-        result: { branch: branch._id },
-        context: {},
-      }).catch(() => {});
+    // Emit events for cache invalidation + product quantity sync (per item)
+    if (emitEvents && results.length > 0) {
+      for (const item of results) {
+        await inventoryRepository.emitAsync('after:update', {
+          result: { product: item.productId, variantSku: item.variantSku || null },
+          context: {},
+        }).catch(() => {});
+      }
     }
 
     const summary = {
       totalItems: results.length,
       totalQuantity: results.reduce((sum, r) => sum + r.quantity, 0),
-      totalValue: results.reduce((sum, r) => sum + (r.quantity * (r.costPrice || 0)), 0),
+      totalValue: results.reduce((sum, r) => sum + (r.lineValue || 0), 0),
       errors: errors.length,
     };
 

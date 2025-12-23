@@ -19,6 +19,12 @@ A comprehensive integration test suite covering all 4 critical bug fixes with 53
    - Tests Fix #4: RedX payload validation
    - Covers: required field validation, error messages, fallback fields, trimming
 
+4. **`tests/integration/purchase-invoice-flow.test.js`** (1 test)
+   - Validates purchase invoice create → receive → pay flow
+
+5. **`tests/integration/supplier-flow.test.js`** (3 tests)
+   - Validates supplier creation, update, and deactivation
+
 ### Supporting Files:
 
 - **`tests/setup/vitest.config.js`** - Vitest configuration with ES modules support

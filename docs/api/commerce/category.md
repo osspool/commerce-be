@@ -23,6 +23,7 @@ Categories use **slug-based references** for optimal query performance. Products
 | `POST` | `/categories` | Admin | Create category |
 | `PATCH` | `/categories/:id` | Admin | Update category |
 | `DELETE` | `/categories/:id` | Admin | Delete (fails if products exist) |
+| `POST` | `/categories/sync-product-count` | Admin + Inventory | Recalculate product counts |
 
 ---
 
@@ -122,7 +123,6 @@ Categories can define default VAT rates for all products within that category:
 POST /api/v1/categories
 {
   "name": "Food",
-  "slug": "food",
   "vatRate": 5  // All food products default to 5% VAT
 }
 ```
@@ -210,10 +210,14 @@ Authorization: Bearer <admin_token>
 - `name` (required): Display name
 - `parent` (optional): Parent category **slug** (not ObjectId)
 - `description` (optional): Short description
-- `image` (optional): Category image { url, alt }
+- `image` (optional): Category image `{ url, alt }`
 - `displayOrder` (optional): Sort order (lower = first)
 - `vatRate` (optional): VAT rate override (0-100). `null` = use platform default
 - `isActive` (optional): Visibility toggle (default: true)
+- `seo` (optional): SEO metadata for category pages
+  - `title` (string): Meta title for search engines
+  - `description` (string): Meta description
+  - `keywords` (array of strings): Meta keywords
 
 **Auto-Generated:**
 - `slug` - Auto-generated from `name` (immutable)
@@ -238,6 +242,28 @@ DELETE /api/v1/categories/:id
 ```
 
 **Fails if products exist.** Move products first.
+
+---
+
+## Sync Product Counts
+
+Recalculate `productCount` for all categories based on current products.  
+Use when manual data fixes or migrations may have desynced counts.
+
+```http
+POST /api/v1/categories/sync-product-count
+Authorization: Bearer <admin_or_inventory_staff_token>
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "updated": 42
+  }
+}
+```
 
 ---
 

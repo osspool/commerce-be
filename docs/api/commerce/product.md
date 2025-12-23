@@ -44,6 +44,13 @@ Complete guide to the Product API endpoints with pagination, filtering, and sear
 
 All variant operations use standard CRUD endpoints - no special APIs needed.
 
+### When to Show Variant Selectors (FE Rules)
+
+- Show variant UI only when `product.productType === "variant"` **and** `product.variants.length > 0`.
+- For simple products (`product.productType === "simple"`), **do not** send `variantSku` in cart/order payloads.
+- If `product.productType === "variant"` but `variants` is empty, treat it as a backend data issue and block add‑to‑cart (show a message).
+- To convert a simple product into a variant product, **PATCH** with `variationAttributes` (and optionally `variants`). `productType` will auto‑switch based on the updated data.
+
 | Operation | Method | Endpoint | Payload |
 |-----------|--------|----------|---------|
 | Create with variants | `POST` | `/products` | `{ variationAttributes, variants }` |
@@ -342,6 +349,48 @@ if (barcode && !validateEAN13(barcode)) {
 
 ---
 
+## Inventory Quantity (Read Model)
+
+`product.quantity` is a **synced total** across all branches, derived from `StockEntry` records.
+
+- **Source of truth:** `StockEntry` (per branch + variant).
+- **Sync:** updated automatically after inventory mutations; can be forced with `POST /api/v1/products/:id/sync-stock`.
+- **Variant quantities:** per-branch counts are not stored on the product. Use inventory/branch endpoints when you need branch-level stock.
+- **Sync scope:** `sync-stock` recomputes `product.quantity` and `stockProjection.variants`. Branch-level counts remain in `StockEntry`.
+
+## Variant Stock Projection (Read-Only)
+
+For fast storefront availability checks, the backend maintains a **read-only** projection on the product:
+
+```json
+{
+  "stockProjection": {
+    "variants": [
+      { "sku": "TSHIRT-M-RED", "quantity": 30 },
+      { "sku": "TSHIRT-L-RED", "quantity": 12 }
+    ],
+    "syncedAt": "2025-12-21T12:00:00.000Z"
+  }
+}
+```
+
+- **Source of truth:** `StockEntry`
+- **Updates:** emitted after stock movements (purchase, transfer, adjustment, sale)
+- **Scope:** totals are summed across **all branches** (no branch breakdown)
+- **Do not write** to this field from FE; it is system-managed.
+
+### Get Branch + Variant Quantities (POS View)
+
+```http
+GET /api/v1/pos/products?branchId=BRANCH_ID&limit=20
+```
+
+Response includes:
+- `branchStock.quantity` (total at that branch)
+- `branchStock.variants[]` (per-variant quantities)
+
+---
+
 ## Pagination Modes
 
 The API supports **two pagination modes** that are **auto-detected** based on query parameters:
@@ -578,6 +627,13 @@ GET /api/v1/products/slug/:slug
 
 Products support **3-tier VAT cascade** for Bangladesh NBR compliance, enabling product-specific tax rates while maintaining category and platform-level defaults.
 
+### Where VAT Is Defined
+
+- `variants[].vatRate` → per-variant override (most specific)
+- `product.vatRate` → per-product override
+- `category.vatRate` → category default (`docs/api/commerce/category.md`)
+- `platform.vat.defaultRate` → global default (`docs/api/platform.md`)
+
 ### VAT Resolution Hierarchy
 
 The system resolves VAT rates in this order (first non-null value wins):
@@ -766,12 +822,12 @@ POST /api/v1/products
 ```
 
 > **Note:** When `variationAttributes` is provided, backend automatically generates all variant combinations (e.g., S-Red, S-Blue, M-Red, etc.). The optional `variants` array allows setting initial priceModifiers for specific combinations.
+> **Note:** `quantity` is optional and does not create stock entries. Inventory is managed via purchases/transfers/adjustments.
 
 **Required Fields:**
 - `name` (string)
 - `category` (string)
 - `basePrice` (number, min: 0)
-- `quantity` (number, min: 0) - Initial stock only. Use POS API to update later.
 
 **Optional Admin Fields:**
 - `costPrice` (number, min: 0) - For profit calculations. Visibility is role-based (see "Role-Based Field Filtering" below).
@@ -785,10 +841,11 @@ POST /api/v1/products
 - `slug` - Auto-generated from name
 - `sku` - Auto-generated from name if not provided
 - `variants[].sku` - Auto-generated from product SKU + attributes
-- `quantity` - Use POS Inventory API to update stock after creation
+- `quantity` - Synced from Inventory (sum across branches). Use purchases/transfers/adjustments to change stock.
 - `stats.*` - Auto-updated by system
 - `averageRating` - Auto-calculated from reviews
 - `numReviews` - Auto-updated from reviews
+- `productType` - Auto-detected from `variationAttributes` + `variants` (cannot be set directly)
 
 **Response:**
 ```json
@@ -978,6 +1035,35 @@ GET /api/v1/products/:productId/recommendations
     { /* Product object */ },
     { /* Product object */ }
   ]
+}
+```
+
+---
+
+### Sync Product Stock (Admin)
+
+```http
+POST /api/v1/products/:id/sync-stock
+```
+
+Recomputes `product.quantity` and `stockProjection.variants` from StockEntry totals across branches.
+
+**Auth Required:** Yes (admin, warehouse-admin, warehouse-staff, store-manager)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "productId": "product_id",
+    "totalQuantity": 120,
+    "variantQuantities": [
+      { "sku": "TSHIRT-M-RED", "quantity": 30 },
+      { "sku": "TSHIRT-L-RED", "quantity": 12 }
+    ],
+    "synced": true,
+    "errors": []
+  }
 }
 ```
 

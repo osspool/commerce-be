@@ -225,6 +225,8 @@ Authorization: Bearer <token>
 }
 ```
 
+> **Note:** If payment initialization fails, the backend cancels the order, sets `currentPayment.status = failed`, and releases the reservation immediately.
+
 ---
 
 ## New Features
@@ -331,7 +333,7 @@ const activePayments = config.paymentMethods.filter(pm =>
 // Group by type for UI display
 const paymentsByType = {
   cash: activePayments.filter(pm => pm.type === 'cash'),
-  mfs: activePayments.filter(pm => pm.type === 'mfs'),      // bKash, Nagad, Rocket
+  mfs: activePayments.filter(pm => pm.type === 'mfs'),      // Providers: bkash, nagad, rocket, upay
   bank: activePayments.filter(pm => pm.type === 'bank_transfer'),
   card: activePayments.filter(pm => pm.type === 'card'),
 };
@@ -344,7 +346,9 @@ const paymentsByType = {
 
 // IMPORTANT: When creating order, use 'provider' as paymentData.type
 // Platform config: type='mfs', provider='bkash'
-// Order creation:  paymentData.type='bkash' (use provider, not 'mfs')
+// Order creation: paymentData.type='bkash' (use provider, not 'mfs')
+// Only send providers supported by backend payment enums (bkash, nagad, rocket, bank_transfer, card, cash).
+// If you add a new provider (e.g., upay), ask backend to add it to PAYMENT_METHOD_VALUES.
 ```
 
 ---
@@ -654,7 +658,6 @@ interface PaymentMethodConfig {
   cardTypes?: ('visa' | 'mastercard' | 'amex' | 'unionpay' | 'other')[];
   note?: string;
   isActive?: boolean;
-  usage?: ('pos' | 'checkout' | 'api')[];     // Controls where this method is shown
 }
 ```
 

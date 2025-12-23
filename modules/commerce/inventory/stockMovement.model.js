@@ -75,7 +75,7 @@ const stockMovementSchema = new Schema({
   reference: {
     model: {
       type: String,
-      enum: ['Order', 'Transfer', 'PurchaseOrder', 'Manual', 'Challan'],
+    enum: ['Order', 'Transfer', 'Purchase', 'PurchaseOrder', 'Manual', 'Challan'],
     },
     id: Schema.Types.ObjectId,
   },

@@ -68,6 +68,14 @@ const statsSchema = new Schema({
   viewCount: { type: Number, default: 0 },
 }, { _id: false });
 
+const stockProjectionSchema = new Schema({
+  variants: [{
+    sku: { type: String, trim: true },
+    quantity: { type: Number, default: 0 },
+  }],
+  syncedAt: Date,
+}, { _id: false });
+
 /**
  * Product Schema
  * 
@@ -128,6 +136,10 @@ const productSchema = new Schema({
   tags: [String],
 
   stats: { type: statsSchema, default: () => ({}) },
+
+  // Read-only stock projection for fast variant availability checks
+  // Synced from StockEntry after stock movements
+  stockProjection: { type: stockProjectionSchema, default: () => ({ variants: [] }) },
 
   averageRating: { type: Number, default: 0, min: 0, max: 5 },
   numReviews: { type: Number, default: 0, min: 0 },
@@ -231,10 +243,10 @@ productSchema.set('toObject', { virtuals: true });
 
 // Product type invariant validation
 productSchema.pre('save', async function () {
-  // Auto-detect product type if not explicitly set
-  if (!this.productType || this.isNew) {
-    this.productType = this.variants?.length > 0 ? 'variant' : 'simple';
-  }
+  // Always derive product type from variant data to prevent mismatches
+  const hasVariants = Array.isArray(this.variants) && this.variants.length > 0;
+  const hasVariationAttributes = Array.isArray(this.variationAttributes) && this.variationAttributes.length > 0;
+  this.productType = hasVariants || hasVariationAttributes ? 'variant' : 'simple';
 
   // Validate invariants
   if (this.productType === 'simple') {

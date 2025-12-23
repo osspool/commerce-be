@@ -1,14 +1,17 @@
 import fp from 'fastify-plugin';
 import { createRoutes } from '#routes/utils/createRoutes.js';
+import createCrudRouter from '#routes/utils/createCrudRouter.js';
 import { createActionRouter } from '#routes/utils/createActionRouter.js';
 import { transferController, transferSchemas } from './transfer/index.js';
-import { purchaseController, purchaseSchemas } from './purchase/index.js';
+import { purchaseController, purchaseInvoiceService, purchaseSchemas } from './purchase/index.js';
 import { stockRequestController, stockRequestSchemas } from './stock-request/index.js';
+import { supplierController, supplierSchemas, supplierEntitySchema } from './supplier/index.js';
 import inventoryController from './inventory.controller.js';
 import { adjustmentSchema } from './inventory.schemas.js';
 import transferService from './transfer/transfer.service.js';
 import stockRequestService from './stock-request/stock-request.service.js';
 import permissions from '#config/permissions.js';
+import { itemWrapper, paginateWrapper } from '#common/docs/responseSchemas.js';
 
 /**
  * Inventory Management Plugin - Optimized
@@ -16,9 +19,12 @@ import permissions from '#config/permissions.js';
  * Industry-standard minimal API following Stripe/Square patterns.
  * 40% fewer endpoints through action-based state transitions.
  *
- * PURCHASES (2 endpoints):
- *   POST /inventory/purchases          - Record purchases (single or batch via items[])
- *   GET  /inventory/purchases/history  - View purchase history
+ * PURCHASES (5 endpoints):
+ *   POST  /inventory/purchases          - Create purchase invoice (draft)
+ *   GET   /inventory/purchases          - List purchase invoices
+ *   GET   /inventory/purchases/:id      - Get purchase by ID
+ *   PATCH /inventory/purchases/:id      - Update draft purchase
+ *   POST  /inventory/purchases/:id/action - approve|receive|pay|cancel
  *
  * TRANSFERS (6 endpoints):
  *   POST  /inventory/transfers           - Create transfer/challan
@@ -45,33 +51,120 @@ import permissions from '#config/permissions.js';
  */
 async function inventoryManagementPlugin(fastify) {
   // ============================================
+  // SUPPLIERS
+  // ============================================
+  fastify.register(async (instance) => {
+    createCrudRouter(instance, supplierController, {
+      tag: 'Inventory - Suppliers',
+      basePath: '/api/v1/inventory/suppliers',
+      schemas: {
+        ...supplierSchemas,
+        entity: supplierEntitySchema,
+      },
+      auth: {
+        list: permissions.inventory.supplierView,
+        get: permissions.inventory.supplierView,
+        create: permissions.inventory.supplierManage,
+        update: permissions.inventory.supplierManage,
+        remove: permissions.inventory.supplierManage,
+      },
+    });
+  }, { prefix: '/inventory/suppliers' });
+
+  // ============================================
   // PURCHASES (Head Office Stock Entry)
   // ============================================
   createRoutes(fastify, [
     {
-      method: 'POST',
+      method: 'GET',
       url: '/inventory/purchases',
-      summary: 'Record stock purchase',
-      description: `Add stock to inventory. Supports single item or batch via items[].
-
-**Optional transaction creation:**
-- \`createTransaction: false\` (default) - Only creates StockEntry + StockMovement
-- \`createTransaction: true\` - Also creates expense transaction for accounting
-
-Manufacturing/homemade products typically use \`createTransaction: false\` since cost is for profit calculation only.`,
-      authRoles: permissions.inventory.purchase,
-      schema: purchaseSchemas.recordPurchaseSchema,
-      handler: purchaseController.create,
+      summary: 'List purchase invoices',
+      authRoles: permissions.inventory.purchaseView,
+      schema: {
+        ...purchaseSchemas.listPurchasesSchema,
+        response: { 200: paginateWrapper(purchaseSchemas.purchaseEntitySchema) },
+      },
+      handler: purchaseController.getAll,
     },
     {
       method: 'GET',
-      url: '/inventory/purchases/history',
-      summary: 'View purchase history',
+      url: '/inventory/purchases/:id',
+      summary: 'Get purchase invoice',
       authRoles: permissions.inventory.purchaseView,
-      schema: purchaseSchemas.purchaseHistorySchema,
-      handler: purchaseController.getHistory,
+      schema: {
+        ...purchaseSchemas.getPurchaseSchema,
+        response: { 200: itemWrapper(purchaseSchemas.purchaseEntitySchema) },
+      },
+      handler: purchaseController.getById,
+    },
+    {
+      method: 'POST',
+      url: '/inventory/purchases',
+      summary: 'Create purchase invoice',
+      authRoles: permissions.inventory.purchase,
+      schema: {
+        ...purchaseSchemas.createPurchaseSchema,
+        response: { 201: itemWrapper(purchaseSchemas.purchaseEntitySchema) },
+      },
+      handler: purchaseController.create,
+    },
+    {
+      method: 'PATCH',
+      url: '/inventory/purchases/:id',
+      summary: 'Update draft purchase',
+      description: 'Only draft purchases can be updated.',
+      authRoles: permissions.inventory.purchase,
+      schema: {
+        ...purchaseSchemas.updatePurchaseSchema,
+        response: { 200: itemWrapper(purchaseSchemas.purchaseEntitySchema) },
+      },
+      handler: purchaseController.update,
     },
   ], { tag: 'Inventory - Purchases', basePath: '/api/v1/inventory/purchases' });
+
+  // Purchase Action Router (Stripe Pattern)
+  fastify.register((instance, _opts, done) => {
+    instance.addHook('preHandler', instance.authenticate);
+
+    createActionRouter(instance, {
+      tag: 'Inventory - Purchases',
+      basePath: '/api/v1/inventory/purchases',
+      actions: {
+        receive: async (id, _data, req) => {
+          return purchaseInvoiceService.receivePurchase(id, req.user._id || req.user.id);
+        },
+        pay: async (id, data, req) => {
+          return purchaseInvoiceService.payPurchase(id, data, req.user._id || req.user.id);
+        },
+        cancel: async (id, data, req) => {
+          return purchaseInvoiceService.cancelPurchase(id, req.user._id || req.user.id, data.reason);
+        },
+      },
+      actionPermissions: {
+        receive: permissions.inventory.purchaseReceive,
+        pay: permissions.inventory.purchasePay,
+        cancel: permissions.inventory.purchaseCancel,
+      },
+      actionSchemas: {
+        pay: {
+          amount: { type: 'number', description: 'Payment amount (BDT)' },
+          method: { type: 'string', description: 'Payment method' },
+          reference: { type: 'string', description: 'Payment reference' },
+          accountNumber: { type: 'string' },
+          walletNumber: { type: 'string' },
+          bankName: { type: 'string' },
+          accountName: { type: 'string' },
+          proofUrl: { type: 'string' },
+          transactionDate: { type: 'string', format: 'date-time' },
+          notes: { type: 'string' },
+        },
+        cancel: {
+          reason: { type: 'string', description: 'Cancellation reason' },
+        },
+      },
+    });
+    done();
+  }, { prefix: '/inventory/purchases' });
 
   // ============================================
   // TRANSFERS (Challan Workflow)

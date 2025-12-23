@@ -74,7 +74,7 @@ async function schemaGeneratorPlugin(fastify, opts) {
       return schemaCache.get(cacheKey);
     }
 
-    const { crudSchemas } = buildCrudSchemasFromModel(Model, options);
+    const crudSchemas = buildCrudSchemasFromModel(Model, options);
 
     // Cache if key exists
     if (cacheKey) {
@@ -107,7 +107,7 @@ async function schemaGeneratorPlugin(fastify, opts) {
       return schemaCache.get(cacheKey);
     }
 
-    const { crudSchemas } = buildCrudSchemasFromModel(Model, options);
+    const crudSchemas = buildCrudSchemasFromModel(Model, options);
     const schema = crudSchemas[operation];
 
     if (!schema) {

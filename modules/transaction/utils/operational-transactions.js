@@ -39,6 +39,7 @@ export async function createVerifiedOperationalExpenseTransaction(params) {
     metadata = undefined,
     verifiedBy = undefined,
     transactionDate = new Date(),
+    session = null,
   } = params || {};
 
   const normalizedAmountBdt = Number(amountBdt);
@@ -49,7 +50,7 @@ export async function createVerifiedOperationalExpenseTransaction(params) {
 
   const amount = toSmallestUnit(normalizedAmountBdt, 'BDT');
 
-  return Transaction.create({
+  const transactionPayload = {
     amount,
     type: 'expense',
     category: String(category),
@@ -65,5 +66,12 @@ export async function createVerifiedOperationalExpenseTransaction(params) {
     ...(notes ? { notes } : {}),
     ...(verifiedBy ? { verifiedBy, verifiedAt: new Date() } : {}),
     transactionDate,
-  });
+  };
+
+  if (session) {
+    const [transaction] = await Transaction.create([transactionPayload], { session });
+    return transaction;
+  }
+
+  return Transaction.create(transactionPayload);
 }

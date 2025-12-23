@@ -72,7 +72,7 @@ class InventoryService {
   /**
    * Check if error is due to transaction not being supported (standalone MongoDB)
    */
-  _isTransactionNotSupportedError(error) {
+  isTransactionNotSupportedError(error) {
     const message = String(error?.message || '');
     return (
       message.includes('Transaction numbers are only allowed on a replica set member') ||
@@ -138,6 +138,8 @@ class InventoryService {
         quantity,
         balanceAfter: result.quantity,
       });
+
+      await this._updateNeedsReorder(result, session);
     }
 
     // Create movements
@@ -192,6 +194,8 @@ class InventoryService {
         quantity,
         balanceAfter: result.quantity,
       });
+
+      await this._updateNeedsReorder(result, session);
     }
 
     // Create movements
@@ -230,6 +234,26 @@ class InventoryService {
     }
   }
 
+  async _updateNeedsReorder(entryDoc, session = null) {
+    if (!entryDoc) return;
+    const reorderPoint = Number(entryDoc.reorderPoint || 0);
+    const quantity = Number(entryDoc.quantity || 0);
+    const needsReorder = reorderPoint > 0 && quantity <= reorderPoint;
+
+    if (entryDoc.needsReorder === needsReorder) return;
+
+    const updateQuery = StockEntry.updateOne(
+      { _id: entryDoc._id },
+      { $set: { needsReorder } }
+    );
+    if (session) updateQuery.session(session);
+    await updateQuery;
+  }
+
+  emitStockEvents(items, isDecrement = true) {
+    return this._emitStockEvents(items, isDecrement);
+  }
+
   /**
    * Rollback decremented items (best-effort, no transaction)
    * @private
@@ -253,8 +277,17 @@ class InventoryService {
    * @param {string} actorId - User who triggered the action
    * @returns {Promise<{ success: boolean, decrementedItems: Array, error?: string }>}
    */
-  async decrementBatch(items, branchId, reference = {}, actorId = null) {
+  async decrementBatch(items, branchId, reference = {}, actorId = null, options = {}) {
     const branch = branchId || (await branchRepository.getDefaultBranch())._id;
+    const { session: externalSession = null, emitEvents = true } = options || {};
+
+    if (externalSession) {
+      const decrementedItems = await this._decrementCore(items, branch, reference, actorId, externalSession);
+      if (emitEvents) {
+        await this._emitStockEvents(decrementedItems, true);
+      }
+      return { success: true, decrementedItems };
+    }
 
     // Try with transaction first
     let session;
@@ -274,7 +307,7 @@ class InventoryService {
 
       return { success: true, decrementedItems };
     } catch (error) {
-      if (this._isTransactionNotSupportedError(error)) {
+      if (this.isTransactionNotSupportedError(error)) {
         await session.abortTransaction().catch(() => {});
         session.endSession();
         return this._decrementWithoutTransaction(items, branch, reference, actorId);
@@ -318,8 +351,17 @@ class InventoryService {
    * @param {string} actorId - User who triggered the action
    * @returns {Promise<{ success: boolean, restoredItems: Array, error?: string }>}
    */
-  async restoreBatch(items, branchId, reference = {}, actorId = null) {
+  async restoreBatch(items, branchId, reference = {}, actorId = null, options = {}) {
     const branch = branchId || (await branchRepository.getDefaultBranch())._id;
+    const { session: externalSession = null, emitEvents = true } = options || {};
+
+    if (externalSession) {
+      const restoredItems = await this._restoreCore(items, branch, reference, actorId, externalSession);
+      if (emitEvents) {
+        await this._emitStockEvents(restoredItems, false);
+      }
+      return { success: true, restoredItems };
+    }
 
     // Try with transaction first
     let session;
@@ -339,7 +381,7 @@ class InventoryService {
 
       return { success: true, restoredItems };
     } catch (error) {
-      if (this._isTransactionNotSupportedError(error)) {
+      if (this.isTransactionNotSupportedError(error)) {
         await session.abortTransaction().catch(() => {});
         session.endSession();
         return this._restoreWithoutTransaction(items, branch, reference, actorId);
@@ -416,6 +458,7 @@ class InventoryService {
       actor: actorId,
     });
 
+    await this._updateNeedsReorder(result);
     await this._emitAfterUpdate(result.toObject(), { quantityDelta: difference, previousQuantity: oldQuantity });
     return result;
   }
@@ -439,6 +482,31 @@ class InventoryService {
     const result = await StockEntry.updateMany({ product: productId }, { $set: { isActive } });
     inventoryRepository.invalidateAllLookupCache?.();
     await this._emitAfterUpdate({ product: productId });
+    return { modifiedCount: result.modifiedCount || 0 };
+  }
+
+  /**
+   * Backfill needsReorder for existing entries.
+   * @param {string|null} branchId
+   */
+  async backfillNeedsReorder(branchId = null) {
+    const match = branchId ? { branch: branchId } : {};
+    const result = await StockEntry.updateMany(
+      match,
+      [
+        {
+          $set: {
+            needsReorder: {
+              $and: [
+                { $gt: ['$reorderPoint', 0] },
+                { $lte: ['$quantity', '$reorderPoint'] },
+              ],
+            },
+          },
+        },
+      ]
+    );
+    inventoryRepository.invalidateAllLookupCache?.();
     return { modifiedCount: result.modifiedCount || 0 };
   }
 
@@ -869,6 +937,8 @@ class InventoryService {
   /**
    * Transfer stock between branches
    *
+   * @deprecated Use TransferService workflows (challan-based) instead to ensure audit trail consistency.
+   *
    * @param {string} productId - Product ID
    * @param {string} variantSku - Variant SKU (null for simple products)
    * @param {string} fromBranchId - Source branch
@@ -898,6 +968,8 @@ class InventoryService {
         throw new Error('Insufficient stock at source branch');
       }
 
+      await this._updateNeedsReorder(source, session);
+
       // Increment at destination
       const dest = await StockEntry.findOneAndUpdate(
         {
@@ -908,6 +980,8 @@ class InventoryService {
         { $inc: { quantity } },
         { new: true, upsert: true, setDefaultsOnInsert: true, session }
       );
+
+      await this._updateNeedsReorder(dest, session);
 
       // Record movements
       await StockMovement.insertMany([

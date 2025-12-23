@@ -289,6 +289,10 @@ orderSchema.virtual('paymentMethod').get(function() {
   return this.currentPayment?.method || 'cash';
 });
 
+orderSchema.virtual('orderNumber').get(function() {
+  return this._id ? this._id.toString().slice(-8).toUpperCase() : null;
+});
+
 // VAT amount from breakdown (for templates)
 orderSchema.virtual('vatAmount').get(function() {
   return this.vat?.amount || 0;

@@ -41,6 +41,9 @@ class InventoryRepository extends Repository {
     this._productSkuCache = new Map();
     this._productMetaCache = new Map();
     this._productSyncTimers = new Map();
+    this._movementRepo = new Repository(StockMovement, [], {
+      defaultLimit: 50,
+    });
     this._setupEvents();
   }
 
@@ -294,12 +297,7 @@ class InventoryRepository extends Repository {
     if (threshold !== null) {
       query.quantity = { $lte: threshold, $gt: 0 };
     } else {
-      query.$expr = {
-        $and: [
-          { $gt: ['$reorderPoint', 0] },
-          { $lte: ['$quantity', '$reorderPoint'] },
-        ],
-      };
+      query.needsReorder = true;
     }
 
     return this.Model.find(query)
@@ -309,8 +307,14 @@ class InventoryRepository extends Repository {
   }
 
   async getMovements(filters = {}, options = {}) {
-    const { page = 1, limit = 50 } = options;
-    const skip = (page - 1) * limit;
+    const {
+      page,
+      limit,
+      sort,
+      after,
+      cursor,
+    } = options;
+    const resolvedLimit = Number.isFinite(limit) ? Number(limit) : undefined;
 
     const query = {};
     if (filters.productId) query.product = filters.productId;
@@ -322,29 +326,21 @@ class InventoryRepository extends Repository {
       if (filters.endDate) query.createdAt.$lte = new Date(filters.endDate);
     }
 
-    const [docs, total] = await Promise.all([
-      StockMovement.find(query)
-        .populate('product', 'name slug')
-        .populate('branch', 'code name')
-        .populate('actor', 'name email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      StockMovement.countDocuments(query),
-    ]);
-
-    return {
-      docs,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1,
-      },
-    };
+    return this._movementRepo.getAll({
+      page,
+      limit: resolvedLimit,
+      ...(sort ? { sort } : {}),
+      after,
+      cursor,
+      filters: query,
+    }, {
+      populate: [
+        { path: 'product', select: 'name slug' },
+        { path: 'branch', select: 'code name' },
+        { path: 'actor', select: 'name email' },
+      ],
+      lean: true,
+    });
   }
 
   async getBatchBranchStock(productIds, branchId, options = {}) {
@@ -377,13 +373,7 @@ class InventoryRepository extends Repository {
           totalItems: { $sum: 1 },
           totalQuantity: { $sum: '$quantity' },
           lowStockCount: {
-            $sum: {
-              $cond: [
-                { $and: [{ $gt: ['$reorderPoint', 0] }, { $lte: ['$quantity', '$reorderPoint'] }] },
-                1,
-                0,
-              ],
-            },
+            $sum: { $cond: [{ $eq: ['$needsReorder', true] }, 1, 0] },
           },
           outOfStockCount: {
             $sum: { $cond: [{ $eq: ['$quantity', 0] }, 1, 0] },

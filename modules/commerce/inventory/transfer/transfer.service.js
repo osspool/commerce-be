@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Transfer, { TransferStatus, TransferType } from './transfer.model.js';
+import transferRepository from './transfer.repository.js';
 import StockEntry from '../stockEntry.model.js';
 import StockMovement from '../stockMovement.model.js';
 import branchRepository from '../../branch/branch.repository.js';
@@ -236,62 +237,103 @@ class TransferService {
    * @returns {Promise<Object>} Dispatched transfer
    */
   async dispatchTransfer(transferId, transportData, actorId) {
-    const transfer = await Transfer.findById(transferId);
-    if (!transfer) {
-      throw createStatusError('Transfer not found', 404);
+    const runDispatch = async (session = null) => {
+      const transfer = session
+        ? await Transfer.findById(transferId).session(session)
+        : await Transfer.findById(transferId);
+      if (!transfer) {
+        throw createStatusError('Transfer not found', 404);
+      }
+      if (transfer.status !== TransferStatus.APPROVED) {
+        throw createStatusError('Only approved transfers can be dispatched');
+      }
+
+      // Prepare items for decrement
+      const stockItems = transfer.items.map(item => ({
+        productId: item.product,
+        variantSku: item.variantSku,
+        quantity: item.quantity,
+        productName: item.productName,
+      }));
+
+      // Decrement stock from sender (head office)
+      const decrementResult = await inventoryService.decrementBatch(
+        stockItems,
+        transfer.senderBranch,
+        { model: 'Challan', id: transfer._id },
+        actorId,
+        { session, emitEvents: !session }
+      );
+
+      if (!decrementResult.success) {
+        throw createStatusError(decrementResult.error || 'Failed to decrement stock from head office');
+      }
+
+      // Get the movement IDs for reference
+      const dispatchMovementsQuery = StockMovement.find({
+        'reference.model': 'Challan',
+        'reference.id': transfer._id,
+        branch: transfer.senderBranch,
+      }).select('_id').lean();
+      if (session) dispatchMovementsQuery.session(session);
+      const dispatchMovements = await dispatchMovementsQuery;
+
+      // Update transfer
+      transfer.status = TransferStatus.DISPATCHED;
+      transfer.dispatchedBy = actorId;
+      transfer.dispatchedAt = new Date();
+      if (transportData) {
+        transfer.transport = {
+          ...transfer.transport,
+          ...transportData,
+        };
+      }
+      transfer.dispatchMovements = dispatchMovements.map(m => m._id);
+      transfer.statusHistory.push({
+        status: TransferStatus.DISPATCHED,
+        actor: actorId,
+        timestamp: new Date(),
+        notes: transportData?.notes || 'Stock dispatched from head office',
+      });
+
+      if (session) {
+        await transfer.save({ session });
+      } else {
+        await transfer.save();
+      }
+
+      return { transfer, decrementedItems: decrementResult.decrementedItems || [] };
+    };
+
+    let session;
+    try {
+      session = await mongoose.startSession();
+      session.startTransaction();
+
+      const { transfer, decrementedItems } = await runDispatch(session);
+      await session.commitTransaction();
+      await inventoryService.emitStockEvents(decrementedItems, true);
+
+      logger.info({ transferId, challanNumber: transfer.challanNumber }, 'Transfer dispatched');
+      return transfer;
+    } catch (error) {
+      if (session) {
+        await session.abortTransaction().catch(() => {});
+      }
+
+      if (inventoryService.isTransactionNotSupportedError(error)) {
+        logger.warn({ err: error }, 'Transactions not supported; falling back to non-transactional dispatch');
+        const { transfer } = await runDispatch(null);
+        logger.info({ transferId, challanNumber: transfer.challanNumber }, 'Transfer dispatched');
+        return transfer;
+      }
+
+      throw error;
+    } finally {
+      if (session) {
+        session.endSession();
+      }
     }
-    if (transfer.status !== TransferStatus.APPROVED) {
-      throw createStatusError('Only approved transfers can be dispatched');
-    }
-
-    // Prepare items for decrement
-    const stockItems = transfer.items.map(item => ({
-      productId: item.product,
-      variantSku: item.variantSku,
-      quantity: item.quantity,
-      productName: item.productName,
-    }));
-
-    // Decrement stock from sender (head office)
-    const decrementResult = await inventoryService.decrementBatch(
-      stockItems,
-      transfer.senderBranch,
-      { model: 'Challan', id: transfer._id },
-      actorId
-    );
-
-    if (!decrementResult.success) {
-      throw createStatusError(decrementResult.error || 'Failed to decrement stock from head office');
-    }
-
-    // Get the movement IDs for reference
-    const dispatchMovements = await StockMovement.find({
-      'reference.model': 'Challan',
-      'reference.id': transfer._id,
-      branch: transfer.senderBranch,
-    }).select('_id').lean();
-
-    // Update transfer
-    transfer.status = TransferStatus.DISPATCHED;
-    transfer.dispatchedBy = actorId;
-    transfer.dispatchedAt = new Date();
-    if (transportData) {
-      transfer.transport = {
-        ...transfer.transport,
-        ...transportData,
-      };
-    }
-    transfer.dispatchMovements = dispatchMovements.map(m => m._id);
-    transfer.statusHistory.push({
-      status: TransferStatus.DISPATCHED,
-      actor: actorId,
-      timestamp: new Date(),
-      notes: transportData?.notes || 'Stock dispatched from head office',
-    });
-
-    await transfer.save();
-    logger.info({ transferId, challanNumber: transfer.challanNumber }, 'Transfer dispatched');
-    return transfer;
   }
 
   /**
@@ -329,88 +371,146 @@ class TransferService {
    * @returns {Promise<Object>} Received transfer
    */
   async receiveTransfer(transferId, receivedItems, actorId) {
-    const transfer = await Transfer.findById(transferId);
-    if (!transfer) {
-      throw createStatusError('Transfer not found', 404);
-    }
-    if (![TransferStatus.DISPATCHED, TransferStatus.IN_TRANSIT].includes(transfer.status)) {
-      throw createStatusError('Only dispatched or in-transit transfers can be received');
-    }
-
-    // Process received quantities
-    let allReceived = true;
-    const stockItems = [];
-
-    for (const item of transfer.items) {
-      // Find matching received item (by item _id or product+variantSku)
-      const receivedItem = receivedItems?.find(
-        ri => ri.itemId?.toString() === item._id.toString() ||
-              (ri.productId?.toString() === item.product.toString() &&
-               (ri.variantSku || null) === (item.variantSku || null))
-      );
-
-      // Default to full quantity if not specified
-      const quantityReceived = receivedItem?.quantityReceived ?? item.quantity;
-      item.quantityReceived = Math.min(quantityReceived, item.quantity);
-
-      if (item.quantityReceived < item.quantity) {
-        allReceived = false;
+    const runReceive = async (session = null) => {
+      const transfer = session
+        ? await Transfer.findById(transferId).session(session)
+        : await Transfer.findById(transferId);
+      if (!transfer) {
+        throw createStatusError('Transfer not found', 404);
+      }
+      // Allow multiple partial receipts:
+      // - dispatched/in_transit: first receipt
+      // - partial_received: subsequent receipts until complete
+      if (![TransferStatus.DISPATCHED, TransferStatus.IN_TRANSIT, TransferStatus.PARTIAL_RECEIVED].includes(transfer.status)) {
+        throw createStatusError('Only dispatched, in-transit, or partially received transfers can be received');
       }
 
-      if (item.quantityReceived > 0) {
-        stockItems.push({
-          productId: item.product,
-          variantSku: item.variantSku,
-          quantity: item.quantityReceived,
-          productName: item.productName,
-        });
+      // Process received quantities
+      let allReceived = true;
+      const stockItems = [];
+
+      for (const item of transfer.items) {
+        const previouslyReceived = Math.max(0, Number(item.quantityReceived || 0));
+        const remaining = Math.max(0, Number(item.quantity || 0) - previouslyReceived);
+
+        // Find matching received item (by item _id or product+variantSku)
+        const receivedItem = receivedItems?.find(
+          ri => ri.itemId?.toString() === item._id.toString() ||
+                (ri.productId?.toString() === item.product.toString() &&
+                 (ri.variantSku || null) === (item.variantSku || null))
+        );
+
+        // Interpret payload quantity as "received NOW" (delta), not cumulative total.
+        // If omitted, default to "receive remaining" for convenience on final receive.
+        const requestedDeltaRaw = receivedItem?.quantityReceived ?? remaining;
+        const requestedDelta = Math.max(0, Number(requestedDeltaRaw || 0));
+        const delta = Math.min(requestedDelta, remaining);
+
+        // Update running received total on the transfer item
+        item.quantityReceived = previouslyReceived + delta;
+
+        if (item.quantityReceived < (item.quantity || 0)) {
+          allReceived = false;
+        }
+
+        // Only add stock for the newly received delta (prevents double-receive)
+        if (delta > 0) {
+          stockItems.push({
+            productId: item.product,
+            variantSku: item.variantSku,
+            quantity: delta,
+            productName: item.productName,
+          });
+        }
+      }
+
+      let restoreResult = { success: true, restoredItems: [] };
+      // Increment stock at receiver branch
+      if (stockItems.length > 0) {
+        restoreResult = await inventoryService.restoreBatch(
+          stockItems,
+          transfer.receiverBranch,
+          { model: 'Challan', id: transfer._id },
+          actorId,
+          { session, emitEvents: !session }
+        );
+
+        if (!restoreResult.success) {
+          throw createStatusError(restoreResult.error || 'Failed to add stock at sub-branch');
+        }
+
+        // Apply transfer cost to receiver stock entries (weighted average).
+        // Receiver branches never set cost directly; cost flows from head office via purchases/transfers.
+        await this._applyTransferCostToReceiverStock(transfer, stockItems, session);
+      }
+
+      // Get the movement IDs for reference
+      const receiveMovementsQuery = StockMovement.find({
+        'reference.model': 'Challan',
+        'reference.id': transfer._id,
+        branch: transfer.receiverBranch,
+      }).select('_id').lean();
+      if (session) receiveMovementsQuery.session(session);
+      const receiveMovements = await receiveMovementsQuery;
+
+      // Update transfer
+      transfer.status = allReceived ? TransferStatus.RECEIVED : TransferStatus.PARTIAL_RECEIVED;
+      transfer.receivedBy = actorId;
+      transfer.receivedAt = new Date();
+      transfer.receiveMovements = receiveMovements.map(m => m._id);
+      transfer.statusHistory.push({
+        status: transfer.status,
+        actor: actorId,
+        timestamp: new Date(),
+        notes: allReceived ? 'All items received' : 'Partial receipt recorded',
+      });
+
+      if (session) {
+        await transfer.save({ session });
+      } else {
+        await transfer.save();
+      }
+
+      return { transfer, restoredItems: restoreResult.restoredItems || [] };
+    };
+
+    let session;
+    try {
+      session = await mongoose.startSession();
+      session.startTransaction();
+
+      const { transfer, restoredItems } = await runReceive(session);
+      await session.commitTransaction();
+      await inventoryService.emitStockEvents(restoredItems, false);
+
+      logger.info({
+        transferId,
+        challanNumber: transfer.challanNumber,
+        status: transfer.status,
+      }, 'Transfer received');
+      return transfer;
+    } catch (error) {
+      if (session) {
+        await session.abortTransaction().catch(() => {});
+      }
+
+      if (inventoryService.isTransactionNotSupportedError(error)) {
+        logger.warn({ err: error }, 'Transactions not supported; falling back to non-transactional receive');
+        const { transfer } = await runReceive(null);
+        logger.info({
+          transferId,
+          challanNumber: transfer.challanNumber,
+          status: transfer.status,
+        }, 'Transfer received');
+        return transfer;
+      }
+
+      throw error;
+    } finally {
+      if (session) {
+        session.endSession();
       }
     }
-
-    // Increment stock at receiver branch
-    if (stockItems.length > 0) {
-      const restoreResult = await inventoryService.restoreBatch(
-        stockItems,
-        transfer.receiverBranch,
-        { model: 'Challan', id: transfer._id },
-        actorId
-      );
-
-      if (!restoreResult.success) {
-        throw createStatusError(restoreResult.error || 'Failed to add stock at sub-branch');
-      }
-
-      // Apply transfer cost to receiver stock entries (weighted average).
-      // Receiver branches never set cost directly; cost flows from head office via purchases/transfers.
-      await this._applyTransferCostToReceiverStock(transfer, stockItems);
-    }
-
-    // Get the movement IDs for reference
-    const receiveMovements = await StockMovement.find({
-      'reference.model': 'Challan',
-      'reference.id': transfer._id,
-      branch: transfer.receiverBranch,
-    }).select('_id').lean();
-
-    // Update transfer
-    transfer.status = allReceived ? TransferStatus.RECEIVED : TransferStatus.PARTIAL_RECEIVED;
-    transfer.receivedBy = actorId;
-    transfer.receivedAt = new Date();
-    transfer.receiveMovements = receiveMovements.map(m => m._id);
-    transfer.statusHistory.push({
-      status: transfer.status,
-      actor: actorId,
-      timestamp: new Date(),
-      notes: allReceived ? 'All items received' : 'Partial receipt recorded',
-    });
-
-    await transfer.save();
-    logger.info({
-      transferId,
-      challanNumber: transfer.challanNumber,
-      status: transfer.status,
-    }, 'Transfer received');
-    return transfer;
   }
 
   /**
@@ -448,14 +548,17 @@ class TransferService {
    * @returns {Promise<Object>}
    */
   async getById(transferId) {
-    return Transfer.findById(transferId)
-      .populate('senderBranch', 'code name address')
-      .populate('receiverBranch', 'code name address')
-      .populate('createdBy', 'name email')
-      .populate('approvedBy', 'name email')
-      .populate('dispatchedBy', 'name email')
-      .populate('receivedBy', 'name email')
-      .lean();
+    return transferRepository.getById(transferId, {
+      populate: [
+        { path: 'senderBranch', select: 'code name address' },
+        { path: 'receiverBranch', select: 'code name address' },
+        { path: 'createdBy', select: 'name email' },
+        { path: 'approvedBy', select: 'name email' },
+        { path: 'dispatchedBy', select: 'name email' },
+        { path: 'receivedBy', select: 'name email' },
+      ],
+      lean: true,
+    });
   }
 
   /**
@@ -464,7 +567,7 @@ class TransferService {
    * @returns {Promise<Object>}
    */
   async getByChallanNumber(challanNumber) {
-    return Transfer.findOne({ challanNumber: challanNumber.toUpperCase() })
+    return transferRepository.Model.findOne({ challanNumber: challanNumber.toUpperCase() })
       .populate('senderBranch', 'code name address')
       .populate('receiverBranch', 'code name address')
       .populate('createdBy', 'name email')
@@ -497,25 +600,19 @@ class TransferService {
     const { page = 1, limit = 20, sort = '-createdAt' } = options;
     const skip = (page - 1) * limit;
 
-    const [docs, total] = await Promise.all([
-      Transfer.find(query)
-        .populate('senderBranch', 'code name')
-        .populate('receiverBranch', 'code name')
-        .populate('createdBy', 'name')
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Transfer.countDocuments(query),
-    ]);
-
-    return {
-      docs,
-      total,
+    return transferRepository.getAll({
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
-    };
+      sort,
+      filters: query,
+    }, {
+      populate: [
+        { path: 'senderBranch', select: 'code name' },
+        { path: 'receiverBranch', select: 'code name' },
+        { path: 'createdBy', select: 'name' },
+      ],
+      lean: true,
+    });
   }
 
   /**
@@ -617,7 +714,7 @@ class TransferService {
    *
    * @private
    */
-  async _applyTransferCostToReceiverStock(transfer, receivedStockItems) {
+  async _applyTransferCostToReceiverStock(transfer, receivedStockItems, session = null) {
     if (!transfer?.items?.length || !receivedStockItems?.length) return;
 
     const itemMap = new Map(
@@ -637,11 +734,13 @@ class TransferService {
       const inQty = Number(received.quantity || 0);
       if (!inQty || inQty <= 0) continue;
 
-      const entry = await StockEntry.findOne({
+      const entryQuery = StockEntry.findOne({
         product: received.productId,
         variantSku: received.variantSku || null,
         branch: transfer.receiverBranch,
       }).select('quantity costPrice').lean();
+      if (session) entryQuery.session(session);
+      const entry = await entryQuery;
 
       if (!entry) continue;
 
@@ -654,10 +753,12 @@ class TransferService {
 
       if (!Number.isFinite(newCost)) continue;
 
-      await StockEntry.updateOne(
+      const updateQuery = StockEntry.updateOne(
         { _id: entry._id },
         { $set: { costPrice: newCost } }
       );
+      if (session) updateQuery.session(session);
+      await updateQuery;
     }
   }
 }

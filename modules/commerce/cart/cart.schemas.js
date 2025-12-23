@@ -48,6 +48,6 @@ export const removeItemSchema = {
   },
 };
 
-const { crudSchemas } = buildCrudSchemasFromModel(Cart, cartSchemaOptions);
+const crudSchemas = buildCrudSchemasFromModel(Cart, cartSchemaOptions);
 
 export default crudSchemas;

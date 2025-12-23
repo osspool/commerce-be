@@ -247,6 +247,78 @@ describe('Inventory E2E - Transfers & Movements', () => {
     expect(headEntry.quantity).toBe(22);
   });
 
+  it('supports multi-step partial receive without double-adding stock', async () => {
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/inventory/transfers',
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: {
+        receiverBranchId: subBranch._id,
+        items: [{ productId: product._id, quantity: 10 }],
+      },
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    const transferId = createResponse.json().data?._id;
+    if (!transferId) {
+      throw new Error(`Unexpected create response: ${createResponse.body}`);
+    }
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/inventory/transfers/${transferId}/action`,
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: { action: 'approve' },
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/inventory/transfers/${transferId}/action`,
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: { action: 'dispatch' },
+    });
+
+    // Receive 4 now (partial)
+    const receivePartial = await app.inject({
+      method: 'POST',
+      url: `/api/v1/inventory/transfers/${transferId}/action`,
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: {
+        action: 'receive',
+        items: [{ productId: product._id.toString(), quantityReceived: 4 }],
+      },
+    });
+    expect(receivePartial.statusCode).toBe(200);
+
+    const entryAfterPartial = await StockEntry.findOne({ product: product._id, branch: subBranch._id });
+    expect(entryAfterPartial.quantity).toBe(14); // 10 initial + 4 received
+
+    // Receive remaining 6 in a second call (complete)
+    const receiveRemaining = await app.inject({
+      method: 'POST',
+      url: `/api/v1/inventory/transfers/${transferId}/action`,
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: {
+        action: 'receive',
+        items: [{ productId: product._id.toString(), quantityReceived: 6 }],
+      },
+    });
+    expect(receiveRemaining.statusCode).toBe(200);
+
+    const finalEntry = await StockEntry.findOne({ product: product._id, branch: subBranch._id });
+    expect(finalEntry.quantity).toBe(20); // 10 initial + 10 total received
+
+    // Ensure movements exist for both receipts (same challan reference)
+    const movements = await StockMovement.find({
+      'reference.model': 'Challan',
+      'reference.id': new mongoose.Types.ObjectId(transferId),
+      branch: subBranch._id,
+      type: 'transfer_in',
+    }).lean();
+    expect(movements.length).toBe(2);
+    expect(movements.reduce((sum, m) => sum + (m.quantity || 0), 0)).toBe(10);
+  });
+
   it('rejects transfer creation for store-manager', async () => {
     const response = await app.inject({
       method: 'POST',

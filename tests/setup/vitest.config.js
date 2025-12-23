@@ -10,6 +10,14 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     globalSetup: './tests/setup/global-setup.js',
+    // Integration tests share a single MongoDB instance and perform aggressive cleanup.
+    // Running test files in parallel can delete data used by other suites (flaky 404/DocumentNotFoundError).
+    fileParallelism: false,
+    maxConcurrency: 1,
+    maxWorkers: 1,
+    sequence: {
+      concurrent: false,
+    },
     testTimeout: 30000,
     hookTimeout: 30000,
     coverage: {

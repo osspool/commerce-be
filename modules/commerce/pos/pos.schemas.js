@@ -77,7 +77,7 @@ export const createOrderSchema = {
       payment: {
         type: 'object',
         properties: {
-          method: { type: 'string', enum: ['cash', 'bkash', 'nagad', 'card'] },
+          method: { type: 'string', enum: ['cash', 'bkash', 'nagad', 'rocket', 'bank_transfer', 'card'] },
           amount: { type: 'number' },
           reference: { type: 'string' },
         },

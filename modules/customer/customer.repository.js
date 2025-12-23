@@ -31,10 +31,50 @@ class CustomerRepository extends Repository {
   async linkOrCreateForUser(user) {
     const userId = user._id || user.id;
     const email = user.email?.toLowerCase().trim();
+    const phone = user.phone?.trim();
 
     // Already linked?
-    const existing = await this.Model.findOne({ userId }).lean();
-    if (existing) return existing;
+    const existing = await this.Model.findOne({ userId });
+    if (existing) {
+      let updated = false;
+      if (user.name && user.name !== existing.name) {
+        existing.name = user.name;
+        updated = true;
+      }
+      if (email && email !== existing.email) {
+        existing.email = email;
+        updated = true;
+      }
+      if (phone && existing.phone !== phone) {
+        const phoneOwner = await this.Model.findOne({ phone, _id: { $ne: existing._id } }).lean();
+        if (!phoneOwner) {
+          existing.phone = phone;
+          updated = true;
+        }
+      }
+      if (updated) {
+        await existing.save();
+      }
+      return existing;
+    }
+
+    // Customer exists by phone? (preferred primary identifier)
+    if (phone) {
+      const byPhone = await this.Model.findOne({ phone });
+      if (byPhone) {
+        if (!byPhone.userId || byPhone.userId.toString() === userId.toString()) {
+          byPhone.userId = userId;
+          if (user.name && user.name !== byPhone.name) {
+            byPhone.name = user.name;
+          }
+          if (email && email !== byPhone.email) {
+            byPhone.email = email;
+          }
+          await byPhone.save();
+        }
+        return byPhone;
+      }
+    }
 
     // Customer exists by email? (from guest checkout)
     if (email) {
@@ -42,6 +82,12 @@ class CustomerRepository extends Repository {
       if (byEmail) {
         byEmail.userId = userId;
         byEmail.name = user.name || byEmail.name;
+        if (phone && (!byEmail.phone || byEmail.phone.startsWith('pending_'))) {
+          const phoneOwner = await this.Model.findOne({ phone, _id: { $ne: byEmail._id } }).lean();
+          if (!phoneOwner) {
+            byEmail.phone = phone;
+          }
+        }
         await byEmail.save();
         return byEmail;
       }
@@ -52,7 +98,7 @@ class CustomerRepository extends Repository {
       userId,
       name: user.name,
       email,
-      phone: `pending_${userId}`,
+      phone: phone || `pending_${userId}`,
     });
   }
 

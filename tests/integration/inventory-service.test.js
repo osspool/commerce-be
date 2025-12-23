@@ -115,6 +115,21 @@ describe('Inventory Service - Event Emissions & Cache', () => {
       const cached2 = await inventoryRepository.getByBarcodeOrSku(product.sku, branch._id);
       expect(cached2.quantity).toBe(43);
     });
+
+    it('should update needsReorder when quantity drops below reorder point', async () => {
+      await StockEntry.updateOne(
+        { _id: stockEntry._id },
+        { $set: { reorderPoint: 45, needsReorder: false } }
+      );
+
+      await inventoryService.decrementBatch(
+        [{ productId: product._id, variantSku: null, quantity: 10 }],
+        branch._id
+      );
+
+      const updatedEntry = await StockEntry.findById(stockEntry._id).lean();
+      expect(updatedEntry.needsReorder).toBe(true);
+    });
   });
 
   describe('Stock Reservations - Cache Invalidation', () => {

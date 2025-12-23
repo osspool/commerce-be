@@ -1,10 +1,12 @@
 ### Transaction API Guide
 
-This guide summarizes how the Transaction API behaves after the monetization/HRM updates, which fields the frontend may set, which are read-only, how income vs expense is determined, and what reports are available.
+This guide summarizes how the Transaction API behaves in this ecommerce backend: which fields are read-only, how income vs expense is determined, and what reports are available.
 
-### Payment Flow (Monetization-managed Transactions)
+**Important:** Transactions are **not created manually** in this app. They are created by order/POS flows via `@classytic/revenue` or by internal operational workflows (inventory loss/purchase, COGS, etc.). `POST /api/v1/transactions` is blocked.
 
-Monetization workflows (membership, subscription) return both `transaction` and `paymentIntent`:
+### Payment Flow (Order/POS Transactions)
+
+Order flows return both `transaction` and `paymentIntent`:
 
 **Manual Payments:**
 - `paymentIntent.instructions` contains formatted payment details (bKash, Nagad, bank accounts)
@@ -20,9 +22,11 @@ Monetization workflows (membership, subscription) return both `transaction` and 
 - Poll transaction status or listen to real-time updates after displaying instructions
 
 ### Transaction types and categories
-- **Monetization-managed (library)**: Created by workflows. Categories: `SUBSCRIPTION` (org expense), `MEMBERSHIP` (org income), `REFUND` (org expense). These map to slugs `platform_subscription`, `gym_membership`, `refund`.
-- **HRM-managed (library)**: Created by HRM workflows. Categories: `SALARY`, `BONUS`, `COMMISSION`, `OVERTIME`, `SEVERANCE` (all expenses).
-- **Manual operational (app)**: Created directly via Transactions API. Categories include `RENT`, `UTILITIES`, `EQUIPMENT`, `SUPPLIES`, `MAINTENANCE`, `MARKETING`, `OTHER_EXPENSE` (expenses) and `CAPITAL_INJECTION`, `RETAINED_EARNINGS`, `OTHER_INCOME` (income). `ADJUSTMENT` is special (type depends on amount sign).
+- **Order/POS (library)**: Created via `revenue.monetization.create()` for `purchase` flows.
+- **Operational (app)**: Created internally for inventory flows (purchase, loss, adjustment, COGS) using the same Transaction model.
+
+App category reference (`#common/revenue/enums.js`):
+`order_purchase`, `order_subscription`, `inventory_purchase`, `purchase_return`, `inventory_loss`, `inventory_adjustment`, `cogs`, `rent`, `utilities`, `equipment`, `supplies`, `maintenance`, `marketing`, `other_expense`, `capital_injection`, `retained_earnings`, `tip_income`, `other_income`, `wholesale_sale`, `platform_subscription`, `creator_subscription`, `enrollment_purchase`, `enrollment_subscription`.
 
 ### Accounting Model: Cashflow vs. Double-Entry
 This system uses a **Cashflow Event** model by default:
@@ -40,17 +44,17 @@ Type inference:
 ### Endpoints
 - List: `GET /api/v1/transactions`
 - Get: `GET /api/v1/transactions/:id`
-- Create (manual only): `POST /api/v1/transactions` (admin only)
-- Update: `PATCH /api/v1/transactions/:id`
-- Delete: `DELETE /api/v1/transactions/:id` (pending manual only)
+- Create: **Blocked** (transactions are created by order/POS/operational workflows)
+- Update: `PATCH /api/v1/transactions/:id` (**notes only**)
+- Delete: **Blocked** (immutable for accounting)
 - Reports:
   - `GET /api/v1/transactions/reports/profit-loss`
   - `GET /api/v1/transactions/reports/categories`
   - `GET /api/v1/transactions/reports/cash-flow`
 
 Monetization flows:
-- Do NOT create transactions directly for subscriptions/memberships. They are created/updated by the monetization workflows and verified by the unified payment webhook system.
-- Membership and subscription endpoints return both `transaction` and `paymentIntent` objects.
+- Do NOT create transactions directly; they are created/updated by order/POS workflows and verified by the payment webhook system.
+- Order endpoints return both `transaction` and `paymentIntent` objects.
 - Use `paymentIntent.instructions` to display payment details to customers (manual payments).
 - Use `paymentIntent.clientSecret` or `transaction.gateway.paymentUrl` for gateway payments (future).
 
@@ -62,16 +66,24 @@ Monetization flows:
 **System-managed fields (all transactions):**
 - `commission`, `gateway`, `webhook`, `verifiedAt`, `verifiedBy`, `metadata`
 
-**Library-managed transactions (subscription, membership, refund, salary, bonus, commission, overtime, severance):**
-- Create: Blocked (managed by workflows)
-- Update: Only `notes` allowed; `status` blocked (webhooks only)
+**All transactions in this app are library/flow-managed:**
+- Create: Blocked (system-managed)
+- Update: Only `notes` allowed
 
-**Manual transactions (rent, utilities, equipment, capital_injection, etc.):**
-- Create: `category`, `amount`, `method`, `reference`, `paymentDetails`, `notes`, `date`, `status` (optional)
-  - `type` auto-derived from `category`
-  - `status` defaults to `pending`
-- Update (pending): `status`, `amount`, `method`, `reference`, `paymentDetails`, `notes`, `date`
-- Update (verified/completed): `status`, `notes`, `reference`, `paymentDetails`
+### Customer Transactions
+
+Transactions are linked to customers **via Order references**, not a direct `customerId` field on Transaction.
+
+Two supported approaches:
+
+1) **From Orders**
+- Query orders by `customer` or `customerPhone`
+- For each order, read `currentPayment.transactionId` (if present)
+- Fetch the transaction via `GET /api/v1/transactions/:id`
+
+2) **Statement Export**
+- `GET /api/v1/transactions/statement?...&format=json`
+- Includes `orderCustomerName` when the transaction references an Order
 
 ### Schemas (FE contract)
 
@@ -86,9 +98,9 @@ Transaction object (response shape; selected fields):
   "category": "string",                // see enums below (immutable after creation)
   "status": "pending | payment_initiated | processing | requires_action | verified | completed | failed | cancelled | expired | refunded | partially_refunded",
   "amount": 12345,                      // immutable after creation
-  "method": "bkash | nagad | rocket | bank | card | online | manual | cash",
+  "method": "cash | bkash | nagad | rocket | bank_transfer | card | online | manual",
   "gateway": {                          // read-only
-    "type": "manual | stripe | sslcommerz | bkash_gateway | nagad_gateway",
+    "type": "manual | stripe | sslcommerz | <custom>",
     "paymentUrl": "string | null"       // redirect URL for gateway payments
   },
   "reference": "string",
@@ -122,13 +134,13 @@ PaymentIntent object (returned with monetization-managed transactions):
 ```json
 {
   "id": "string",
-  "provider": "manual | stripe | sslcommerz | bkash_gateway | nagad_gateway",
+  "provider": "manual | stripe | sslcommerz | <custom>",
   "status": "pending | processing | succeeded | failed | cancelled",
   "instructions": {                     // manual payments only
     "bkash": "01712345678 (Personal)",
     "nagad": "01812345678 (Merchant)",
     "bank": "ABC Bank - 1234567890",
-    "reference": "Use code: MEM-2025-001",
+    "reference": "Use code: ORD-2025-001",
     "note": "Pay to XYZ Gym. Operating hours: 6 AM - 10 PM"
   },
   "clientSecret": "string | null",      // Stripe SDK payments
@@ -136,73 +148,21 @@ PaymentIntent object (returned with monetization-managed transactions):
 }
 ```
 
-Create manual transaction (request body):
-```json
-{
-  "category": "rent | utilities | equipment | supplies | maintenance | marketing | other_expense | capital_injection | retained_earnings | other_income | adjustment",
-  "amount": 50000,
-  "method": "bank | bkash | nagad | rocket | cash | manual | card | online",
-  "reference": "string",
-  "paymentDetails": {
-    "bankName": "string",
-    "accountNumber": "string",
-    "accountName": "string",
-    "walletNumber": "string",
-    "walletType": "personal | merchant",
-    "proofUrl": "string"
-  },
-  "date": "2025-11-01T00:00:00.000Z",
-  "notes": "string"
-}
-```
+> Manual creation is blocked. Only `notes` updates are allowed via PATCH.
 
-Update manual transaction (status=pending):
-```json
-{
-  "amount": 52000,
-  "method": "bank",
-  "reference": "TT-2025-11-01",
-  "paymentDetails": { "bankName": "ABC Bank" },
-  "date": "2025-11-02T00:00:00.000Z",
-  "notes": "Updated note"
-}
-```
-
-### Supported enums (import from `@classytic/revenue/enums`)
+### Supported enums (import from `@classytic/revenue/enums` and `#common/revenue/enums.js`)
 - **TRANSACTION_STATUS**: `pending`, `payment_initiated`, `processing`, `requires_action`, `verified`, `completed`, `failed`, `cancelled`, `expired`, `refunded`, `partially_refunded`.
-- **PAYMENT_METHOD**: `bkash`, `nagad`, `rocket`, `bank`, `card`, `online`, `manual`, `cash`.
-- **PAYMENT_GATEWAY_TYPE**: `manual`, `stripe`, `sslcommerz`, `bkash_gateway`, `nagad_gateway`.
-- **LIBRARY_TRANSACTION_CATEGORIES** (system-managed):
-  - `SUBSCRIPTION` → `platform_subscription` (expense)
-  - `MEMBERSHIP` → `gym_membership` (income)
-  - `REFUND` → `refund` (expense)
-- **HRM categories** (system-managed): `salary`, `bonus`, `commission`, `overtime`, `severance`.
-- **Manual categories** (create via API): `rent`, `utilities`, `equipment`, `supplies`, `maintenance`, `marketing`, `other_expense`, `capital_injection`, `retained_earnings`, `other_income`, `adjustment`.
+- **PAYMENT_METHOD**: `cash`, `bkash`, `nagad`, `rocket`, `bank_transfer`, `card`, `online`, `manual`.
+- **PAYMENT_GATEWAY_TYPE**: `manual`, `stripe`, `sslcommerz` (custom values allowed).
+- **App categories**: see `#common/revenue/enums.js` list above.
 
 Notes:
 - `type` is derived from `category` server-side. Do not send `type` unless necessary.
 - Library-managed categories cannot be created manually; only `notes` can be updated.
 
-### Create manual transaction (example)
-Request (owner/manager/admin with org context):
-```json
-POST /api/v1/transactions
-{
-  "category": "rent",
-  "amount": 50000,
-  "method": "bank",
-  "reference": "TT-2025-11-01",
-  "paymentDetails": { "bankName": "ABC Bank", "accountNumber": "123456" },
-  "date": "2025-11-01T00:00:00.000Z",
-  "notes": "November office rent"
-}
-```
-Behavior:
-- Backend validates category is manual (not monetization/HRM), derives `type`=`expense`, injects `organizationId` from context, and sets `status`=`pending`.
-
 ### Income vs Expense in UI
 - Use `type` to render Income/Expense badges and groupings.
-- For category display, use the friendly key (e.g., `SUBSCRIPTION`, `MEMBERSHIP`, `RENT`) and/or a localized label.
+- For category display, use the friendly key (e.g., `order_purchase`, `inventory_loss`, `rent`) and/or a localized label.
 
 ### Financial reports
 - Profit & Loss: totals income, expenses, net profit for date range.
@@ -223,10 +183,8 @@ Includes (when available):
 Note: This is a transaction statement (a financial log), not a full double-entry ledger.
 
 ### Notes
-- Platform subscription (`platform_subscription`) is an organization **expense**.
-- Membership sales (`gym_membership`) are organization **income**.
 - Commission tracked in `commission` object for gateway payments.
-- All immutable fields protected at schema + controller level.
-- **Status**: Library-managed = webhooks only; Manual = user can update.
+- All immutable fields are protected at schema + controller level.
+- **Status**: managed by payment workflows/webhooks; client updates are limited to `notes`.
 
 

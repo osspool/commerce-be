@@ -8,7 +8,7 @@ import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
  * - manager: optional, auto-populated
  * - isDefault: systemManaged when creating (first branch becomes default)
  */
-const { crudSchemas } = buildCrudSchemasFromModel(Branch, {
+const crudSchemas = buildCrudSchemasFromModel(Branch, {
   strictAdditionalProperties: true,
   fieldRules: {
     // isDefault is managed by the system for first branch

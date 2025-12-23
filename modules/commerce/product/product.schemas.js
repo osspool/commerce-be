@@ -9,9 +9,12 @@ export const productSchemaOptions = {
     averageRating: { systemManaged: true },
     numReviews: { systemManaged: true },
     slug: { systemManaged: true },
+    productType: { systemManaged: true },
     quantity: { systemManaged: true }, // Managed by inventory system
+    stockProjection: { systemManaged: true },
     'stats.viewCount': { systemManaged: true },
     'stats.totalQuantitySold': { systemManaged: true },
+    'stats.totalSales': { systemManaged: true },
   },
   query: {
     allowedPopulate: [], // images carry URLs + variants directly; no populate needed
@@ -25,6 +28,6 @@ export const productSchemaOptions = {
   },
 };
 
-const { crudSchemas } = buildCrudSchemasFromModel(Product, productSchemaOptions);
+const crudSchemas = buildCrudSchemasFromModel(Product, productSchemaOptions);
 
 export default crudSchemas;

@@ -1,0 +1,107 @@
+{
+  "name": "@classytic/revenue",
+  "version": "1.0.3",
+  "description": "Enterprise revenue management system with subscriptions, payments, escrow, splits - Modern, Type-safe, Resilient",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "keywords": [
+    "revenue",
+    "monetization",
+    "subscription",
+    "payment",
+    "saas",
+    "billing",
+    "proration",
+    "recurring",
+    "gateway",
+    "webhook",
+    "stripe",
+    "sslcommerz",
+    "bkash",
+    "transaction",
+    "invoice",
+    "escrow",
+    "hold",
+    "release",
+    "split",
+    "affiliate",
+    "commission",
+    "marketplace",
+    "typescript"
+  ],
+  "author": "Sadman Chowdhury",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/classytic/revenue.git"
+  },
+  "bugs": {
+    "url": "https://github.com/classytic/revenue/issues"
+  },
+  "homepage": "https://github.com/classytic/revenue#readme",
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "test": "node ../tests/run-all.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./enums": {
+      "types": "./dist/enums/index.d.ts",
+      "import": "./dist/enums/index.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas/index.d.ts",
+      "import": "./dist/schemas/index.js"
+    },
+    "./schemas/validation": {
+      "types": "./dist/schemas/validation.d.ts",
+      "import": "./dist/schemas/validation.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.js"
+    },
+    "./providers": {
+      "types": "./dist/providers/index.d.ts",
+      "import": "./dist/providers/index.js"
+    },
+    "./services": {
+      "types": "./dist/services/index.d.ts",
+      "import": "./dist/services/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "mongoose": "^8.0.0 || ^9.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.8.7",
+    "rimraf": "^6.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "nanoid": "^5.1.6",
+    "zod": "^4.1.13"
+  }
+}

@@ -174,8 +174,6 @@ async function calculateTotals(subtotal, deliveryPrice, couponCode) {
       discountValue: coupon.discountAmount,
       discountAmount: discount,
     };
-
-    await couponRepository.incrementUsage(coupon._id);
   }
 
   return {
@@ -414,6 +412,9 @@ export async function createOrderWorkflow(orderInput, context) {
 
   // Free order - done
   if (isFreeOrder) {
+    if (totals.couponData?.coupon) {
+      await couponRepository.incrementUsage(totals.couponData.coupon);
+    }
     return { order, transaction: null, paymentIntent: null };
   }
 
@@ -433,8 +434,29 @@ export async function createOrderWorkflow(orderInput, context) {
       : PAYMENT_STATUS.PENDING;
     await order.save();
 
+    if (totals.couponData?.coupon) {
+      await couponRepository.incrementUsage(totals.couponData.coupon);
+    }
+
     return { order, transaction, paymentIntent };
   } catch (error) {
+    if (order?.stockReservationId) {
+      await stockService.release(order.stockReservationId).catch(() => {});
+    }
+    if (order) {
+      order.status = ORDER_STATUS.CANCELLED;
+      order.cancellationReason = 'payment_failed';
+      if (order.currentPayment) {
+        order.currentPayment.status = PAYMENT_STATUS.FAILED;
+      }
+      if (order.addTimelineEvent) {
+        order.addTimelineEvent('payment.failed', 'Payment initialization failed', request, {
+          reason: error?.message || 'Payment initialization failed',
+        });
+      }
+      await order.save();
+    }
+
     // Handle revenue library errors
     if (error instanceof InvalidAmountError) {
       throw Object.assign(new Error('Invalid order amount'), { statusCode: 400, code: 'INVALID_AMOUNT' });

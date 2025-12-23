@@ -11,7 +11,7 @@ export const platformConfigSchemaOptions = {
   },
 };
 
-const { crudSchemas } = buildCrudSchemasFromModel(PlatformConfig, platformConfigSchemaOptions);
+const crudSchemas = buildCrudSchemasFromModel(PlatformConfig, platformConfigSchemaOptions);
 
 export default crudSchemas;
 

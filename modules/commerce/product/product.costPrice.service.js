@@ -9,15 +9,17 @@ import Product from './product.model.js';
  * - fallback when branch stock entry has no cost
  */
 
-export async function setProductCostPriceSnapshot(productId, variantSku, costPrice) {
+export async function setProductCostPriceSnapshot(productId, variantSku, costPrice, options = {}) {
   if (!productId) return;
   if (typeof costPrice !== 'number' || Number.isNaN(costPrice) || costPrice < 0) return;
+  const { session = null } = options;
+  const sessionOptions = session ? { session } : {};
 
   if (variantSku) {
     await Product.findOneAndUpdate(
       { _id: productId, 'variants.sku': variantSku },
       { $set: { 'variants.$.costPrice': costPrice } },
-      { timestamps: true }
+      { timestamps: true, ...sessionOptions }
     );
     return;
   }
@@ -25,7 +27,6 @@ export async function setProductCostPriceSnapshot(productId, variantSku, costPri
   await Product.findOneAndUpdate(
     { _id: productId },
     { $set: { costPrice } },
-    { timestamps: true }
+    { timestamps: true, ...sessionOptions }
   );
 }
-

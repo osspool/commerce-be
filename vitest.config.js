@@ -14,13 +14,9 @@ export default defineConfig({
     // Running test files in parallel can delete data used by other suites (flaky 404/DocumentNotFoundError).
     fileParallelism: false,
     maxConcurrency: 1,
+    maxWorkers: 1,
     sequence: {
       concurrent: false,
-    },
-    poolOptions: {
-      threads: {
-        singleThread: true,
-      },
     },
     testTimeout: 30000,
     hookTimeout: 60000,

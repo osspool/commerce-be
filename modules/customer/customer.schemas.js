@@ -8,7 +8,7 @@ import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
  * - userId: systemManaged (auto-linked from user)
  * - stats.*: systemManaged (calculated from orders/subscriptions)
  */
-const { crudSchemas } = buildCrudSchemasFromModel(Customer, {
+const crudSchemas = buildCrudSchemasFromModel(Customer, {
   strictAdditionalProperties: true, // Reject unknown fields at schema level
   fieldRules: {
     userId: { systemManaged: true },

@@ -4,7 +4,7 @@ import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
 /**
  * Review CRUD Schemas with Field Rules
  */
-const { crudSchemas } = buildCrudSchemasFromModel(Review, {
+const crudSchemas = buildCrudSchemasFromModel(Review, {
   strictAdditionalProperties: true,
   fieldRules: {
     user: { systemManaged: true },

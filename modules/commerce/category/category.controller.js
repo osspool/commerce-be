@@ -13,6 +13,7 @@ class CategoryController extends BaseController {
 
         this.getBySlug = this.getBySlug.bind(this);
         this.getTree = this.getTree.bind(this);
+        this.syncProductCounts = this.syncProductCounts.bind(this);
     }
 
     /**
@@ -36,6 +37,14 @@ class CategoryController extends BaseController {
     async getTree(req, reply) {
         const tree = await categoryRepository.getCategoryTree();
         return reply.send({ success: true, data: tree });
+    }
+
+    /**
+     * Recalculate product counts for all categories
+     */
+    async syncProductCounts(req, reply) {
+        const result = await categoryRepository.recalculateAllCounts();
+        return reply.send({ success: true, data: result });
     }
 
     /**

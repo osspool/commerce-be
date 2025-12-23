@@ -22,6 +22,88 @@ GET /api/v1/inventory/transfers/CHN-202512-0042
 
 The server auto-detects the format and routes appropriately.
 
+## Action Endpoint (Stripe Pattern)
+
+State transitions are handled via a single action endpoint:
+
+```http
+POST /api/v1/inventory/transfers/:id/action
+```
+
+You can include `Idempotency-Key` to make retries safe:
+```http
+Idempotency-Key: transfer-receive-2025-001
+```
+
+```json
+{ "action": "approve" }
+{ "action": "dispatch", "transport": { "vehicleNumber": "DHA-1234" } }
+{ "action": "in-transit" }
+{ "action": "receive", "items": [{ "productId": "...", "quantityReceived": 8 }] }
+{ "action": "cancel", "reason": "Incorrect items" }
+```
+
+**Receive payload notes:**
+- `quantityReceived` is the **delta for this call**, not a cumulative total.
+- You may pass `itemId` instead of `productId` for precise matching.
+
+**Action Enum:**
+| Value | Description |
+|-------|-------------|
+| `approve` | Validate availability (no stock movement) |
+| `dispatch` | Decrement sender stock |
+| `in-transit` | Mark shipment in transit |
+| `receive` | Increment receiver stock |
+| `cancel` | Cancel (draft/approved only) |
+
+**Action Responses (200):**
+
+Approve:
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "transfer_id",
+    "status": "approved"
+  }
+}
+```
+
+Dispatch:
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "transfer_id",
+    "status": "dispatched",
+    "dispatchMovements": ["movement_id_1"]
+  }
+}
+```
+
+Receive:
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "transfer_id",
+    "status": "received",
+    "receiveMovements": ["movement_id_2"]
+  }
+}
+```
+
+Cancel:
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "transfer_id",
+    "status": "cancelled"
+  }
+}
+```
+
 ## Transfer Document Structure
 
 ```json
@@ -92,6 +174,56 @@ The server auto-detects the format and routes appropriately.
 }
 ```
 
+## Create Transfer (Draft)
+
+```http
+POST /api/v1/inventory/transfers
+```
+
+```json
+{
+  "receiverBranchId": "SUB_BRANCH_ID",
+  "documentType": "delivery_challan",
+  "items": [
+    { "productId": "PRODUCT_ID", "variantSku": "SKU-RED-M", "quantity": 10 }
+  ],
+  "remarks": "Weekly replenishment"
+}
+```
+
+## List Transfers (MongoKit Pagination)
+
+```http
+GET /api/v1/inventory/transfers
+```
+
+**Offset pagination response (use `page`):**
+```json
+{
+  "success": true,
+  "method": "offset",
+  "docs": [],
+  "total": 120,
+  "pages": 6,
+  "page": 1,
+  "limit": 20,
+  "hasNext": true,
+  "hasPrev": false
+}
+```
+
+**Keyset pagination response (use `after`/`cursor`):**
+```json
+{
+  "success": true,
+  "method": "keyset",
+  "docs": [],
+  "limit": 20,
+  "hasMore": true,
+  "next": "eyJ2IjoxLCJ0Ijoi..."
+}
+```
+
 ## Transfer Fields Reference
 
 | Field | Type | Description |
@@ -156,6 +288,9 @@ draft ──→ approved ──→ dispatched ──→ in_transit ──→ rec
 | `received` | Receiver incremented | Full receipt confirmed |
 | `partial_received` | Receiver incremented (partial) | Some items received, discrepancy noted |
 | `cancelled` | None (or reversed) | Transfer aborted |
+
+**Status Enum:**
+`draft`, `approved`, `dispatched`, `in_transit`, `received`, `partial_received`, `cancelled`
 
 ## Transfer Types
 

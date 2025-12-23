@@ -7,7 +7,7 @@ import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
  * Field Rules:
  * - reservedQuantity: systemManaged (updated by order system)
  */
-const { crudSchemas } = buildCrudSchemasFromModel(StockEntry, {
+const crudSchemas = buildCrudSchemasFromModel(StockEntry, {
   strictAdditionalProperties: true,
   fieldRules: {
     reservedQuantity: { systemManaged: true },

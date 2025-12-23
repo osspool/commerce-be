@@ -6,6 +6,7 @@ import { stockService } from '../../core/index.js';
 import { getVatConfig } from '../vat.utils.js';
 import { generateVatInvoiceForBranch } from '../vatInvoice.service.js';
 import { createVerifiedOperationalExpenseTransaction } from '#modules/transaction/utils/operational-transactions.js';
+import Transaction from '#modules/transaction/transaction.model.js';
 
 /**
  * Fulfill Order Workflow

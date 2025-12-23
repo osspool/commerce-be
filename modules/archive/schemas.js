@@ -8,7 +8,7 @@ import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
  * - All fields are systemManaged (archives are created by /run endpoint)
  * - Users can only view, download, or purge (superadmin) archives
  */
-const { crudSchemas } = buildCrudSchemasFromModel(Archive, {
+const crudSchemas = buildCrudSchemasFromModel(Archive, {
   fieldRules: {
     type: { systemManaged: true },
     organizationId: { systemManaged: true },

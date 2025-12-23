@@ -8,7 +8,7 @@ import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
  * - createdAt, updatedAt: systemManaged (auto-generated)
  * - publishedAt: systemManaged (set on status change to published)
  */
-const { crudSchemas } = buildCrudSchemasFromModel(CMS, {
+const crudSchemas = buildCrudSchemasFromModel(CMS, {
   strictAdditionalProperties: false, // Allow flexible content field
   fieldRules: {
     publishedAt: { systemManaged: true },

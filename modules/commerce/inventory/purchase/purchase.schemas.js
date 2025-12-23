@@ -1,126 +1,145 @@
-/**
- * Purchase Validation Schemas
- *
- * JSON Schema definitions for purchase (stock entry) API endpoints.
- */
+import Purchase from './purchase.model.js';
+import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
 
-const purchaseItemSchema = {
-  type: 'object',
-  properties: {
-    productId: { type: 'string', description: 'Product ID' },
-    variantSku: { type: 'string', nullable: true, description: 'Variant SKU (null for simple products)' },
-    // Allow quantity=0 for cost-only corrections (service supports this).
-    quantity: { type: 'integer', minimum: 0, description: 'Quantity to add (0 allowed for cost-only correction when costPrice is provided)' },
-    costPrice: { type: 'number', minimum: 0, description: 'Cost price per unit' },
+const schemaParts = buildCrudSchemasFromModel(Purchase, {
+  strictAdditionalProperties: true,
+  fieldRules: {
+    invoiceNumber: { systemManaged: true },
+    branch: { systemManaged: true },
+    status: { systemManaged: true },
+    paymentStatus: { systemManaged: true },
+    paidAmount: { systemManaged: true },
+    dueAmount: { systemManaged: true },
+    subTotal: { systemManaged: true },
+    discountTotal: { systemManaged: true },
+    taxTotal: { systemManaged: true },
+    grandTotal: { systemManaged: true },
+    transactionIds: { systemManaged: true },
+    statusHistory: { systemManaged: true },
+    approvedBy: { systemManaged: true },
+    approvedAt: { systemManaged: true },
+    receivedBy: { systemManaged: true },
+    receivedAt: { systemManaged: true },
+    createdBy: { systemManaged: true },
+    updatedBy: { systemManaged: true },
   },
-  required: ['productId', 'quantity'],
+  query: {
+    filterableFields: {
+      supplier: 'ObjectId',
+      branch: 'ObjectId',
+      status: 'string',
+      paymentStatus: 'string',
+      invoiceNumber: 'string',
+      purchaseOrderNumber: 'string',
+      createdAt: 'date',
+    },
+  },
+});
+
+const crudSchemas = schemaParts.crudSchemas || {
+  create: { body: schemaParts.createBody },
+  update: { body: schemaParts.updateBody },
+  get: { params: schemaParts.params },
+  list: { querystring: schemaParts.listQuery },
+  remove: { params: schemaParts.params },
 };
 
-// Record Purchase
-export const recordPurchaseSchema = {
+export const purchaseSchemaOptions = {
+  query: {
+    allowedPopulate: ['supplier', 'branch'],
+    filterableFields: {
+      supplier: 'ObjectId',
+      branch: 'ObjectId',
+      status: 'string',
+      paymentStatus: 'string',
+      invoiceNumber: 'string',
+      purchaseOrderNumber: 'string',
+      createdAt: 'date',
+    },
+  },
+};
+
+export const purchaseEntitySchema = schemaParts.entitySchema || {
+  type: 'object',
+  additionalProperties: true,
+};
+
+const purchaseItemInputSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    variantSku: { type: 'string', nullable: true },
+    quantity: { type: 'number', minimum: 0 },
+    costPrice: { type: 'number', minimum: 0 },
+    discount: { type: 'number', minimum: 0 },
+    taxRate: { type: 'number', minimum: 0, maximum: 100 },
+    notes: { type: 'string' },
+  },
+  required: ['productId', 'quantity', 'costPrice'],
+};
+
+export const createPurchaseSchema = {
   body: {
     type: 'object',
     properties: {
-      branchId: {
-        type: 'string',
-        description: 'Head office branch ID (optional - defaults to head office)',
-      },
+      supplierId: { type: 'string' },
+      branchId: { type: 'string' },
+      purchaseOrderNumber: { type: 'string' },
+      invoiceDate: { type: 'string', format: 'date-time' },
+      paymentTerms: { type: 'string', enum: ['cash', 'credit'] },
+      creditDays: { type: 'number', minimum: 0 },
+      dueDate: { type: 'string', format: 'date-time' },
+      notes: { type: 'string' },
       items: {
         type: 'array',
-        items: purchaseItemSchema,
         minItems: 1,
-        description: 'Items to add to stock',
+        items: purchaseItemInputSchema,
       },
-      purchaseOrderNumber: {
-        type: 'string',
-        description: 'Purchase order reference number',
-      },
-      supplierName: {
-        type: 'string',
-        description: 'Supplier name',
-      },
-      supplierInvoice: {
-        type: 'string',
-        description: 'Supplier invoice number',
-      },
-      notes: {
-        type: 'string',
-        description: 'Additional notes',
-      },
-      // User-controlled transaction creation (Stripe pattern)
-      createTransaction: {
-        type: 'boolean',
-        default: false,
-        description: 'Create expense transaction for accounting. Default: false (manufacturing/homemade products typically skip this)',
-      },
-      transactionData: {
+      autoApprove: { type: 'boolean', default: false },
+      autoReceive: { type: 'boolean', default: false },
+      payment: {
         type: 'object',
-        description: 'Transaction details (only used if createTransaction: true)',
         properties: {
-          paymentMethod: {
-            type: 'string',
-            enum: ['cash', 'bkash', 'nagad', 'rocket', 'bank_transfer', 'card'],
-            default: 'cash',
-          },
-          reference: {
-            type: 'string',
-            description: 'Payment reference (e.g., bank transfer ID)',
-          },
-          accountNumber: {
-            type: 'string',
-            description: 'Bank account number (for bank transfers)',
-          },
-          walletNumber: {
-            type: 'string',
-            description: 'Mobile wallet number (for MFS payments)',
-          },
+          amount: { type: 'number', minimum: 0 },
+          method: { type: 'string', enum: ['cash', 'bkash', 'nagad', 'rocket', 'bank_transfer', 'card'] },
+          reference: { type: 'string' },
+          accountNumber: { type: 'string' },
+          walletNumber: { type: 'string' },
+          bankName: { type: 'string' },
+          accountName: { type: 'string' },
+          proofUrl: { type: 'string' },
+          transactionDate: { type: 'string', format: 'date-time' },
+          notes: { type: 'string' },
         },
       },
     },
     required: ['items'],
   },
-  response: {
-    201: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean' },
-        branch: { type: 'object' },
-        items: { type: 'array' },
-        summary: { type: 'object' },
-        errors: { type: 'array' },
-        transaction: { type: 'object', nullable: true },
+};
+
+export const updatePurchaseSchema = {
+  body: {
+    type: 'object',
+    properties: {
+      supplierId: { type: 'string' },
+      purchaseOrderNumber: { type: 'string' },
+      invoiceDate: { type: 'string', format: 'date-time' },
+      paymentTerms: { type: 'string', enum: ['cash', 'credit'] },
+      creditDays: { type: 'number', minimum: 0 },
+      dueDate: { type: 'string', format: 'date-time' },
+      notes: { type: 'string' },
+      items: {
+        type: 'array',
+        minItems: 1,
+        items: purchaseItemInputSchema,
       },
     },
   },
 };
 
-// Add Single Stock Item
-export const addStockSchema = {
-  body: {
-    type: 'object',
-    properties: {
-      productId: { type: 'string' },
-      variantSku: { type: 'string', nullable: true },
-      quantity: { type: 'integer', minimum: 1 },
-      costPrice: { type: 'number', minimum: 0 },
-      branchId: { type: 'string' },
-      notes: { type: 'string' },
-    },
-    required: ['productId', 'quantity'],
-  },
-};
+export const listPurchasesSchema = crudSchemas.list;
+export const getPurchaseSchema = crudSchemas.get;
 
-// Get Purchase History
-export const purchaseHistorySchema = {
-  querystring: {
-    type: 'object',
-    properties: {
-      branchId: { type: 'string' },
-      productId: { type: 'string' },
-      startDate: { type: 'string', format: 'date' },
-      endDate: { type: 'string', format: 'date' },
-      page: { type: 'integer', minimum: 1, default: 1 },
-      limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
-    },
-  },
+export default {
+  ...crudSchemas,
 };

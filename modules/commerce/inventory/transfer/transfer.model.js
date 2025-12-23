@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import InventoryCounter from '../inventoryCounter.model.js';
 
 const { Schema } = mongoose;
 
@@ -294,18 +295,7 @@ transferSchema.statics.generateChallanNumber = async function() {
   const now = new Date();
   const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
   const prefix = `CHN-${yearMonth}-`;
-
-  const latest = await this.findOne({ challanNumber: { $regex: `^${prefix}` } })
-    .sort({ challanNumber: -1 })
-    .select('challanNumber')
-    .lean();
-
-  let sequence = 1;
-  if (latest?.challanNumber) {
-    const lastSeq = parseInt(latest.challanNumber.split('-').pop(), 10);
-    if (!isNaN(lastSeq)) sequence = lastSeq + 1;
-  }
-
+  const sequence = await InventoryCounter.nextSeq('CHN', yearMonth);
   return `${prefix}${String(sequence).padStart(4, '0')}`;
 };
 

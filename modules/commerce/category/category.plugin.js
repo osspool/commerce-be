@@ -49,6 +49,14 @@ async function categoryPlugin(fastify) {
                         },
                     },
                 },
+                {
+                    method: 'POST',
+                    path: '/sync-product-count',
+                    summary: 'Sync product counts for all categories',
+                    handler: categoryController.syncProductCounts,
+                    authRoles: permissions.categories.syncCounts,
+                    responseSchema: categorySchemas.syncProductCountResponse,
+                },
             ],
         });
 

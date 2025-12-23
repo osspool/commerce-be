@@ -279,6 +279,6 @@ export const fulfillOrderSchema = {
   },
 };
 
-const { crudSchemas } = buildCrudSchemasFromModel(Order, orderSchemaOptions);
+const crudSchemas = buildCrudSchemasFromModel(Order, orderSchemaOptions);
 
 export default crudSchemas;

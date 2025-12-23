@@ -1,0 +1,100 @@
+{
+  "name": "@classytic/media-kit",
+  "version": "2.0.4",
+  "description": "Production-grade media management powered by mongokit - smart pagination, caching, events, and pluggable storage",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./providers/s3": {
+      "types": "./dist/providers/s3.provider.d.ts",
+      "default": "./dist/providers/s3.provider.js"
+    },
+    "./providers/gcs": {
+      "types": "./dist/providers/gcs.provider.d.ts",
+      "default": "./dist/providers/gcs.provider.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cleanup": "npx tsx tests/cleanup-s3-test-files.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test && npm run typecheck",
+    "publish:dry": "npm publish --dry-run --access public",
+    "publish:npm": "npm publish --access public",
+    "release": "npm run build && npm run test && npm run typecheck && npm publish --access public",
+    "release:patch": "npm version patch && npm run release",
+    "release:minor": "npm version minor && npm run release",
+    "release:major": "npm version major && npm run release"
+  },
+  "keywords": [
+    "media",
+    "mongoose",
+    "mongokit",
+    "s3",
+    "gcs",
+    "image-upload",
+    "file-management",
+    "mongodb",
+    "storage",
+    "multitenancy",
+    "pagination",
+    "cursor-pagination",
+    "repository-pattern"
+  ],
+  "author": "Classytic",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/classytic/media-kit"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-s3": ">=3.0.0",
+    "@classytic/mongokit": ">=3.0.0",
+    "@google-cloud/storage": ">=7.0.0",
+    "mongoose": "^8.0.0 || ^9.0.0",
+    "sharp": ">=0.33.0"
+  },
+  "peerDependenciesMeta": {
+    "sharp": {
+      "optional": true
+    },
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "@google-cloud/storage": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "mime-types": "^2.1.35"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.943.0",
+    "@aws-sdk/s3-request-presigner": "^3.943.0",
+    "@classytic/mongokit": "^3.0.0",
+    "@google-cloud/storage": "^7.18.0",
+    "@types/mime-types": "^2.1.4",
+    "@types/node": "^20.0.0",
+    "dotenv": "^17.2.3",
+    "mongoose": "^9.0.1",
+    "sharp": "^0.34.5",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

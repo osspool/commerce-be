@@ -8,7 +8,7 @@ import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
  * - All execution fields are systemManaged (jobs are managed by queue system)
  * - Users can view jobs but cannot create/update directly
  */
-const { crudSchemas } = buildCrudSchemasFromModel(Job, {
+const crudSchemas = buildCrudSchemasFromModel(Job, {
   fieldRules: {
     status: { systemManaged: true },
     lastRun: { systemManaged: true },

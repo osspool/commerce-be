@@ -32,7 +32,41 @@ export const inventory = {
   /**
    * View purchase history
    */
-  purchaseView: [roles.ADMIN, roles.SUPERADMIN, roles.STORE_MANAGER],
+  purchaseView: [...groups.inventoryStaff, ...groups.financeStaff],
+
+  /**
+   * Approve purchase invoices
+   */
+  purchaseApprove: groups.warehouseStaff,
+
+  /**
+   * Receive stock for purchases
+   */
+  purchaseReceive: groups.warehouseStaff,
+
+  /**
+   * Record supplier payments
+   */
+  purchasePay: groups.financeStaff,
+
+  /**
+   * Cancel draft/approved purchases
+   */
+  purchaseCancel: groups.warehouseStaff,
+
+  // ============================================
+  // SUPPLIERS
+  // ============================================
+
+  /**
+   * Create/update suppliers
+   */
+  supplierManage: groups.warehouseStaff,
+
+  /**
+   * View suppliers
+   */
+  supplierView: groups.inventoryStaff,
 
   // ============================================
   // TRANSFERS (Challan Operations)

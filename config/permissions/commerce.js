@@ -8,6 +8,7 @@ export const products = {
   remove: groups.adminOnly,
   deleted: groups.adminOnly,
   restore: groups.adminOnly,
+  syncStock: groups.inventoryStaff,
 };
 
 export const categories = {
@@ -18,6 +19,7 @@ export const categories = {
   // createCrudRouter expects `remove` for DELETE /:id
   remove: groups.adminOnly,
   admin: groups.adminOnly,
+  syncCounts: groups.inventoryStaff,
 };
 
 export const coupons = {
@@ -74,4 +76,3 @@ export const pos = {
 };
 
 export default { products, categories, coupons, orders, cart, reviews, branches, pos };
-

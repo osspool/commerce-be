@@ -34,7 +34,7 @@
     "@classytic/bd-areas": "^1.0.0",
     "@classytic/bd-logistics": "^1.0.3",
     "@classytic/media-kit": "^2.0.0",
-    "@classytic/mongokit": "^3.0.4",
+    "@classytic/mongokit": "^3.0.6",
     "@classytic/mongoose-slug-plugin": "^1.0.1",
     "@classytic/notifications": "^0.0.1",
     "@classytic/revenue": "^1.0.0",

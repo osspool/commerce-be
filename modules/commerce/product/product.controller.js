@@ -3,6 +3,7 @@ import productRepository from './product.repository.js';
 import { productSchemaOptions } from './product.schemas.js';
 import { filterCostPriceByRole } from './product.utils.js';
 import { queryParser } from '@classytic/mongokit/utils';
+import { syncProduct } from '../inventory/stockSync.util.js';
 
 class ProductController extends BaseController {
   constructor() {
@@ -12,6 +13,7 @@ class ProductController extends BaseController {
     this.delete = this.delete.bind(this);
     this.restore = this.restore.bind(this);
     this.getDeleted = this.getDeleted.bind(this);
+    this.syncStock = this.syncStock.bind(this);
   }
 
   // Override getAll to filter cost prices
@@ -120,6 +122,31 @@ class ProductController extends BaseController {
     }
 
     return reply.code(200).send({ success: true, ...result });
+  }
+
+  /**
+   * Sync product.quantity from StockEntry totals
+   * POST /products/:id/sync-stock
+   */
+  async syncStock(req, reply) {
+    const { id } = req.params;
+    const product = await productRepository.getById(id, { lean: true, select: '_id quantity costPrice' });
+    if (!product) {
+      return reply.code(404).send({ success: false, error: 'Product not found' });
+    }
+
+    const result = await syncProduct(id);
+
+    return reply.code(200).send({
+      success: true,
+      data: {
+        productId: id,
+        totalQuantity: result.totalQuantity || 0,
+        variantQuantities: result.variantQuantities || [],
+        synced: result.synced === true,
+        errors: result.errors || [],
+      },
+    });
   }
 }
 

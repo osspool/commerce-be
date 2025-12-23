@@ -360,11 +360,36 @@ class InventoryController extends BaseController {
   }
 
   async getMovements(req, reply) {
-    const { productId, branchId, type, startDate, endDate, page, limit } = req.query;
+    const {
+      productId,
+      product,
+      branchId,
+      branch,
+      type,
+      startDate,
+      endDate,
+      page,
+      limit,
+      sort,
+      after,
+      cursor,
+    } = req.query;
 
     const result = await this.service.getMovements(
-      { productId, branchId, type, startDate, endDate },
-      { page: parseInt(page) || 1, limit: parseInt(limit) || 50 }
+      {
+        productId: productId || product,
+        branchId: branchId || branch,
+        type,
+        startDate,
+        endDate,
+      },
+      {
+        page: page ? parseInt(page) : undefined,
+        limit: limit ? parseInt(limit) : undefined,
+        sort,
+        after,
+        cursor,
+      }
     );
 
     return reply.send({

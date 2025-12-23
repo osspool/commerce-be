@@ -8,14 +8,17 @@ Every stock change creates an immutable `StockMovement` record.
 
 | Type | Description | Triggered By |
 |------|-------------|--------------|
-| `purchase` | Stock received from supplier | `POST /inventory/purchases` |
+| `purchase` | Stock received from supplier | `POST /api/v1/inventory/purchases` |
 | `sale` | Stock decremented for order | POS/Web order fulfillment |
 | `return` | Stock restored | Order cancellation/return |
-| `adjustment` | Manual correction | `POST /inventory/adjustments` |
+| `adjustment` | Manual correction | `POST /api/v1/inventory/adjustments` |
 | `transfer_in` | Received from another branch | Transfer (challan) receive |
 | `transfer_out` | Sent to another branch | Transfer (challan) dispatch |
 | `initial` | Initial stock setup | Bulk import / first-time setup |
 | `recount` | Physical inventory count | Adjustment with reason containing "recount" |
+
+**Movement Type Enum:**
+`purchase`, `sale`, `return`, `adjustment`, `transfer_in`, `transfer_out`, `initial`, `recount`
 
 ## Query Endpoint
 
@@ -34,12 +37,15 @@ GET /api/v1/inventory/movements
 | `endDate` | ISO string | Filter by date range end |
 | `page` | number | Page number (default: 1) |
 | `limit` | number | Items per page (default: 50) |
+| `sort` | string | Sort fields (default: `-createdAt`) |
+| `after` / `cursor` | string | Cursor token for keyset pagination |
 
 ### Response
 
 ```json
 {
   "success": true,
+  "method": "offset",
   "docs": [
     {
       "_id": "movement_id",
@@ -72,14 +78,24 @@ GET /api/v1/inventory/movements
       "createdAt": "2025-01-15T10:30:00.000Z"
     }
   ],
-  "pagination": {
-    "page": 1,
-    "limit": 50,
-    "total": 150,
-    "totalPages": 3,
-    "hasNext": true,
-    "hasPrev": false
-  }
+  "total": 150,
+  "pages": 3,
+  "page": 1,
+  "limit": 50,
+  "hasNext": true,
+  "hasPrev": false
+}
+```
+
+**Keyset response (use `after`/`cursor` or `sort` without `page`):**
+```json
+{
+  "success": true,
+  "method": "keyset",
+  "docs": [],
+  "limit": 50,
+  "hasMore": true,
+  "next": "eyJ2IjoxLCJ0Ijoi..."
 }
 ```
 
@@ -94,7 +110,8 @@ Movements are linked to source documents:
 | `Order` | POS or web order |
 | `Transfer` | Transfer document (legacy) |
 | `Challan` | Transfer/challan document (current) |
-| `PurchaseOrder` | Purchase record |
+| `Purchase` | Purchase invoice |
+| `PurchaseOrder` | Legacy purchase record |
 | `Manual` | Manual adjustment |
 
 ## Data Retention

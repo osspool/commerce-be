@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import InventoryCounter from '../inventoryCounter.model.js';
 
 const { Schema } = mongoose;
 
@@ -246,18 +247,7 @@ stockRequestSchema.statics.generateRequestNumber = async function() {
   const now = new Date();
   const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
   const prefix = `REQ-${yearMonth}-`;
-
-  const latest = await this.findOne({ requestNumber: { $regex: `^${prefix}` } })
-    .sort({ requestNumber: -1 })
-    .select('requestNumber')
-    .lean();
-
-  let sequence = 1;
-  if (latest?.requestNumber) {
-    const lastSeq = parseInt(latest.requestNumber.split('-').pop(), 10);
-    if (!isNaN(lastSeq)) sequence = lastSeq + 1;
-  }
-
+  const sequence = await InventoryCounter.nextSeq('REQ', yearMonth);
   return `${prefix}${String(sequence).padStart(4, '0')}`;
 };
 

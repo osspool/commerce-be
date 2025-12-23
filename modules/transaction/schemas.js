@@ -44,6 +44,6 @@ export const transactionSchemaOptions = {
   },
 };
 
-const { crudSchemas } = buildCrudSchemasFromModel(Transaction, transactionSchemaOptions);
+const crudSchemas = buildCrudSchemasFromModel(Transaction, transactionSchemaOptions);
 
 export default crudSchemas;

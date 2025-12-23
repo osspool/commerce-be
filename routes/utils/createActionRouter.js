@@ -38,6 +38,7 @@
  */
 
 import { registerPath } from '#common/docs/apiDocs.js';
+import { idempotencyService } from '#modules/commerce/core/index.js';
 
 /**
  * Create action-based state transition endpoint
@@ -154,6 +155,10 @@ export function createActionRouter(fastify, config) {
   }, async (req, reply) => {
     const { action, ...data } = req.body;
     const { id } = req.params;
+    const rawIdempotencyKey = req.headers['idempotency-key'];
+    const idempotencyKey = Array.isArray(rawIdempotencyKey)
+      ? rawIdempotencyKey[0]
+      : rawIdempotencyKey;
 
     // Validate action exists
     const handler = actions[action];
@@ -185,14 +190,35 @@ export function createActionRouter(fastify, config) {
       }
     }
 
-    // Execute the action handler
     try {
+      // Idempotency check (optional)
+      if (idempotencyKey) {
+        const payloadForHash = {
+          action,
+          id,
+          data,
+          userId: req.user?._id?.toString?.() || null,
+        };
+
+        const { isNew, existingResult } = await idempotencyService.check(idempotencyKey, payloadForHash);
+        if (!isNew && existingResult) {
+          return reply.send({
+            success: true,
+            data: existingResult,
+            cached: true,
+          });
+        }
+      }
+
+      // Execute the action handler
       const result = await handler(id, data, req);
+      await idempotencyService.complete(idempotencyKey, result);
       return reply.send({
         success: true,
         data: result,
       });
     } catch (error) {
+      await idempotencyService.fail(idempotencyKey, error);
       // Handle known error types
       const statusCode = error.statusCode || error.status || 500;
       const errorCode = error.code || 'ACTION_FAILED';

@@ -27,15 +27,15 @@ GET /api/v1/pos/products
 | Param | Type | Description |
 |-------|------|-------------|
 | branchId | string | Branch ID (uses default if omitted) |
-| category | string | Filter by category |
+| category | string | Category slug filter (matches `product.category` or `product.parentCategory`) |
 | search | string | Search name, SKU, or barcode |
 | inStockOnly | boolean | Only in-stock products |
 | lowStockOnly | boolean | Only low stock products |
 | sort | string | Sort: `name`, `-createdAt`, `basePrice` |
-| after | string | Pagination cursor |
-| limit | number | Items per page (default: 50) |
+| after | string | Keyset cursor (MongoKit) |
+| limit | number | Items per page (default: 50, max: 100) |
 
-**Response:**
+**Response (MongoKit keyset pagination):**
 
 ```json
 {
@@ -71,6 +71,22 @@ GET /api/v1/pos/products
 ```
 
 **Note:** `costPrice` is role-protected and may be omitted/filtered in responses for non-privileged users.
+
+## Payment Methods Source (Platform Config)
+
+POS payment options are **not hardcoded**. Load them from platform config and map to POS `payment.method`.
+
+```http
+GET /api/v1/platform/config?select=paymentMethods
+```
+
+**Mapping rule:**
+- `type= mfs` → use `provider` as `payment.method` (`bkash`, `nagad`, `rocket`, `upay`)
+- `type= bank_transfer` → `payment.method = "bank_transfer"`
+- `type= card` → `payment.method = "card"`
+- `type= cash` → `payment.method = "cash"`
+
+Only send methods where `isActive=true`.
 
 ---
 
@@ -165,7 +181,7 @@ POST /api/v1/pos/orders
 
 | Field | Type | Description |
 |-------|------|-------------|
-| method | string | `cash`, `bkash`, `nagad`, `card` |
+| method | string | `cash`, `bkash`, `nagad`, `rocket`, `bank_transfer`, `card` (from platform config) |
 | amount | number | Payment amount (defaults to order total) |
 | reference | string | Transaction ID (for MFS/card payments) |
 
@@ -420,7 +436,7 @@ Important rules (server enforced):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| paymentMethod | string | Payment method (cash, bkash, nagad, bank, etc.) |
+| paymentMethod | string | Payment method (`cash`, `bkash`, `nagad`, `rocket`, `bank_transfer`) |
 | reference | string | Transaction reference ID |
 | walletNumber | string | Mobile wallet number (for MFS payments) |
 | walletType | string | Wallet type (personal/merchant) |

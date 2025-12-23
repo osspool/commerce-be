@@ -60,6 +60,7 @@ const stockEntrySchema = new Schema({
   // Reorder alerts
   reorderPoint: { type: Number, default: 0 },
   reorderQuantity: { type: Number, default: 0 },
+  needsReorder: { type: Boolean, default: false, index: true },
 
   // Active status (synced from product variant isActive)
   // When variant is disabled, stock entry is marked inactive
@@ -96,15 +97,11 @@ stockEntrySchema.index({ branch: 1, variantSku: 1 });
 stockEntrySchema.index({ branch: 1, product: 1, variantSku: 1 });
 
 // Low stock alerts query
-stockEntrySchema.index({ quantity: 1, reorderPoint: 1 });
+stockEntrySchema.index({ branch: 1, needsReorder: 1 });
 
 // Virtuals
 stockEntrySchema.virtual('availableQuantity').get(function() {
   return Math.max(0, this.quantity - this.reservedQuantity);
-});
-
-stockEntrySchema.virtual('needsReorder').get(function() {
-  return this.reorderPoint > 0 && this.quantity <= this.reorderPoint;
 });
 
 stockEntrySchema.set('toJSON', { virtuals: true });
