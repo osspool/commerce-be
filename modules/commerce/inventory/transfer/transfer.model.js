@@ -55,6 +55,9 @@ const transferItemSchema = new Schema({
     type: Map,
     of: String,
   },
+  cartonNumber: {
+    type: String,
+  },
   quantity: {
     type: Number,
     required: true,

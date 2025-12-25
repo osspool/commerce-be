@@ -26,7 +26,6 @@ export const splitSchema = new Schema(
     recipientId: {
       type: String,
       required: true,
-      index: true,
     },
     recipientType: {
       type: String,
@@ -64,7 +63,6 @@ export const splitSchema = new Schema(
       type: String,
       enum: SPLIT_STATUS_VALUES,
       default: SPLIT_STATUS.PENDING,
-      index: true,
     },
     dueDate: {
       type: Date,
@@ -88,4 +86,3 @@ export const splitSchema = new Schema(
 );
 
 export default splitSchema;
-

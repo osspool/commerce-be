@@ -6,12 +6,22 @@ import StockMovement from '../stockMovement.model.js';
 import branchRepository from '../../branch/branch.repository.js';
 import inventoryService from '../inventory.service.js';
 import logger from '#common/utils/logger.js';
+import { createStateMachine } from '#common/utils/state-machine.js';
 
 function createStatusError(message, statusCode = 400) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
 }
+
+const transferState = createStateMachine('Transfer', {
+  update: [TransferStatus.DRAFT],
+  approve: [TransferStatus.DRAFT],
+  dispatch: [TransferStatus.APPROVED],
+  'in-transit': [TransferStatus.DISPATCHED],
+  receive: [TransferStatus.DISPATCHED, TransferStatus.IN_TRANSIT, TransferStatus.PARTIAL_RECEIVED],
+  cancel: [TransferStatus.DRAFT, TransferStatus.APPROVED],
+});
 
 /**
  * Transfer Service
@@ -162,9 +172,7 @@ class TransferService {
     if (!transfer) {
       throw createStatusError('Transfer not found', 404);
     }
-    if (transfer.status !== TransferStatus.DRAFT) {
-      throw createStatusError('Only draft transfers can be updated');
-    }
+    transferState.assert('update', transfer.status, createStatusError, 'Only draft transfers can be updated');
 
     const { items, remarks, documentType, transport } = data;
 
@@ -191,9 +199,7 @@ class TransferService {
     if (!transfer) {
       throw createStatusError('Transfer not found', 404);
     }
-    if (transfer.status !== TransferStatus.DRAFT) {
-      throw createStatusError('Only draft transfers can be approved');
-    }
+    transferState.assert('approve', transfer.status, createStatusError, 'Only draft transfers can be approved');
 
     // Validate stock availability at sender (head office)
     const availability = await inventoryService.checkAvailability(
@@ -244,9 +250,7 @@ class TransferService {
       if (!transfer) {
         throw createStatusError('Transfer not found', 404);
       }
-      if (transfer.status !== TransferStatus.APPROVED) {
-        throw createStatusError('Only approved transfers can be dispatched');
-      }
+      transferState.assert('dispatch', transfer.status, createStatusError, 'Only approved transfers can be dispatched');
 
       // Prepare items for decrement
       const stockItems = transfer.items.map(item => ({
@@ -305,35 +309,25 @@ class TransferService {
       return { transfer, decrementedItems: decrementResult.decrementedItems || [] };
     };
 
-    let session;
-    try {
-      session = await mongoose.startSession();
-      session.startTransaction();
+    const { transfer, decrementedItems, usedSession } = await transferRepository.withTransaction(
+      async (session) => {
+        const { transfer, decrementedItems } = await runDispatch(session);
+        return { transfer, decrementedItems, usedSession: Boolean(session) };
+      },
+      {
+        allowFallback: true,
+        onFallback: (error) => {
+          logger.warn({ err: error }, 'Transactions not supported; falling back to non-transactional dispatch');
+        },
+      }
+    );
 
-      const { transfer, decrementedItems } = await runDispatch(session);
-      await session.commitTransaction();
+    if (usedSession) {
       await inventoryService.emitStockEvents(decrementedItems, true);
-
-      logger.info({ transferId, challanNumber: transfer.challanNumber }, 'Transfer dispatched');
-      return transfer;
-    } catch (error) {
-      if (session) {
-        await session.abortTransaction().catch(() => {});
-      }
-
-      if (inventoryService.isTransactionNotSupportedError(error)) {
-        logger.warn({ err: error }, 'Transactions not supported; falling back to non-transactional dispatch');
-        const { transfer } = await runDispatch(null);
-        logger.info({ transferId, challanNumber: transfer.challanNumber }, 'Transfer dispatched');
-        return transfer;
-      }
-
-      throw error;
-    } finally {
-      if (session) {
-        session.endSession();
-      }
     }
+
+    logger.info({ transferId, challanNumber: transfer.challanNumber }, 'Transfer dispatched');
+    return transfer;
   }
 
   /**
@@ -347,9 +341,7 @@ class TransferService {
     if (!transfer) {
       throw createStatusError('Transfer not found', 404);
     }
-    if (transfer.status !== TransferStatus.DISPATCHED) {
-      throw createStatusError('Only dispatched transfers can be marked in transit');
-    }
+    transferState.assert('in-transit', transfer.status, createStatusError, 'Only dispatched transfers can be marked in transit');
 
     transfer.status = TransferStatus.IN_TRANSIT;
     transfer.statusHistory.push({
@@ -381,9 +373,12 @@ class TransferService {
       // Allow multiple partial receipts:
       // - dispatched/in_transit: first receipt
       // - partial_received: subsequent receipts until complete
-      if (![TransferStatus.DISPATCHED, TransferStatus.IN_TRANSIT, TransferStatus.PARTIAL_RECEIVED].includes(transfer.status)) {
-        throw createStatusError('Only dispatched, in-transit, or partially received transfers can be received');
-      }
+      transferState.assert(
+        'receive',
+        transfer.status,
+        createStatusError,
+        'Only dispatched, in-transit, or partially received transfers can be received'
+      );
 
       // Process received quantities
       let allReceived = true;
@@ -474,43 +469,29 @@ class TransferService {
       return { transfer, restoredItems: restoreResult.restoredItems || [] };
     };
 
-    let session;
-    try {
-      session = await mongoose.startSession();
-      session.startTransaction();
+    const { transfer, restoredItems, usedSession } = await transferRepository.withTransaction(
+      async (session) => {
+        const { transfer, restoredItems } = await runReceive(session);
+        return { transfer, restoredItems, usedSession: Boolean(session) };
+      },
+      {
+        allowFallback: true,
+        onFallback: (error) => {
+          logger.warn({ err: error }, 'Transactions not supported; falling back to non-transactional receive');
+        },
+      }
+    );
 
-      const { transfer, restoredItems } = await runReceive(session);
-      await session.commitTransaction();
+    if (usedSession) {
       await inventoryService.emitStockEvents(restoredItems, false);
-
-      logger.info({
-        transferId,
-        challanNumber: transfer.challanNumber,
-        status: transfer.status,
-      }, 'Transfer received');
-      return transfer;
-    } catch (error) {
-      if (session) {
-        await session.abortTransaction().catch(() => {});
-      }
-
-      if (inventoryService.isTransactionNotSupportedError(error)) {
-        logger.warn({ err: error }, 'Transactions not supported; falling back to non-transactional receive');
-        const { transfer } = await runReceive(null);
-        logger.info({
-          transferId,
-          challanNumber: transfer.challanNumber,
-          status: transfer.status,
-        }, 'Transfer received');
-        return transfer;
-      }
-
-      throw error;
-    } finally {
-      if (session) {
-        session.endSession();
-      }
     }
+
+    logger.info({
+      transferId,
+      challanNumber: transfer.challanNumber,
+      status: transfer.status,
+    }, 'Transfer received');
+    return transfer;
   }
 
   /**
@@ -525,9 +506,12 @@ class TransferService {
     if (!transfer) {
       throw createStatusError('Transfer not found', 404);
     }
-    if (![TransferStatus.DRAFT, TransferStatus.APPROVED].includes(transfer.status)) {
-      throw createStatusError('Cannot cancel a dispatched or received transfer. Stock has already been moved.');
-    }
+    transferState.assert(
+      'cancel',
+      transfer.status,
+      createStatusError,
+      'Cannot cancel a dispatched or received transfer. Stock has already been moved.'
+    );
 
     transfer.status = TransferStatus.CANCELLED;
     transfer.statusHistory.push({
@@ -691,6 +675,7 @@ class TransferService {
 
       const stockKey = `${productId}_${item.variantSku || 'null'}`;
       const senderStockCost = stockEntryCostMap.get(stockKey);
+      const cartonNumber = item.cartonNumber ?? item.cartonNo ?? item.carton;
 
       return {
         product: productId,
@@ -698,6 +683,7 @@ class TransferService {
         productSku: product?.sku,
         variantSku: item.variantSku || null,
         variantAttributes: variant?.attributes,
+        cartonNumber,
         quantity: item.quantity,
         // Ignore caller-provided costPrice; cost must be derived from inventory at sender branch.
         costPrice: (typeof senderStockCost === 'number' && senderStockCost > 0)

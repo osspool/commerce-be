@@ -5,6 +5,7 @@ import {
   requireField,
 } from '@classytic/mongokit';
 import Customer from './customer.model.js';
+import platformRepository from '#modules/platform/platform.repository.js';
 
 /**
  * Customer Repository
@@ -228,6 +229,109 @@ class CustomerRepository extends Repository {
 
     await customer.save();
     return customer;
+  }
+
+  // ============================================
+  // MEMBERSHIP OPERATIONS
+  // ============================================
+
+  /**
+   * Enroll customer in membership program
+   * Generates unique card ID and initializes points
+   *
+   * @param {string} customerId - Customer ID
+   * @returns {Promise<Object>} Updated customer with membership
+   */
+  async enrollMembership(customerId) {
+    // Uses MongoKit cachePlugin (5-min TTL, auto-invalidate on update)
+    const config = await platformRepository.getConfig();
+
+    if (!config.membership?.enabled) {
+      throw new Error('Membership program is not enabled');
+    }
+
+    const customer = await this.Model.findById(customerId);
+    if (!customer) throw new Error('Customer not found');
+
+    if (customer.membership?.cardId) {
+      throw new Error('Customer already has a membership card');
+    }
+
+    const prefix = config.membership.cardPrefix || 'MBR';
+    const digits = config.membership.cardDigits || 8;
+
+    // Generate unique card ID
+    let cardId;
+    let attempts = 0;
+    do {
+      const random = Math.random().toString().slice(2, 2 + digits).padStart(digits, '0');
+      cardId = `${prefix}-${random}`;
+      const exists = await this.Model.findOne({ 'membership.cardId': cardId }).lean();
+      if (!exists) break;
+      attempts++;
+    } while (attempts < 10);
+
+    if (attempts >= 10) throw new Error('Failed to generate unique card ID');
+
+    // Determine initial tier (sort by minPoints ascending, pick lowest)
+    let initialTier = 'Bronze';
+    if (config.membership.tiers?.length > 0) {
+      const sortedTiers = [...config.membership.tiers].sort((a, b) => a.minPoints - b.minPoints);
+      initialTier = sortedTiers[0]?.name || 'Bronze';
+    }
+
+    customer.membership = {
+      cardId,
+      isActive: true,
+      enrolledAt: new Date(),
+      points: { current: 0, lifetime: 0, redeemed: 0 },
+      tier: initialTier,
+    };
+
+    await customer.save();
+    return customer;
+  }
+
+  /**
+   * Lookup customer by membership card ID
+   *
+   * @param {string} cardId - Membership card ID (e.g., "MBR-12345678")
+   * @returns {Promise<Object|null>} Customer or null
+   */
+  async lookupByCardId(cardId) {
+    if (!cardId) return null;
+    return this.Model.findOne({
+      'membership.cardId': cardId,
+      'membership.isActive': true,
+    }).lean();
+  }
+
+  /**
+   * Deactivate membership card
+   *
+   * @param {string} customerId - Customer ID
+   * @returns {Promise<Object>} Updated customer
+   */
+  async deactivateMembership(customerId) {
+    return this.Model.findByIdAndUpdate(
+      customerId,
+      { 'membership.isActive': false },
+      { new: true }
+    );
+  }
+
+  /**
+   * Reactivate membership card
+   *
+   * @param {string} customerId - Customer ID
+   * @returns {Promise<Object>} Updated customer
+   */
+  async reactivateMembership(customerId) {
+    return this.Model.findByIdAndUpdate(
+      customerId,
+      { 'membership.isActive': true },
+      { new: true }
+    );
   }
 }
 

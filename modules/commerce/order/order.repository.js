@@ -11,9 +11,13 @@ import { ORDER_STATUS, PAYMENT_STATUS } from './order.enums.js';
 // Stats utilities
 import * as customerStats from '#modules/customer/customer.stats.js';
 import * as productStats from '#modules/commerce/product/product.stats.js';
+import { onMembershipPointsEarned } from '#modules/customer/customer.stats.js';
 
 // Inventory service for stock restoration
 import inventoryService from '#modules/commerce/inventory/inventory.service.js';
+
+// Membership utils for points restoration
+import { releasePoints } from '#modules/customer/membership.utils.js';
 
 /**
  * Order Repository
@@ -63,6 +67,21 @@ class OrderRepository extends Repository {
       try {
         if (result.customer) {
           await customerStats.onOrderCreated(result.customer, result);
+
+          // For POS pickup orders (immediately delivered + verified), award points now
+          const isImmediatelyCompleted = result.source === 'pos' &&
+            result.status === ORDER_STATUS.DELIVERED &&
+            result.currentPayment?.status === PAYMENT_STATUS.VERIFIED;
+
+          if (isImmediatelyCompleted) {
+            // Update completed order stats
+            await customerStats.onOrderCompleted(result.customer, result.totalAmount);
+
+            // Award membership points if applicable
+            if (result.membershipApplied?.pointsEarned > 0) {
+              await onMembershipPointsEarned(result.customer, result.membershipApplied.pointsEarned);
+            }
+          }
         }
         // productStats.decrementInventory() REMOVED - done atomically in workflow
       } catch (error) {
@@ -86,14 +105,27 @@ class OrderRepository extends Repository {
         ) {
           if (result.customer) {
             await customerStats.onOrderCompleted(result.customer, result.totalAmount);
+
+            // Award membership points if applicable
+            if (result.membershipApplied?.pointsEarned > 0) {
+              await onMembershipPointsEarned(result.customer, result.membershipApplied.pointsEarned);
+            }
           }
           await productStats.onOrderItemsSold(result.items);
         }
         
-        // Order cancelled - restore inventory
+        // Order cancelled - restore inventory and membership points
         if (result.status === ORDER_STATUS.CANCELLED && previousStatus !== ORDER_STATUS.CANCELLED) {
           if (result.customer) {
             await customerStats.onOrderCancelled(result.customer);
+
+            // Restore redeemed membership points
+            const redeemedPoints = result.membershipApplied?.pointsRedeemed;
+            if (redeemedPoints > 0) {
+              await releasePoints(result.customer, redeemedPoints).catch(err => {
+                console.error(`Failed to restore ${redeemedPoints} points for customer ${result.customer}:`, err.message);
+              });
+            }
           }
 
           // Only restore stock if order was fulfilled (stock was actually decremented)
@@ -105,10 +137,18 @@ class OrderRepository extends Repository {
           }
         }
 
-        // Order refunded - restore inventory and revert stats
+        // Order refunded - restore inventory, points, and revert stats
         if (currentPaymentStatus === PAYMENT_STATUS.REFUNDED && previousPaymentStatus !== PAYMENT_STATUS.REFUNDED) {
           if (result.customer) {
             await customerStats.onOrderRefunded(result.customer, result.totalAmount);
+
+            // Restore redeemed membership points
+            const redeemedPoints = result.membershipApplied?.pointsRedeemed;
+            if (redeemedPoints > 0) {
+              await releasePoints(result.customer, redeemedPoints).catch(err => {
+                console.error(`Failed to restore ${redeemedPoints} points for customer ${result.customer}:`, err.message);
+              });
+            }
           }
 
           // Only restore stock if order was fulfilled

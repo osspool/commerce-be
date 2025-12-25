@@ -3,15 +3,14 @@ import { createRoutes } from '#routes/utils/createRoutes.js';
 import createCrudRouter from '#routes/utils/createCrudRouter.js';
 import { createActionRouter } from '#routes/utils/createActionRouter.js';
 import { transferController, transferSchemas } from './transfer/index.js';
-import { purchaseController, purchaseInvoiceService, purchaseSchemas } from './purchase/index.js';
+import { purchaseController, purchaseSchemas } from './purchase/index.js';
 import { stockRequestController, stockRequestSchemas } from './stock-request/index.js';
 import { supplierController, supplierSchemas, supplierEntitySchema } from './supplier/index.js';
 import inventoryController from './inventory.controller.js';
 import { adjustmentSchema } from './inventory.schemas.js';
-import transferService from './transfer/transfer.service.js';
-import stockRequestService from './stock-request/stock-request.service.js';
 import permissions from '#config/permissions.js';
 import { itemWrapper, paginateWrapper } from '#common/docs/responseSchemas.js';
+import { inventoryActionRegistry } from './inventory.actions.js';
 
 /**
  * Inventory Management Plugin - Optimized
@@ -122,49 +121,14 @@ async function inventoryManagementPlugin(fastify) {
     },
   ], { tag: 'Inventory - Purchases', basePath: '/api/v1/inventory/purchases' });
 
-  // Purchase Action Router (Stripe Pattern)
-  fastify.register((instance, _opts, done) => {
-    instance.addHook('preHandler', instance.authenticate);
-
-    createActionRouter(instance, {
-      tag: 'Inventory - Purchases',
-      basePath: '/api/v1/inventory/purchases',
-      actions: {
-        receive: async (id, _data, req) => {
-          return purchaseInvoiceService.receivePurchase(id, req.user._id || req.user.id);
-        },
-        pay: async (id, data, req) => {
-          return purchaseInvoiceService.payPurchase(id, data, req.user._id || req.user.id);
-        },
-        cancel: async (id, data, req) => {
-          return purchaseInvoiceService.cancelPurchase(id, req.user._id || req.user.id, data.reason);
-        },
-      },
-      actionPermissions: {
-        receive: permissions.inventory.purchaseReceive,
-        pay: permissions.inventory.purchasePay,
-        cancel: permissions.inventory.purchaseCancel,
-      },
-      actionSchemas: {
-        pay: {
-          amount: { type: 'number', description: 'Payment amount (BDT)' },
-          method: { type: 'string', description: 'Payment method' },
-          reference: { type: 'string', description: 'Payment reference' },
-          accountNumber: { type: 'string' },
-          walletNumber: { type: 'string' },
-          bankName: { type: 'string' },
-          accountName: { type: 'string' },
-          proofUrl: { type: 'string' },
-          transactionDate: { type: 'string', format: 'date-time' },
-          notes: { type: 'string' },
-        },
-        cancel: {
-          reason: { type: 'string', description: 'Cancellation reason' },
-        },
-      },
-    });
-    done();
-  }, { prefix: '/inventory/purchases' });
+  // Inventory Action Routers (Stripe Pattern)
+  for (const actionConfig of inventoryActionRegistry) {
+    fastify.register((instance, _opts, done) => {
+      instance.addHook('preHandler', instance.authenticate);
+      createActionRouter(instance, actionConfig);
+      done();
+    }, { prefix: actionConfig.prefix });
+  }
 
   // ============================================
   // TRANSFERS (Challan Workflow)
@@ -228,74 +192,6 @@ async function inventoryManagementPlugin(fastify) {
     },
   ], { tag: 'Inventory - Transfers', basePath: '/api/v1/inventory/transfers' });
 
-  // Transfer Action Router (Stripe Pattern)
-  // Replaces: /approve, /dispatch, /in-transit, /receive, /cancel
-  fastify.register((instance, _opts, done) => {
-    // Add authentication for all action routes
-    instance.addHook('preHandler', instance.authenticate);
-
-    createActionRouter(instance, {
-      tag: 'Inventory - Transfers',
-      basePath: '/api/v1/inventory/transfers',
-      actions: {
-        approve: async (id, _data, req) => {
-          return transferService.approveTransfer(id, req.user._id || req.user.id);
-        },
-        dispatch: async (id, data, req) => {
-          return transferService.dispatchTransfer(id, data.transport || data, req.user._id || req.user.id);
-        },
-        'in-transit': async (id, _data, req) => {
-          return transferService.markInTransit(id, req.user._id || req.user.id);
-        },
-        receive: async (id, data, req) => {
-          return transferService.receiveTransfer(id, data.items || [], req.user._id || req.user.id);
-        },
-        cancel: async (id, data, req) => {
-          return transferService.cancelTransfer(id, data.reason, req.user._id || req.user.id);
-        },
-      },
-      actionPermissions: {
-        approve: permissions.inventory.transferApprove,
-        dispatch: permissions.inventory.transferDispatch,
-        'in-transit': permissions.inventory.transferDispatch,
-        receive: permissions.inventory.transferReceive,
-        cancel: permissions.inventory.transferCancel,
-      },
-      actionSchemas: {
-        dispatch: {
-          transport: {
-            type: 'object',
-            description: 'Transport details (vehicle, driver, etc.)',
-            properties: {
-              vehicleNumber: { type: 'string' },
-              driverName: { type: 'string' },
-              driverPhone: { type: 'string' },
-              notes: { type: 'string' },
-            },
-          },
-        },
-        receive: {
-          items: {
-            type: 'array',
-            description: 'Received items with quantities',
-            items: {
-              type: 'object',
-              properties: {
-                itemId: { type: 'string' },
-                productId: { type: 'string' },
-                variantSku: { type: 'string' },
-                quantityReceived: { type: 'number' },
-              },
-            },
-          },
-        },
-        cancel: {
-          reason: { type: 'string', description: 'Cancellation reason' },
-        },
-      },
-    });
-    done();
-  }, { prefix: '/inventory/transfers' });
 
   // ============================================
   // STOCK REQUESTS (Sub-branch → Head Office)
@@ -335,67 +231,6 @@ async function inventoryManagementPlugin(fastify) {
     },
   ], { tag: 'Inventory - Stock Requests', basePath: '/api/v1/inventory/requests' });
 
-  // Stock Request Action Router (Stripe Pattern)
-  // Replaces: /approve, /reject, /fulfill, /cancel
-  fastify.register((instance, _opts, done) => {
-    // Add authentication for all action routes
-    instance.addHook('preHandler', instance.authenticate);
-
-    createActionRouter(instance, {
-      tag: 'Inventory - Stock Requests',
-      basePath: '/api/v1/inventory/requests',
-      actions: {
-        approve: async (id, data, req) => {
-          return stockRequestService.approveRequest(
-            id,
-            data.items || data.approvedItems,
-            data.reviewNotes || data.notes,
-            req.user._id || req.user.id
-          );
-        },
-        reject: async (id, data, req) => {
-          return stockRequestService.rejectRequest(id, data.reason, req.user._id || req.user.id);
-        },
-        fulfill: async (id, data, req) => {
-          return stockRequestService.fulfillRequest(id, data, req.user._id || req.user.id);
-        },
-        cancel: async (id, data, req) => {
-          return stockRequestService.cancelRequest(id, data.reason, req.user._id || req.user.id);
-        },
-      },
-      actionPermissions: {
-        approve: permissions.inventory.stockRequestApprove,
-        reject: permissions.inventory.stockRequestApprove,
-        fulfill: permissions.inventory.stockRequestFulfill,
-        cancel: permissions.inventory.stockRequestCancel,
-      },
-      actionSchemas: {
-        approve: {
-          items: {
-            type: 'array',
-            description: 'Items with approved quantities',
-            items: {
-              type: 'object',
-              properties: {
-                itemId: { type: 'string' },
-                productId: { type: 'string' },
-                variantSku: { type: 'string' },
-                quantityApproved: { type: 'number' },
-              },
-            },
-          },
-          reviewNotes: { type: 'string', description: 'Review notes' },
-        },
-        reject: {
-          reason: { type: 'string', description: 'Rejection reason' },
-        },
-        cancel: {
-          reason: { type: 'string', description: 'Cancellation reason' },
-        },
-      },
-    });
-    done();
-  }, { prefix: '/inventory/requests' });
 
   // ============================================
   // STOCK VIEWING

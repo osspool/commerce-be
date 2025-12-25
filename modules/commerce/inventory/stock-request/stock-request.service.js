@@ -17,7 +17,7 @@ import logger from '#common/utils/logger.js';
  * 1. Sub-branch creates request (pending)
  * 2. Head office reviews (approve/reject with quantities)
  * 3. Head office fulfills by creating transfer
- * 4. Request auto-updates when transfer is dispatched
+ * 4. Transfer workflow continues independently
  */
 class StockRequestService {
   /**
@@ -194,17 +194,42 @@ class StockRequestService {
     if (request.status !== StockRequestStatus.APPROVED) {
       throw new Error('Only approved requests can be fulfilled');
     }
+    if (request.transfer) {
+      throw new Error('Transfer already created for this request');
+    }
+
+    const requestedItems = transferData?.items;
+    const hasOverrides = Array.isArray(requestedItems) && requestedItems.length > 0;
 
     // Prepare items for transfer (only approved quantities)
     const transferItems = request.items
       .filter(item => item.quantityApproved > 0)
-      .map(item => ({
-        productId: item.product,
-        variantSku: item.variantSku,
-        quantity: item.quantityApproved,
-        productName: item.productName,
-        notes: item.notes,
-      }));
+      .map(item => {
+        const override = requestedItems?.find(
+          r => r.itemId?.toString() === item._id.toString() ||
+               (r.productId?.toString() === item.product.toString() &&
+                (r.variantSku || null) === (item.variantSku || null))
+        );
+        const requestedQty = override?.quantity;
+        const resolvedQty = Number.isFinite(requestedQty)
+          ? Math.max(0, Number(requestedQty))
+          : (hasOverrides ? 0 : item.quantityApproved);
+
+        if (resolvedQty > item.quantityApproved) {
+          throw new Error(`Fulfill quantity exceeds approved quantity for ${item.productName}`);
+        }
+
+        item.quantityFulfilled = resolvedQty;
+
+        return {
+          productId: item.product,
+          variantSku: item.variantSku,
+          quantity: resolvedQty,
+          productName: item.productName,
+          notes: item.notes,
+        };
+      })
+      .filter(item => item.quantity > 0);
 
     if (transferItems.length === 0) {
       throw new Error('No items with approved quantities');
@@ -219,10 +244,15 @@ class StockRequestService {
       ...transferData,
     }, actorId);
 
-    // Update request with transfer reference
+    const isPartial = request.totalQuantityFulfilled < request.totalQuantityApproved;
+
+    // Update request with transfer reference and mark fulfilled
     request.transfer = transfer._id;
+    request.status = isPartial
+      ? StockRequestStatus.PARTIAL_FULFILLED
+      : StockRequestStatus.FULFILLED;
     request.statusHistory.push({
-      status: 'transfer_created',
+      status: request.status,
       actor: actorId,
       timestamp: new Date(),
       notes: `Transfer ${transfer.challanNumber} created`,

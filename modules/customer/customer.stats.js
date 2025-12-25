@@ -8,6 +8,7 @@
  */
 
 import Customer from './customer.model.js';
+import platformRepository from '#modules/platform/platform.repository.js';
 
 /**
  * Update customer stats when a new order is placed
@@ -134,6 +135,133 @@ export async function updateLastActive(customerId) {
       'stats.lastActiveDate': new Date(),
     },
   });
+}
+
+// ============================================
+// MEMBERSHIP POINTS OPERATIONS
+// ============================================
+
+/**
+ * Calculate tier based on lifetime points
+ * @param {Number} lifetimePoints - Total lifetime points
+ * @param {Array} tiers - Tier configuration from platform config
+ * @returns {String} Tier name
+ */
+function calculateTier(lifetimePoints, tiers) {
+  if (!tiers?.length) return 'Bronze';
+  const sorted = [...tiers].sort((a, b) => b.minPoints - a.minPoints);
+  return sorted.find(t => lifetimePoints >= t.minPoints)?.name || tiers[0]?.name || 'Bronze';
+}
+
+/**
+ * Calculate points for an order based on membership config
+ * @param {Number} orderTotal - Order total in BDT
+ * @param {Object} membershipConfig - Platform membership configuration
+ * @param {String} customerTier - Customer's current tier
+ * @returns {Number} Points earned
+ */
+export function calculatePointsForOrder(orderTotal, membershipConfig, customerTier) {
+  if (!membershipConfig?.enabled || !orderTotal) return 0;
+
+  const { amountPerPoint = 100, pointsPerAmount = 1, roundingMode = 'floor' } = membershipConfig;
+  const tierConfig = membershipConfig.tiers?.find(t => t.name === customerTier);
+  const multiplier = tierConfig?.pointsMultiplier || 1;
+
+  // Base points: orderTotal / amountPerPoint * pointsPerAmount
+  // Example: 1000 BDT / 100 * 1 = 10 points
+  const basePoints = (orderTotal / amountPerPoint) * pointsPerAmount;
+  const rawPoints = basePoints * multiplier;
+
+  // Apply rounding mode
+  switch (roundingMode) {
+    case 'ceil': return Math.ceil(rawPoints);
+    case 'round': return Math.round(rawPoints);
+    default: return Math.floor(rawPoints);
+  }
+}
+
+/**
+ * Get tier discount percent for a customer
+ * @param {String} customerTier - Customer's current tier
+ * @param {Object} membershipConfig - Platform membership configuration
+ * @returns {Number} Discount percentage
+ */
+export function getTierDiscountPercent(customerTier, membershipConfig) {
+  if (!membershipConfig?.enabled) return 0;
+  const tierConfig = membershipConfig.tiers?.find(t => t.name === customerTier);
+  return tierConfig?.discountPercent || 0;
+}
+
+/**
+ * Update customer membership points after order completion
+ * @param {String} customerId - Customer ID
+ * @param {Number} pointsEarned - Points earned from order
+ */
+export async function onMembershipPointsEarned(customerId, pointsEarned) {
+  if (!customerId || !pointsEarned || pointsEarned <= 0) return;
+
+  // Uses MongoKit cachePlugin (5-min TTL, auto-invalidate on update)
+  const config = await platformRepository.getConfig();
+
+  if (!config.membership?.enabled) return;
+
+  // Atomic update
+  const customer = await Customer.findByIdAndUpdate(
+    customerId,
+    {
+      $inc: {
+        'membership.points.current': pointsEarned,
+        'membership.points.lifetime': pointsEarned,
+      },
+    },
+    { new: true }
+  );
+
+  // Recalculate tier if customer has membership and no override
+  if (customer?.membership && !customer.membership.tierOverride && config.membership.tiers?.length) {
+    const newTier = calculateTier(customer.membership.points.lifetime, config.membership.tiers);
+    if (newTier !== customer.membership.tier) {
+      await Customer.findByIdAndUpdate(customerId, { 'membership.tier': newTier });
+    }
+  }
+}
+
+/**
+ * Redeem membership points (for future use)
+ * @param {String} customerId - Customer ID
+ * @param {Number} pointsToRedeem - Points to redeem
+ * @returns {Object} { success, newBalance, error }
+ */
+export async function redeemPoints(customerId, pointsToRedeem) {
+  if (!customerId || !pointsToRedeem || pointsToRedeem <= 0) {
+    return { success: false, error: 'Invalid redemption request' };
+  }
+
+  const customer = await Customer.findById(customerId).lean();
+  if (!customer?.membership?.isActive) {
+    return { success: false, error: 'No active membership' };
+  }
+
+  const currentPoints = customer.membership.points?.current || 0;
+  if (pointsToRedeem > currentPoints) {
+    return { success: false, error: 'Insufficient points' };
+  }
+
+  const updated = await Customer.findByIdAndUpdate(
+    customerId,
+    {
+      $inc: {
+        'membership.points.current': -pointsToRedeem,
+        'membership.points.redeemed': pointsToRedeem,
+      },
+    },
+    { new: true }
+  );
+
+  return {
+    success: true,
+    newBalance: updated.membership.points.current,
+  };
 }
 
 /**

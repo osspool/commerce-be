@@ -4,7 +4,8 @@
       "Bash(find:*)",
       "Bash(npx vitest run:*)",
       "Bash(npm test:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []

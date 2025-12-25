@@ -200,6 +200,38 @@ export type PaymentStatusValue =
 /** Payment gateway type values */
 export type PaymentGatewayTypeValue = 'manual' | 'stripe' | 'sslcommerz' | string;
 
+/** Individual payment entry for split/multi-payment scenarios */
+export interface PaymentEntry {
+  /** Payment method (e.g., 'cash', 'bank_transfer', 'bkash') */
+  method: string;
+  /** Amount in smallest currency unit */
+  amount: number;
+  /** Reference/transaction ID for this payment */
+  reference?: string;
+  /** Method-specific details (walletNumber, bankName, trxId, etc.) */
+  details?: Record<string, unknown>;
+}
+
+/** Current payment with split payment support */
+export interface CurrentPayment {
+  /** Reference to the transaction */
+  transactionId?: ObjectId;
+  /** Total amount (sum of all payments for split payments) */
+  amount: number;
+  /** Payment status */
+  status: PaymentStatusValue;
+  /** Primary method for single payments, or 'split' when multiple methods */
+  method: string;
+  /** Reference/transaction ID for single payment */
+  reference?: string;
+  /** Array of individual payments for split payment scenarios */
+  payments?: PaymentEntry[];
+  /** Verification timestamp */
+  verifiedAt?: Date;
+  /** User who verified the payment */
+  verifiedBy?: ObjectId;
+}
+
 // ============ MONETIZATION TYPES ============
 
 /** Monetization type values */

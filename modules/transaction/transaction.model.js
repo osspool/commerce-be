@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import {
   gatewaySchema,
   paymentDetailsSchema,
+  paymentEntrySchema,
   commissionSchema,
   TRANSACTION_STATUS_VALUES,
   TRANSACTION_TYPE_VALUES,
@@ -9,6 +10,14 @@ import {
 import { PAYMENT_METHOD_VALUES } from '#common/revenue/enums.js';
 
 const { Schema } = mongoose;
+
+const paymentDetailsWithSplitSchema = new Schema({
+  ...paymentDetailsSchema.obj,
+  payments: {
+    type: [paymentEntrySchema],
+    default: undefined,
+  },
+}, { _id: false });
 
 /**
  * Transaction Schema
@@ -40,7 +49,7 @@ const transactionSchema = new Schema({
   // Payment method (bkash, nagad, bank, cash, etc.)
   method: {
     type: String,
-    enum: [...PAYMENT_METHOD_VALUES, 'manual'],
+    enum: [...PAYMENT_METHOD_VALUES, 'manual', 'split'],
     required: true,
     default: 'manual',
   },
@@ -97,7 +106,7 @@ const transactionSchema = new Schema({
   gateway: gatewaySchema,
 
   // Payment details (for manual payments) - uses library schema
-  paymentDetails: paymentDetailsSchema,
+  paymentDetails: paymentDetailsWithSplitSchema,
 
   // Commission tracking - uses library schema (for future marketplace use)
   commission: commissionSchema,

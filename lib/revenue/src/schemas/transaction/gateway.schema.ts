@@ -16,17 +16,14 @@ export const gatewaySchema = new Schema(
     type: {
       type: String,
       required: true,
-      index: true,
     },
     sessionId: {
       type: String,
       sparse: true,
-      index: true,
     },
     paymentIntentId: {
       type: String,
       sparse: true,
-      index: true,
     },
     provider: {
       type: String,
@@ -43,4 +40,3 @@ export const gatewaySchema = new Schema(
 );
 
 export default gatewaySchema;
-

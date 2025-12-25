@@ -104,6 +104,19 @@ export const fulfillRequestSchema = {
         enum: ['delivery_challan', 'dispatch_note', 'delivery_slip'],
       },
       remarks: { type: 'string' },
+      items: {
+        type: 'array',
+        description: 'Optional fulfilled quantities (defaults to approved quantities)',
+        items: {
+          type: 'object',
+          properties: {
+            itemId: { type: 'string' },
+            productId: { type: 'string' },
+            variantSku: { type: 'string', nullable: true },
+            quantity: { type: 'integer', minimum: 0 },
+          },
+        },
+      },
     },
   },
 };

@@ -56,6 +56,32 @@ Idempotency-Key: transfer-receive-2025-001
 | `receive` | Increment receiver stock |
 | `cancel` | Cancel (draft/approved only) |
 
+**State rules (strict):**
+- `approve`: only `draft`
+- `dispatch`: only `approved`
+- `in-transit`: only `dispatched`
+- `receive`: `dispatched`, `in_transit`, or `partial_received`
+- `cancel`: `draft` or `approved`
+
+Invalid transitions return `400` with a clear message.
+
+**Example flow:**
+```http
+POST /api/v1/inventory/transfers/:id/action
+Idempotency-Key: transfer-approve-2025-001
+```
+```json
+{ "action": "approve" }
+```
+
+```http
+POST /api/v1/inventory/transfers/:id/action
+Idempotency-Key: transfer-dispatch-2025-001
+```
+```json
+{ "action": "dispatch", "transport": { "vehicleNumber": "DHA-1234" } }
+```
+
 **Action Responses (200):**
 
 Approve:
@@ -125,6 +151,7 @@ Cancel:
       "productSku": "TSHIRT-001",
       "variantSku": "TSHIRT-M-RED",
       "variantAttributes": { "size": "M", "color": "Red" },
+      "cartonNumber": "C-12",
       "quantity": 10,
       "quantityReceived": 0,
       "costPrice": 250,
@@ -185,7 +212,7 @@ POST /api/v1/inventory/transfers
   "receiverBranchId": "SUB_BRANCH_ID",
   "documentType": "delivery_challan",
   "items": [
-    { "productId": "PRODUCT_ID", "variantSku": "SKU-RED-M", "quantity": 10 }
+    { "productId": "PRODUCT_ID", "variantSku": "SKU-RED-M", "cartonNumber": "C-12", "quantity": 10 }
   ],
   "remarks": "Weekly replenishment"
 }
@@ -254,6 +281,7 @@ GET /api/v1/inventory/transfers
 | `productSku` | string | Product SKU (snapshot) |
 | `variantSku` | string | Variant SKU (null for simple products) |
 | `variantAttributes` | Map | Variant attributes (e.g., `{ "size": "M", "color": "Red" }`) |
+| `cartonNumber` | string | Optional carton number for grouping/printing |
 | `quantity` | number | Quantity to transfer |
 | `quantityReceived` | number | Quantity actually received (for partial receipt) |
 | `costPrice` | number | Cost price per unit |

@@ -82,7 +82,7 @@ export function createMemoryCacheAdapter(options = {}) {
 
     /**
      * Clear cache entries matching pattern
-     * @param {string} pattern - Pattern to match (supports simple prefix matching)
+     * @param {string} pattern - Pattern to match (supports glob with * wildcards)
      */
     async clear(pattern) {
       if (!pattern || pattern === '*') {
@@ -90,11 +90,13 @@ export function createMemoryCacheAdapter(options = {}) {
         return;
       }
 
-      // Simple prefix matching (convert glob to prefix)
-      const prefix = pattern.replace(/\*+$/, '');
+      // Convert glob pattern to regex (supports * anywhere in pattern)
+      // e.g., 'mk:*:PlatformConfig:*' -> /^mk:.*:PlatformConfig:.*$/
+      const regexPattern = '^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
+      const regex = new RegExp(regexPattern);
 
       for (const key of store.cache.keys()) {
-        if (key.startsWith(prefix)) {
+        if (regex.test(key)) {
           store.cache.delete(key);
         }
       }

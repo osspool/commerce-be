@@ -78,11 +78,12 @@ describe('Inventory Transfers & Movements', () => {
   it('processes a head-office transfer and records transfer_in/out movements', async () => {
     const transfer = await transferService.createTransfer({
       receiverBranchId: subBranch._id,
-      items: [{ productId: product._id, quantity: 5 }],
+      items: [{ productId: product._id, quantity: 5, cartonNumber: 'C-12' }],
     }, actorId);
 
     expect(transfer.transferType).toBe('head_to_sub');
     expect(transfer.status).toBe('draft');
+    expect(transfer.items?.[0]?.cartonNumber).toBe('C-12');
 
     await transferService.approveTransfer(transfer._id, actorId);
     await transferService.dispatchTransfer(transfer._id, { vehicleNumber: 'DHA-1234' }, actorId);
@@ -131,6 +132,24 @@ describe('Inventory Transfers & Movements', () => {
 
     const subEntry = await StockEntry.findOne({ product: product._id, branch: subBranch._id });
     expect(subEntry.quantity).toBe(4);
+  });
+
+  it('blocks approve when transfer is already approved', async () => {
+    const transfer = await transferService.createTransfer({
+      receiverBranchId: subBranch._id,
+      items: [{ productId: product._id, quantity: 2 }],
+    }, actorId);
+
+    await transferService.approveTransfer(transfer._id, actorId);
+
+    let errorMessage = '';
+    try {
+      await transferService.approveTransfer(transfer._id, actorId);
+    } catch (error) {
+      errorMessage = error.message;
+    }
+
+    expect(errorMessage).toContain('Only draft transfers can be approved');
   });
 
   it('creates recount movement when notes include "recount"', async () => {

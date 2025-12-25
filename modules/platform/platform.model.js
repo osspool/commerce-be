@@ -21,7 +21,10 @@ const paymentMethodSchema = new Schema({
     required: true, // Display name e.g., "bKash Personal", "City Bank Visa"
   },
   // MFS provider (bkash, nagad, rocket, upay)
-  provider: String,
+  provider: {
+    type: String,
+    enum: ['bkash', 'nagad', 'rocket', 'upay'],
+  },
   // MFS details
   walletNumber: String,
   walletName: String,
@@ -36,6 +39,37 @@ const paymentMethodSchema = new Schema({
   // Common
   note: String,
   isActive: { type: Boolean, default: true },
+});
+
+// Payment method type-specific validation
+paymentMethodSchema.pre('validate', function(next) {
+  const method = this;
+
+  if (method.type === 'mfs') {
+    if (!method.provider) {
+      return next(new Error('MFS payment method requires provider (bkash, nagad, rocket, upay)'));
+    }
+    if (!method.walletNumber) {
+      return next(new Error('MFS payment method requires walletNumber'));
+    }
+  }
+
+  if (method.type === 'bank_transfer') {
+    if (!method.bankName) {
+      return next(new Error('Bank transfer requires bankName'));
+    }
+    if (!method.accountNumber) {
+      return next(new Error('Bank transfer requires accountNumber'));
+    }
+  }
+
+  if (method.type === 'card') {
+    if (!method.cardTypes || method.cardTypes.length === 0) {
+      return next(new Error('Card payment method requires at least one cardType'));
+    }
+  }
+
+  next();
 });
 
 /**
@@ -107,6 +141,85 @@ const logisticsSettingsSchema = new Schema({
 }, { _id: false });
 
 /**
+ * Membership Tier Schema
+ */
+const membershipTierSchema = new Schema({
+  name: { type: String, required: true },           // e.g., "Silver", "Gold", "Platinum"
+  minPoints: {
+    type: Number,
+    required: true,
+    min: [0, 'minPoints cannot be negative'],
+  },
+  pointsMultiplier: {
+    type: Number,
+    default: 1,
+    min: [0.1, 'pointsMultiplier must be at least 0.1'],
+    max: [10, 'pointsMultiplier cannot exceed 10'],
+  },
+  discountPercent: {
+    type: Number,
+    default: 0,
+    min: [0, 'discountPercent cannot be negative'],
+    max: [100, 'discountPercent cannot exceed 100'],
+  },
+  color: String,                                     // UI color code
+}, { _id: false });
+
+/**
+ * Membership Config Schema
+ * Loyalty points program configuration
+ */
+const membershipConfigSchema = new Schema({
+  enabled: { type: Boolean, default: false },
+
+  // Points earning rules
+  pointsPerAmount: {
+    type: Number,
+    default: 1,
+    min: [1, 'pointsPerAmount must be at least 1'],
+  },
+  amountPerPoint: {
+    type: Number,
+    default: 100,
+    min: [1, 'amountPerPoint must be at least 1'],
+  },
+  roundingMode: { type: String, enum: ['floor', 'round', 'ceil'], default: 'floor' },
+
+  // Tier thresholds
+  tiers: [membershipTierSchema],
+
+  // Points redemption (optional)
+  redemption: {
+    enabled: { type: Boolean, default: false },
+    pointsPerBdt: {
+      type: Number,
+      default: 10,
+      min: [1, 'pointsPerBdt must be at least 1'],
+    },
+    maxRedeemPercent: {
+      type: Number,
+      default: 50,
+      min: [0, 'maxRedeemPercent cannot be negative'],
+      max: [100, 'maxRedeemPercent cannot exceed 100'],
+    },
+    minRedeemPoints: {
+      type: Number,
+      default: 100,
+      min: [0, 'minRedeemPoints cannot be negative'],
+    },
+    minOrderAmount: {
+      type: Number,
+      default: 0,
+      min: [0, 'minOrderAmount cannot be negative'],
+    },
+  },
+
+  // Card settings
+  cardPrefix: { type: String, default: 'MBR' },
+  cardDigits: { type: Number, default: 8, min: 4, max: 12 },
+}, { _id: false });
+
+/**
  * Platform Config Schema
  * Singleton document storing all platform-wide settings
  */
@@ -129,6 +242,7 @@ const platformConfigSchema = new Schema({
   checkout: checkoutSettingsSchema,
   logistics: logisticsSettingsSchema,
   vat: vatConfigSchema,
+  membership: membershipConfigSchema,
 
   policies: {
     termsAndConditions: String,
@@ -166,27 +280,98 @@ platformConfigSchema.statics.getConfig = async function() {
 
 /**
  * Get next invoice number (atomic increment)
+ * Uses upsert to ensure config exists before incrementing
  */
 platformConfigSchema.statics.getNextInvoiceNumber = async function() {
   const config = await this.findOneAndUpdate(
     { isSingleton: true },
-    { $inc: { 'vat.invoice.currentNumber': 1 } },
-    { new: true }
+    {
+      $inc: { 'vat.invoice.currentNumber': 1 },
+      $setOnInsert: {
+        platformName: process.env.PLATFORM_NAME || 'My Store',
+        isSingleton: true,
+        paymentMethods: [{ type: 'cash', name: 'Cash', isActive: true }],
+        'vat.isRegistered': false,
+        'vat.defaultRate': 15,
+        'vat.pricesIncludeVat': true,
+        'vat.invoice.prefix': 'INV-',
+        'vat.invoice.startNumber': 1,
+      },
+    },
+    { new: true, upsert: true }
   );
 
-  const prefix = config?.vat?.invoice?.prefix || 'INV-';
-  const number = config?.vat?.invoice?.currentNumber || 1;
+  const prefix = config.vat?.invoice?.prefix || 'INV-';
+  const number = config.vat?.invoice?.currentNumber || 1;
   const year = new Date().getFullYear();
 
   return `${prefix}${year}-${String(number).padStart(6, '0')}`;
 };
 
 /**
- * Update config with partial data
+ * Deep merge utility for nested objects
+ * Arrays are replaced, not merged (intentional for paymentMethods, tiers, etc.)
+ */
+function deepMerge(target, source) {
+  if (!source || typeof source !== 'object') return target;
+  if (Array.isArray(source)) return source; // Arrays are replaced entirely
+
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    const sourceVal = source[key];
+    const targetVal = result[key];
+
+    if (sourceVal !== undefined) {
+      if (
+        sourceVal !== null &&
+        typeof sourceVal === 'object' &&
+        !Array.isArray(sourceVal) &&
+        targetVal &&
+        typeof targetVal === 'object' &&
+        !Array.isArray(targetVal)
+      ) {
+        // Deep merge nested objects
+        result[key] = deepMerge(targetVal, sourceVal);
+      } else {
+        // Replace primitives, arrays, and null
+        result[key] = sourceVal;
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Update config with partial data (deep merge)
+ * Nested objects like membership, vat are merged, not replaced.
+ * Arrays (paymentMethods, tiers) are replaced entirely.
  */
 platformConfigSchema.statics.updateConfig = async function(updates) {
   const config = await this.getConfig();
-  Object.assign(config, updates);
+
+  // Deep merge each top-level key
+  for (const key of Object.keys(updates)) {
+    if (updates[key] !== undefined) {
+      const currentVal = config[key];
+      const updateVal = updates[key];
+
+      if (
+        updateVal !== null &&
+        typeof updateVal === 'object' &&
+        !Array.isArray(updateVal) &&
+        currentVal &&
+        typeof currentVal === 'object' &&
+        !Array.isArray(currentVal)
+      ) {
+        // Deep merge nested objects (vat, membership, checkout, logistics, policies)
+        config[key] = deepMerge(currentVal.toObject ? currentVal.toObject() : currentVal, updateVal);
+      } else {
+        // Replace primitives, arrays, null
+        config[key] = updateVal;
+      }
+    }
+  }
+
   await config.save();
   return config;
 };

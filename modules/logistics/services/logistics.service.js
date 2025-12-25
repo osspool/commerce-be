@@ -2,6 +2,7 @@ import config from '../../../config/index.js';
 import Shipment from '../models/shipment.model.js';
 import { createProvider } from '@classytic/bd-logistics/providers';
 import bdAreas from '@classytic/bd-areas';
+import platformRepository from '#modules/platform/platform.repository.js';
 
 /**
  * Logistics Service
@@ -84,9 +85,8 @@ class LogisticsService {
   async createShipment(order, options = {}) {
     await this.initialize();
 
-    // Get platform config for defaults
-    const PlatformConfig = (await import('../../platform/platform.model.js')).default;
-    const platformConfig = await PlatformConfig.getConfig();
+    // Uses MongoKit cachePlugin (5-min TTL, auto-invalidate on update)
+    const platformConfig = await platformRepository.getConfig();
     const logisticsSettings = platformConfig.logistics || {};
 
     const {

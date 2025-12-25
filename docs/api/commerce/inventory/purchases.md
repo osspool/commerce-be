@@ -161,6 +161,30 @@ Idempotency-Key: purchase-pay-2025-001
 { "action": "cancel", "reason": "Supplier cancelled order" }
 ```
 
+**State rules (strict):**
+- `receive`: `draft` or `approved`
+- `cancel`: `draft` or `approved`
+- `pay`: any status except `cancelled`
+
+Invalid transitions return `400` with a clear message.
+
+**Example flow:**
+```http
+POST /api/v1/inventory/purchases/:id/action
+Idempotency-Key: purchase-receive-2025-001
+```
+```json
+{ "action": "receive" }
+```
+
+```http
+POST /api/v1/inventory/purchases/:id/action
+Idempotency-Key: purchase-pay-2025-002
+```
+```json
+{ "action": "pay", "amount": 1000, "method": "cash" }
+```
+
 ### Receive
 
 `receive` auto-approves a draft purchase and creates stock movements.

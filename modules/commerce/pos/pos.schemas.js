@@ -44,6 +44,18 @@ export const lookupSchema = {
 // ORDER SCHEMAS
 // ============================================
 
+/**
+ * Customer Resolution Priority:
+ * 1. membershipCardId - Scans card → auto-populates customer name, phone, applies tier discount + points
+ * 2. customer.id - Existing customer ID lookup
+ * 3. customer.phone - Find or create customer by phone
+ * 4. None - Walk-in customer (no customer record)
+ *
+ * When membershipCardId is provided:
+ * - Customer object is NOT needed (auto-populated from membership record)
+ * - Tier discount is auto-applied
+ * - Points are calculated and awarded on order completion
+ */
 export const createOrderSchema = {
   body: {
     type: 'object',
@@ -66,20 +78,42 @@ export const createOrderSchema = {
       },
       branchId: { anyOf: [{ type: 'string' }, { type: 'object' }], description: 'Branch ID' },
       branchSlug: { type: 'string', description: 'Branch slug (takes priority over branchId)' },
+
+      // Customer identification (optional - use membershipCardId for members)
       customer: {
         type: 'object',
+        description: 'Optional if membershipCardId is provided (customer auto-resolved from card)',
         properties: {
           id: { anyOf: [{ type: 'string' }, { type: 'object' }] },
           name: { type: 'string' },
           phone: { type: 'string' },
         },
       },
+      // Single payment (backward compatible)
       payment: {
         type: 'object',
         properties: {
           method: { type: 'string', enum: ['cash', 'bkash', 'nagad', 'rocket', 'bank_transfer', 'card'] },
           amount: { type: 'number' },
           reference: { type: 'string' },
+        },
+      },
+      // Split/multi-payment: e.g., 100 cash + 200 bkash + 200 bank
+      payments: {
+        type: 'array',
+        description: 'Multiple payment methods for split payments',
+        items: {
+          type: 'object',
+          required: ['method', 'amount'],
+          properties: {
+            method: { type: 'string', enum: ['cash', 'bkash', 'nagad', 'rocket', 'bank_transfer', 'card'] },
+            amount: { type: 'number', minimum: 0 },
+            reference: { type: 'string' },
+            details: {
+              type: 'object',
+              description: 'Method-specific details (walletNumber, bankName, etc.)',
+            },
+          },
         },
       },
       discount: { type: 'number', default: 0 },
@@ -101,6 +135,13 @@ export const createOrderSchema = {
       notes: { type: 'string' },
       terminalId: { type: 'string' },
       idempotencyKey: { type: 'string', description: 'Optional idempotency key for safely retrying create-order', maxLength: 200 },
+
+      // Membership - scan or enter card ID for instant customer lookup + benefits
+      membershipCardId: {
+        type: 'string',
+        description: 'Membership card ID (e.g., "MBR-12345678"). When provided: customer auto-resolved, tier discount applied, points earned.',
+        maxLength: 50,
+      },
     },
     required: ['items'],
   },

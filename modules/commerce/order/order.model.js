@@ -115,6 +115,20 @@ const couponAppliedSchema = new Schema({
 }, { _id: false });
 
 /**
+ * Membership Applied Schema
+ * Snapshot of membership benefits applied at order time
+ */
+const membershipAppliedSchema = new Schema({
+  cardId: String,                                    // Membership card ID
+  tier: String,                                      // Customer tier at order time
+  pointsEarned: { type: Number, default: 0 },        // Points earned from this order
+  pointsRedeemed: { type: Number, default: 0 },      // Points redeemed (if redemption enabled)
+  pointsRedemptionDiscount: { type: Number, default: 0 }, // Discount amount from points in BDT
+  tierDiscountApplied: { type: Number, default: 0 }, // Tier discount amount in BDT
+  tierDiscountPercent: { type: Number, default: 0 }, // Tier discount percentage applied
+}, { _id: false });
+
+/**
  * VAT/Tax Breakdown Schema
  * Captures VAT at order time for accurate reporting
  *
@@ -245,6 +259,7 @@ const orderSchema = new Schema({
   currentPayment: currentPaymentSchema,
   
   couponApplied: couponAppliedSchema,
+  membershipApplied: membershipAppliedSchema,
   shipping: shippingSchema,
   cancellationRequest: {
     requested: { type: Boolean, default: false },

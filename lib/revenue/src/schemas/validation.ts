@@ -295,6 +295,73 @@ export const CommissionConfigSchema = z.object({
 
 export type CommissionConfig = z.infer<typeof CommissionConfigSchema>;
 
+// ============ CURRENT PAYMENT SCHEMAS ============
+
+/**
+ * Payment status enum
+ */
+export const PaymentStatusEnumSchema = z.enum([
+  'pending',
+  'verified',
+  'failed',
+  'refunded',
+  'cancelled',
+]);
+
+export type PaymentStatusEnum = z.infer<typeof PaymentStatusEnumSchema>;
+
+/**
+ * Individual payment entry for split/multi-payment scenarios
+ * e.g., cash + bank transfer + mobile wallet
+ */
+export const PaymentEntrySchema = z.object({
+  /** Payment method (e.g., 'cash', 'bank_transfer', 'bkash') */
+  method: z.string().min(1, 'Payment method is required'),
+  /** Amount in smallest currency unit */
+  amount: MoneyAmountSchema,
+  /** Reference/transaction ID for this payment */
+  reference: z.string().optional(),
+  /** Method-specific details (walletNumber, bankName, trxId, etc.) */
+  details: z.record(z.string(), z.unknown()).optional(),
+});
+
+export type PaymentEntryInput = z.infer<typeof PaymentEntrySchema>;
+
+/**
+ * Current payment schema with split payment support
+ * Backward compatible - single payments work without the payments array
+ */
+export const CurrentPaymentInputSchema = z.object({
+  /** Transaction ID reference */
+  transactionId: z.string().optional(),
+  /** Total amount (sum of all payments for split payments) */
+  amount: MoneyAmountSchema,
+  /** Payment status */
+  status: PaymentStatusEnumSchema.default('pending'),
+  /** Primary method for single payments, or 'split' when multiple methods */
+  method: z.string().min(1, 'Payment method is required'),
+  /** Reference/transaction ID for single payment */
+  reference: z.string().optional(),
+  /** Array of individual payments for split payment scenarios */
+  payments: z.array(PaymentEntrySchema).optional(),
+  /** Verification timestamp */
+  verifiedAt: z.date().optional(),
+  /** User ID who verified the payment */
+  verifiedBy: z.string().optional(),
+}).refine(
+  (data) => {
+    // If payments array exists and has items, validate totals match
+    if (data.payments && data.payments.length > 0) {
+      const paymentsTotal = data.payments.reduce((sum, p) => sum + p.amount, 0);
+      return paymentsTotal === data.amount;
+    }
+    return true;
+  },
+  { message: 'Split payments total must equal the transaction amount' }
+);
+
+export type CurrentPaymentInput = z.infer<typeof CurrentPaymentInputSchema>;
+
 // ============ ESCROW SCHEMAS ============
 
 /**
@@ -423,4 +490,42 @@ export function formatZodError(error: z.ZodError): string {
     .join(', ');
 }
 
-export { z };
+// ============ SPLIT PAYMENT HELPERS ============
+
+/**
+ * Validates that split payment totals match the transaction amount
+ * Returns true for single payments (no payments array)
+ *
+ * @param currentPayment - The current payment object to validate
+ * @returns true if valid, false if split totals don't match
+ *
+ * @example
+ * // Single payment - always valid
+ * validateSplitPayments({ amount: 50000, method: 'cash', status: 'verified' }) // true
+ *
+ * // Split payment - totals must match
+ * validateSplitPayments({
+ *   amount: 50000,
+ *   method: 'split',
+ *   status: 'verified',
+ *   payments: [
+ *     { method: 'cash', amount: 10000 },
+ *     { method: 'bkash', amount: 40000 },
+ *   ]
+ * }) // true (10000 + 40000 = 50000)
+ */
+export function validateSplitPayments(currentPayment: {
+  amount: number;
+  payments?: Array<{ amount: number }>;
+}): boolean {
+  if (!currentPayment.payments?.length) {
+    return true; // Single payment, no validation needed
+  }
+
+  const paymentsTotal = currentPayment.payments.reduce(
+    (sum, p) => sum + p.amount,
+    0
+  );
+
+  return paymentsTotal === currentPayment.amount;
+}

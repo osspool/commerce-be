@@ -9,6 +9,7 @@ const transferItemSchema = {
   properties: {
     productId: { type: 'string', description: 'Product ID' },
     variantSku: { type: 'string', nullable: true, description: 'Variant SKU (null for simple products)' },
+    cartonNumber: { type: 'string', description: 'Carton number reference' },
     quantity: { type: 'integer', minimum: 1, description: 'Quantity to transfer' },
     costPrice: { type: 'number', minimum: 0, description: 'Cost price per unit' },
     notes: { type: 'string', description: 'Item notes' },

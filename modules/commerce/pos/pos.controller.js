@@ -6,6 +6,7 @@ import orderRepository from '../order/order.repository.js';
 import { getRevenue } from '#common/plugins/revenue.plugin.js';
 import { fromSmallestUnit, toSmallestUnit } from '@classytic/revenue';
 import Transaction from '#modules/transaction/transaction.model.js';
+import platformRepository from '#modules/platform/platform.repository.js';
 import { getBatchCostPrices } from '../order/order.utils.js';
 import { filterOrderCostPriceByUser } from '../order/order.costPrice.utils.js';
 import { calculateOrderParcelMetricsFromLineItems } from '../order/checkout.utils.js';
@@ -16,9 +17,16 @@ import {
   getProductVatRate,
   getVatConfig,
 } from '../order/vat.utils.js';
-
-// Stock validation + idempotency
-import { stockService, idempotencyService } from '../core/index.js';
+import {
+  calculatePointsForOrder,
+  getTierDiscountPercent,
+} from '../../customer/customer.stats.js';
+import {
+  validateRedemption,
+  reservePoints,
+  releasePoints,
+} from '../../customer/membership.utils.js';
+import { idempotencyService } from '../core/index.js';
 
 /**
  * POS Controller
@@ -71,6 +79,7 @@ class PosController {
       items,
       customer,
       payment,
+      payments, // Split payments array
       discount = 0,
       notes,
       branchId,
@@ -81,6 +90,8 @@ class PosController {
       deliveryPrice = 0,
       deliveryAreaId,
       idempotencyKey,
+      membershipCardId, // Optional: lookup customer by membership card
+      pointsToRedeem = 0, // Optional: redeem loyalty points
     } = req.body;
     const cashier = req.user;
 
@@ -94,9 +105,25 @@ class PosController {
 
     try {
       // Check idempotency - return cached result if duplicate
+      // Include all inputs that affect order outcome for proper duplicate detection
       const { isNew, existingResult } = await idempotencyService.check(
         effectiveIdempotencyKey,
-        { items, customer, payment, discount, branchId, branchSlug, terminalId, deliveryMethod }
+        {
+          items,
+          customer,
+          payment,
+          payments,
+          discount,
+          branchId,
+          branchSlug,
+          terminalId,
+          deliveryMethod,
+          deliveryAddress,
+          deliveryPrice,
+          membershipCardId,
+          pointsToRedeem,
+          notes,
+        }
       );
 
       if (!isNew && existingResult) {
@@ -133,8 +160,17 @@ class PosController {
       }
 
       // Resolve customer (optional for POS)
+      // Priority: membershipCardId > customer.id > customer.phone
       let resolvedCustomer = null;
-      if (customer?.id || customer?.phone) {
+      if (membershipCardId) {
+        resolvedCustomer = await customerRepository.lookupByCardId(membershipCardId);
+        if (!resolvedCustomer) {
+          return reply.code(400).send({
+            success: false,
+            message: `Membership card not found: ${membershipCardId}`,
+          });
+        }
+      } else if (customer?.id || customer?.phone) {
         resolvedCustomer = await customerRepository.resolvePosCustomer(
           { name: customer.name, phone: customer.phone },
           customer.id
@@ -299,22 +335,76 @@ class PosController {
         vatBreakdown.invoiceDateKey = dateKey;
       }
 
-      // ===== CRITICAL: Validate and decrement stock for ALL POS orders =====
-      // Both pickup and delivery orders decrement inventory at POS checkout
-      // (Web orders decrement at fulfillment instead)
-      const validation = await stockService.validate(stockItems, branch._id, { throwOnFailure: false });
-      if (!validation.valid) {
-        const unavailableNames = validation.unavailable.map(u =>
-          `${u.productName}: need ${u.requested}, have ${u.available}`
-        ).join('; ');
+      // ===== MEMBERSHIP BENEFITS CALCULATION =====
+      // platformRepository.getConfig() uses MongoKit cachePlugin (5-min TTL, auto-invalidate on update)
+      let membershipApplied = null;
+      let tierDiscountAmount = 0;
+      let pointsRedemptionDiscount = 0;
+      let actualPointsRedeemed = 0;
+      const platformConfig = await platformRepository.getConfig();
+
+      if (resolvedCustomer?.membership?.isActive && platformConfig.membership?.enabled) {
+        const customerTier = resolvedCustomer.membership.tierOverride || resolvedCustomer.membership.tier;
+        const tierDiscountPercent = getTierDiscountPercent(customerTier, platformConfig.membership);
+
+        // Calculate tier discount (applied to subtotal)
+        if (tierDiscountPercent > 0) {
+          tierDiscountAmount = Math.round(subtotal * tierDiscountPercent / 100);
+        }
+
+        // Preliminary total (before points redemption)
+        // Guard against negative total from excessive discounts
+        const preliminaryTotal = Math.max(0, subtotal - discountAmount - tierDiscountAmount + deliveryCharge);
+
+        // ===== POINTS REDEMPTION =====
+        // Validate and calculate redemption using utils
+        if (pointsToRedeem > 0) {
+          const currentPoints = resolvedCustomer.membership.points?.current || 0;
+          const redemptionResult = validateRedemption({
+            pointsToRedeem,
+            currentPoints,
+            orderTotal: preliminaryTotal,
+            redemptionConfig: platformConfig.membership.redemption,
+          });
+
+          if (!redemptionResult.valid) {
+            return reply.code(400).send({
+              success: false,
+              message: redemptionResult.error,
+            });
+          }
+
+          actualPointsRedeemed = redemptionResult.pointsToRedeem;
+          pointsRedemptionDiscount = redemptionResult.discountAmount;
+        }
+
+        // Final total for points earning calculation
+        const finalTotalForPoints = preliminaryTotal - pointsRedemptionDiscount;
+
+        // Calculate points to earn (on final amount after all discounts)
+        const pointsEarned = calculatePointsForOrder(finalTotalForPoints, platformConfig.membership, customerTier);
+
+        membershipApplied = {
+          cardId: resolvedCustomer.membership.cardId,
+          tier: customerTier,
+          pointsEarned,
+          pointsRedeemed: actualPointsRedeemed,
+          pointsRedemptionDiscount,
+          tierDiscountApplied: tierDiscountAmount,
+          tierDiscountPercent,
+        };
+      } else if (pointsToRedeem > 0) {
+        // Customer tried to redeem without active membership
         return reply.code(400).send({
           success: false,
-          message: `Insufficient stock: ${unavailableNames}`,
-          unavailable: validation.unavailable,
+          message: 'Active membership required for points redemption',
         });
       }
 
-      // Now decrement (validated)
+      // ===== ATOMIC STOCK DECREMENT =====
+      // decrementBatch uses findOneAndUpdate with $inc and quantity >= check
+      // This is atomic and handles insufficient stock without separate validation
+      // (Saves one DB roundtrip vs validate-then-decrement pattern)
       const decrementResult = await inventoryService.decrementBatch(
         stockItems,
         branch._id,
@@ -331,25 +421,97 @@ class PosController {
 
       const didDecrement = true;
 
-    // Calculate totals
-    const totalAmount = subtotal - discountAmount + deliveryCharge;
+      // ===== ATOMIC POINTS RESERVATION =====
+      // Reserve points BEFORE order creation to prevent race conditions.
+      // If order creation fails, points are released in the catch block.
+      let didReservePoints = false;
+      if (actualPointsRedeemed > 0 && resolvedCustomer?._id) {
+        const reserveResult = await reservePoints(resolvedCustomer._id, actualPointsRedeemed);
+        if (!reserveResult.success) {
+          // Points no longer available - restore stock and fail
+          await inventoryService.restoreBatch(
+            stockItems,
+            branch._id,
+            { model: 'Order', id: null },
+            cashier._id
+          ).catch(() => {});
+          return reply.code(400).send({
+            success: false,
+            message: reserveResult.error || 'Failed to reserve points',
+          });
+        }
+        didReservePoints = true;
+      }
 
-    // Build payment object
-    const paymentAmountInPaisa = toSmallestUnit(payment?.amount ?? totalAmount, 'BDT');
-    const currentPayment = payment ? {
-      amount: paymentAmountInPaisa,
-      method: payment.method || 'cash',
-      reference: payment.reference,
-      status: 'verified',
-      verifiedAt: new Date(),
-      verifiedBy: cashier._id,
-    } : {
-      amount: paymentAmountInPaisa,
-      method: 'cash',
-      status: 'verified',
-      verifiedAt: new Date(),
-      verifiedBy: cashier._id,
-    };
+    // Calculate totals (including tier discount and points redemption)
+    const finalDiscountAmount = discountAmount + tierDiscountAmount + pointsRedemptionDiscount;
+    const totalAmount = subtotal - finalDiscountAmount + deliveryCharge;
+    const totalAmountInPaisa = toSmallestUnit(totalAmount, 'BDT');
+
+    // Build payment object (supports split payments)
+    let currentPayment;
+
+    if (payments && payments.length > 0) {
+      // Split payments mode
+      const paymentsInPaisa = payments.map(p => ({
+        method: p.method,
+        amount: toSmallestUnit(p.amount, 'BDT'),
+        reference: p.reference || null,
+        details: p.details || null,
+      }));
+
+      const paymentsTotal = paymentsInPaisa.reduce((sum, p) => sum + p.amount, 0);
+
+      // Validate split payments total matches order total
+      if (paymentsTotal !== totalAmountInPaisa) {
+        return reply.code(400).send({
+          success: false,
+          message: `Split payments total (${fromSmallestUnit(paymentsTotal, 'BDT')}) does not match order total (${totalAmount})`,
+        });
+      }
+
+      if (paymentsInPaisa.length === 1) {
+        // Single payment in array - use standard format
+        currentPayment = {
+          amount: totalAmountInPaisa,
+          method: paymentsInPaisa[0].method,
+          reference: paymentsInPaisa[0].reference,
+          status: 'verified',
+          verifiedAt: new Date(),
+          verifiedBy: cashier._id,
+        };
+      } else {
+        // Multiple payments - use split format
+        currentPayment = {
+          amount: totalAmountInPaisa,
+          method: 'split',
+          payments: paymentsInPaisa,
+          status: 'verified',
+          verifiedAt: new Date(),
+          verifiedBy: cashier._id,
+        };
+      }
+    } else if (payment) {
+      // Single payment (legacy format)
+      const paymentAmountInPaisa = toSmallestUnit(payment.amount ?? totalAmount, 'BDT');
+      currentPayment = {
+        amount: paymentAmountInPaisa,
+        method: payment.method || 'cash',
+        reference: payment.reference,
+        status: 'verified',
+        verifiedAt: new Date(),
+        verifiedBy: cashier._id,
+      };
+    } else {
+      // Default: cash payment
+      currentPayment = {
+        amount: totalAmountInPaisa,
+        method: 'cash',
+        status: 'verified',
+        verifiedAt: new Date(),
+        verifiedBy: cashier._id,
+      };
+    }
 
       // Build delivery info
       const delivery = isPickup
@@ -388,7 +550,7 @@ class PosController {
 
           items: orderItems,
           subtotal,
-          discountAmount,
+          discountAmount: finalDiscountAmount,
           deliveryCharge,
           totalAmount,
 
@@ -396,6 +558,7 @@ class PosController {
           delivery,
           deliveryAddress: orderDeliveryAddress,
           parcel,
+          membershipApplied,
 
           status: isPickup ? 'delivered' : 'processing',
           currentPayment,
@@ -403,7 +566,7 @@ class PosController {
           idempotencyKey: effectiveIdempotencyKey,
         });
       } catch (error) {
-        // If we already decremented stock for pickup, restore it on failure.
+        // Rollback: restore stock and release points on failure
         if (didDecrement) {
           await inventoryService.restoreBatch(
             stockItems,
@@ -412,61 +575,82 @@ class PosController {
             cashier._id
           ).catch(() => {});
         }
+        if (didReservePoints && resolvedCustomer?._id) {
+          await releasePoints(resolvedCustomer._id, actualPointsRedeemed).catch(() => {});
+        }
         throw error;
       }
 
-      // Create transaction via Revenue library
-      try {
-        const revenue = getRevenue();
-        const amountInPaisa = toSmallestUnit(totalAmount, 'BDT');
-
-        const { transaction } = await revenue.monetization.create({
-          data: {
-            customerId: resolvedCustomer?._id?.toString() || 'walk-in',
-            referenceId: order._id,
-            referenceModel: 'Order',
-          },
-          planKey: 'one_time',
-          monetizationType: 'purchase',
-          amount: amountInPaisa,
-          currency: 'BDT',
-          gateway: 'manual',
-          paymentData: {
-            method: payment?.method || 'cash',
-            trxId: payment?.reference,
-          },
-          metadata: {
-            orderId: order._id.toString(),
-            source: 'pos',
-            branch: branch._id.toString(),
-            branchCode: branch.code,
-            terminalId,
-            cashierId: cashier._id.toString(),
-            vatInvoiceNumber: order.vat?.invoiceNumber || null,
-            vatSellerBin: order.vat?.sellerBin || null,
-          },
-          idempotencyKey: order.idempotencyKey || `pos_${order._id}`,
-        });
-
-        if (transaction) {
-          order.currentPayment.transactionId = transaction._id;
-
-          await Promise.all([
-            Transaction.findByIdAndUpdate(transaction._id, {
-              source: 'pos',
-              branch: branch._id,
-            }),
-            revenue.payments.verify(transaction._id, { verifiedBy: cashier._id }),
-            order.save(),
-          ]);
-        }
-      } catch (error) {
-        req.log.error('Failed to create POS transaction:', error.message);
-      }
-
-      // Mark idempotency as complete
+      // Mark idempotency as complete (before async transaction)
       const safeOrder = filterOrderCostPriceByUser(order, req.user);
       idempotencyService.complete(effectiveIdempotencyKey, safeOrder);
+
+      // Points were already reserved atomically before order creation.
+      // No post-order deduction needed - this prevents the race condition
+      // where an order could be created with discount but points not deducted.
+
+      // ===== ASYNC TRANSACTION CREATION (fire-and-forget) =====
+      // Transaction is created in background to reduce POS response latency.
+      // Order is already persisted; transaction links asynchronously.
+      // Industry best practice: POS response < 200ms, background reconciliation.
+      const orderId = order._id;
+      const orderIdempotencyKey = order.idempotencyKey || `pos_${orderId}`;
+      const customerId = resolvedCustomer?._id?.toString() || 'walk-in';
+      const asyncBranchId = branch._id;
+      const branchIdStr = branch._id.toString();
+      const branchCode = branch.code;
+      const asyncCashierId = cashier._id;
+      const cashierIdStr = cashier._id.toString();
+      const vatInvoiceNumber = order.vat?.invoiceNumber || null;
+      const vatSellerBin = order.vat?.sellerBin || null;
+      const isSplitPayment = currentPayment.method === 'split';
+      const paymentMethod = currentPayment.method;
+      const paymentReference = currentPayment.reference;
+      const paymentPayments = currentPayment.payments;
+
+      setImmediate(async () => {
+        try {
+          const revenue = getRevenue();
+          const amountInPaisa = toSmallestUnit(totalAmount, 'BDT');
+
+          const { transaction } = await revenue.monetization.create({
+            data: { customerId, referenceId: orderId, referenceModel: 'Order' },
+            planKey: 'one_time',
+            monetizationType: 'purchase',
+            amount: amountInPaisa,
+            currency: 'BDT',
+            gateway: 'manual',
+            paymentData: {
+              method: paymentMethod,
+              trxId: paymentReference,
+              ...(paymentPayments && { payments: paymentPayments }),
+            },
+            metadata: {
+              orderId: orderId.toString(),
+              source: 'pos',
+              branch: branchIdStr,
+              branchCode,
+              terminalId,
+              cashierId: cashierIdStr,
+              vatInvoiceNumber,
+              vatSellerBin,
+              isSplitPayment,
+            },
+            idempotencyKey: orderIdempotencyKey,
+          });
+
+          if (transaction) {
+            await Promise.all([
+              Transaction.findByIdAndUpdate(transaction._id, { source: 'pos', branch: asyncBranchId }),
+              revenue.payments.verify(transaction._id, { verifiedBy: asyncCashierId }),
+              orderRepository.update(orderId, { 'currentPayment.transactionId': transaction._id }),
+            ]);
+          }
+        } catch (error) {
+          // Log but don't fail - transaction will be reconciled by background job
+          console.error('[POS] Async transaction creation failed:', error.message);
+        }
+      });
 
       return reply.code(201).send({
         success: true,
@@ -563,7 +747,21 @@ class PosController {
         method: order.currentPayment?.method || 'cash',
         amount: Math.round(paymentAmountBdt * 100) / 100,
         reference: order.currentPayment?.reference,
+        // Include split payments breakdown if present
+        payments: order.currentPayment?.payments?.map(p => ({
+          method: p.method,
+          amount: fromSmallestUnit(p.amount, 'BDT'),
+          reference: p.reference,
+        })) || null,
       },
+
+      // Membership info (if applied)
+      membership: order.membershipApplied ? {
+        cardId: order.membershipApplied.cardId,
+        tier: order.membershipApplied.tier,
+        pointsEarned: order.membershipApplied.pointsEarned,
+        tierDiscount: order.membershipApplied.tierDiscountApplied,
+      } : null,
     };
 
     return reply.send({

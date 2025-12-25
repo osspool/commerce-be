@@ -6,8 +6,8 @@ import { customerSchemaOptions } from './customer.schemas.js';
  * Customer Controller
  * Handles customer CRUD operations
  *
- * Note: Customer creation is auto-handled by membership workflows
- * Users can view and update customer profiles via standard CRUD
+ * Note: Customer creation is auto-handled by order/checkout workflows.
+ * Membership actions are handled via handlers/membership.handler.js
  */
 export class CustomerController extends BaseController {
   constructor(service, schemaOptions) {

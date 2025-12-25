@@ -13,7 +13,6 @@ export const holdSchema = {
     type: String,
     enum: HOLD_STATUS_VALUES,
     default: HOLD_STATUS.PENDING,
-    index: true,
   },
 
   heldAmount: {
@@ -60,4 +59,3 @@ export const holdSchema = {
 } as const;
 
 export default holdSchema;
-

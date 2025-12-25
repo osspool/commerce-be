@@ -8,12 +8,21 @@ import inventoryRepository from '../inventory.repository.js';
 import logger from '#common/utils/logger.js';
 import { createVerifiedOperationalExpenseTransaction } from '#modules/transaction/utils/operational-transactions.js';
 import { computePurchaseTotals, computePaymentStatus, normalizeNumber, buildStatusEntry } from './purchase.utils.js';
+import { createStateMachine } from '#common/utils/state-machine.js';
 
 function createStatusError(message, statusCode = 400) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
 }
+
+const purchaseState = createStateMachine('Purchase', {
+  update: [PurchaseStatus.DRAFT],
+  approve: [PurchaseStatus.DRAFT],
+  receive: [PurchaseStatus.DRAFT, PurchaseStatus.APPROVED],
+  cancel: [PurchaseStatus.DRAFT, PurchaseStatus.APPROVED],
+  pay: [PurchaseStatus.DRAFT, PurchaseStatus.APPROVED, PurchaseStatus.RECEIVED],
+});
 
 class PurchaseInvoiceService {
   async _withTransaction(operation, options = {}) {
@@ -146,9 +155,7 @@ class PurchaseInvoiceService {
   async updateDraftPurchase(purchaseId, data, actorId) {
     const purchase = await purchaseRepository.getById(purchaseId, { lean: true });
     if (!purchase) throw createStatusError('Purchase not found', 404);
-    if (purchase.status !== PurchaseStatus.DRAFT) {
-      throw createStatusError('Only draft purchases can be updated');
-    }
+    purchaseState.assert('update', purchase.status, createStatusError, 'Only draft purchases can be updated');
 
     const updates = {};
     if (data.purchaseOrderNumber !== undefined) updates.purchaseOrderNumber = data.purchaseOrderNumber;
@@ -205,9 +212,7 @@ class PurchaseInvoiceService {
   async approvePurchase(purchaseId, actorId) {
     const purchase = await purchaseRepository.getById(purchaseId, { lean: true });
     if (!purchase) throw createStatusError('Purchase not found', 404);
-    if (purchase.status !== PurchaseStatus.DRAFT) {
-      throw createStatusError('Only draft purchases can be approved');
-    }
+    purchaseState.assert('approve', purchase.status, createStatusError, 'Only draft purchases can be approved');
 
     return purchaseRepository.appendStatus(purchaseId, buildStatusEntry(
       PurchaseStatus.APPROVED,
@@ -227,6 +232,7 @@ class PurchaseInvoiceService {
         ? await Purchase.findById(purchaseId).session(session)
         : await Purchase.findById(purchaseId);
       if (!purchase) throw createStatusError('Purchase not found', 404);
+      purchaseState.assert('receive', purchase.status, createStatusError, 'Only draft or approved purchases can be received');
 
       if (purchase.status === PurchaseStatus.DRAFT) {
         purchase.status = PurchaseStatus.APPROVED;
@@ -237,10 +243,6 @@ class PurchaseInvoiceService {
           actorId,
           'Purchase approved'
         ));
-      }
-
-      if (purchase.status !== PurchaseStatus.APPROVED) {
-        throw createStatusError('Only draft or approved purchases can be received');
       }
 
       const supplier = purchase.supplier
@@ -300,9 +302,7 @@ class PurchaseInvoiceService {
   async cancelPurchase(purchaseId, actorId, reason) {
     const purchase = await purchaseRepository.getById(purchaseId, { lean: true });
     if (!purchase) throw createStatusError('Purchase not found', 404);
-    if (![PurchaseStatus.DRAFT, PurchaseStatus.APPROVED].includes(purchase.status)) {
-      throw createStatusError('Only draft or approved purchases can be cancelled');
-    }
+    purchaseState.assert('cancel', purchase.status, createStatusError, 'Only draft or approved purchases can be cancelled');
 
     return purchaseRepository.appendStatus(purchaseId, buildStatusEntry(
       PurchaseStatus.CANCELLED,
@@ -320,9 +320,7 @@ class PurchaseInvoiceService {
         ? await Purchase.findById(purchaseId).session(session)
         : await Purchase.findById(purchaseId);
       if (!purchase) throw createStatusError('Purchase not found', 404);
-      if (purchase.status === PurchaseStatus.CANCELLED) {
-        throw createStatusError('Cancelled purchases cannot be paid');
-      }
+      purchaseState.assert('pay', purchase.status, createStatusError, 'Cancelled purchases cannot be paid');
 
       const amount = normalizeNumber(paymentData.amount, purchase.dueAmount);
       if (!Number.isFinite(amount) || amount <= 0) {

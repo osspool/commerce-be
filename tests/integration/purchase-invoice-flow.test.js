@@ -97,4 +97,30 @@ describe('Purchase Invoice Flow', () => {
     expect(transaction).toBeTruthy();
     expect(transaction?.category).toBe('inventory_purchase');
   });
+
+  it('blocks receiving a purchase twice', async () => {
+    const actorId = new mongoose.Types.ObjectId();
+
+    const purchase = await purchaseInvoiceService.createPurchase({
+      supplierId: supplier._id,
+      items: [
+        {
+          productId: product._id,
+          quantity: 5,
+          costPrice: 200,
+        },
+      ],
+    }, actorId);
+
+    await purchaseInvoiceService.receivePurchase(purchase._id, actorId);
+
+    let errorMessage = '';
+    try {
+      await purchaseInvoiceService.receivePurchase(purchase._id, actorId);
+    } catch (error) {
+      errorMessage = error.message;
+    }
+
+    expect(errorMessage).toContain('Only draft or approved purchases can be received');
+  });
 });

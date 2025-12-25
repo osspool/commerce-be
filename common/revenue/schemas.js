@@ -30,12 +30,13 @@
 
 // Subscription schemas (for Mongoose models)
 export {
-  subscriptionPlanSchema,
+  planSchema,
   subscriptionInfoSchema,
 } from '@classytic/revenue/schemas';
 
 // Payment/Transaction schemas (for Mongoose models)
 export {
+  paymentEntrySchema,
   currentPaymentSchema,
   paymentSummarySchema,
   paymentDetailsSchema,
@@ -44,10 +45,27 @@ export {
   commissionSchema,
 } from '@classytic/revenue/schemas';
 
-// Common fields
-export {
-  commonFields,
-} from '@classytic/revenue/schemas';
+// ============ VALIDATION HELPERS ============
+
+/**
+ * Validates that split payment totals match the transaction amount
+ * Returns true for single payments (no payments array)
+ *
+ * @param {Object} currentPayment - The current payment object to validate
+ * @returns {boolean} true if valid, false if split totals don't match
+ */
+export function validateSplitPayments(currentPayment) {
+  if (!currentPayment.payments?.length) {
+    return true; // Single payment, no validation needed
+  }
+
+  const paymentsTotal = currentPayment.payments.reduce(
+    (sum, p) => sum + p.amount,
+    0
+  );
+
+  return paymentsTotal === currentPayment.amount;
+}
 
 // ============ APP-SPECIFIC API SCHEMAS ============
 
@@ -136,7 +154,7 @@ export const planObjectSchema = {
 // ============ HELPER FUNCTIONS ============
 
 /**
- * Build currentPayment object
+ * Build currentPayment object (single payment)
  * @param {number} amount - Payment amount
  * @param {string} method - Payment method
  * @param {string} reference - Payment reference (optional)
@@ -151,32 +169,67 @@ export function buildCurrentPayment(amount, method, reference = null) {
   };
 }
 
+/**
+ * Build currentPayment object with split payments support
+ * @param {number} totalAmount - Total payment amount
+ * @param {Array<{method: string, amount: number, reference?: string, details?: object}>} payments - Payment entries
+ * @returns {Object}
+ */
+export function buildSplitPayment(totalAmount, payments) {
+  if (!payments || payments.length === 0) {
+    throw new Error('At least one payment entry is required');
+  }
+
+  if (payments.length === 1) {
+    // Single payment - use standard format
+    return {
+      amount: totalAmount,
+      status: 'pending',
+      method: payments[0].method,
+      reference: payments[0].reference || null,
+    };
+  }
+
+  // Multiple payments - use split format
+  return {
+    amount: totalAmount,
+    status: 'pending',
+    method: 'split',
+    payments: payments.map(p => ({
+      method: p.method,
+      amount: p.amount,
+      reference: p.reference || null,
+      details: p.details || null,
+    })),
+  };
+}
+
 // ============ DEFAULT EXPORT ============
 
 // Import re-exported schemas for default export
 import {
-  subscriptionPlanSchema,
+  planSchema,
   subscriptionInfoSchema,
+  paymentEntrySchema,
   currentPaymentSchema,
   paymentSummarySchema,
   paymentDetailsSchema,
   tenantSnapshotSchema,
   gatewaySchema,
   commissionSchema,
-  commonFields,
 } from '@classytic/revenue/schemas';
 
 export default {
   // Mongoose schemas
-  subscriptionPlanSchema,
+  planSchema,
   subscriptionInfoSchema,
+  paymentEntrySchema,
   currentPaymentSchema,
   paymentSummarySchema,
   paymentDetailsSchema,
   tenantSnapshotSchema,
   gatewaySchema,
   commissionSchema,
-  commonFields,
 
   // API schemas
   paymentDataSchema,
@@ -185,5 +238,7 @@ export default {
 
   // Helpers
   buildCurrentPayment,
+  buildSplitPayment,
+  validateSplitPayments,
 };
 

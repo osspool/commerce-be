@@ -10,7 +10,7 @@ export const StockRequestStatus = Object.freeze({
   PENDING: 'pending',           // Submitted, awaiting review
   APPROVED: 'approved',         // Approved, ready for transfer creation
   REJECTED: 'rejected',         // Denied by head office
-  FULFILLED: 'fulfilled',       // Transfer created and dispatched
+  FULFILLED: 'fulfilled',       // Transfer created
   PARTIAL_FULFILLED: 'partial_fulfilled', // Partially fulfilled
   CANCELLED: 'cancelled',       // Cancelled by requester
 });
@@ -56,6 +56,12 @@ const requestItemSchema = new Schema({
     default: 0,
     min: 0,
   },
+  // Fulfilled quantity (what was actually sent in transfer)
+  quantityFulfilled: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   // Current stock at requesting branch (snapshot)
   currentStock: {
     type: Number,
@@ -92,8 +98,8 @@ const statusHistorySchema = new Schema({
  * Workflow:
  * 1. Sub-branch submits request (pending)
  * 2. Head office reviews and approves/rejects
- * 3. If approved, head office creates transfer from request
- * 4. Status updated to fulfilled when transfer dispatched
+ * 3. If approved, head office creates transfer from request (fulfilled)
+ * 4. Transfer workflow continues independently
  *
  * Benefits:
  * - Demand visibility for head office
@@ -153,6 +159,10 @@ const stockRequestSchema = new Schema({
     default: 0,
   },
   totalQuantityApproved: {
+    type: Number,
+    default: 0,
+  },
+  totalQuantityFulfilled: {
     type: Number,
     default: 0,
   },
@@ -216,7 +226,7 @@ stockRequestSchema.virtual('canReview').get(function() {
 });
 
 stockRequestSchema.virtual('canFulfill').get(function() {
-  return this.status === StockRequestStatus.APPROVED;
+  return this.status === StockRequestStatus.APPROVED && !this.transfer;
 });
 
 stockRequestSchema.virtual('canCancel').get(function() {
@@ -232,10 +242,12 @@ stockRequestSchema.pre('save', function() {
     this.totalItems = this.items.length;
     this.totalQuantityRequested = this.items.reduce((sum, i) => sum + (i.quantityRequested || 0), 0);
     this.totalQuantityApproved = this.items.reduce((sum, i) => sum + (i.quantityApproved || 0), 0);
+    this.totalQuantityFulfilled = this.items.reduce((sum, i) => sum + (i.quantityFulfilled || 0), 0);
   } else {
     this.totalItems = 0;
     this.totalQuantityRequested = 0;
     this.totalQuantityApproved = 0;
+    this.totalQuantityFulfilled = 0;
   }
 });
 

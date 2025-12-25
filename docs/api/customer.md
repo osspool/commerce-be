@@ -15,6 +15,8 @@ Quick reference for customer management and POS customer lookup.
 | `GET` | `/api/v1/customers/me` | User/Admin | Get my customer profile |
 | `PATCH` | `/api/v1/customers/:id` | Authenticated | Update customer |
 | `DELETE` | `/api/v1/customers/:id` | Admin/Superadmin | Delete customer |
+| `POST` | `/api/v1/customers/me/membership` | User | Self-service membership actions |
+| `POST` | `/api/v1/customers/:id/membership` | Staff | All membership actions (enroll, deactivate, reactivate, adjust) |
 
 ---
 
@@ -324,9 +326,13 @@ if (docs.length > 0) {
 
 ---
 
-## Customer Tiers (Virtual)
+## Customer Tiers
 
-Customers have automatic tier assignment based on lifetime revenue:
+Customers have **two separate tier systems**:
+
+### 1. Revenue-Based Tier (`customer.tier`)
+
+Virtual field calculated from `stats.revenue.lifetime` (stored in BDT):
 
 | Tier | Lifetime Revenue |
 |------|-----------------|
@@ -335,7 +341,184 @@ Customers have automatic tier assignment based on lifetime revenue:
 | `gold` | ৳50,000 - ৳99,999 |
 | `platinum` | ≥ ৳100,000 |
 
-> **Note:** `tier` is a virtual field calculated on-the-fly from `stats.revenue.lifetime`
+> **Note:** This tier is for **analytics/segmentation only**. It does NOT provide discounts or benefits. Use `customer.membership.tier` for loyalty benefits.
+
+### 2. Membership Points Tier (`customer.membership.tier`)
+
+For customers with a membership card, tier is based on **lifetime points earned**. Thresholds and discounts are **fully configurable** via Platform Config.
+
+**Example configuration** (your values may differ):
+
+| Tier | Points Required | Discount |
+|------|-----------------|----------|
+| `Bronze` | 0 | 0% |
+| `Silver` | 500+ | 2% |
+| `Gold` | 2,000+ | 5% |
+| `Platinum` | 5,000+ | 10% |
+
+> **Note:** Membership tier provides automatic discounts at POS/checkout. Configure via `PATCH /api/v1/platform/config` → `membership.tiers[]`.
+
+---
+
+## Membership API
+
+Customers can optionally have membership cards for loyalty points and tier-based discounts.
+
+The Membership API follows **Stripe-style action-based routing** - single endpoint with action in body.
+
+### Action-Based Endpoint
+
+```http
+POST /api/v1/customers/:id/membership
+Authorization: Bearer <staff_token>
+Content-Type: application/json
+
+{ "action": "enroll" | "deactivate" | "reactivate" | "adjust", ...params }
+```
+
+| Action | Description | Additional Params |
+|--------|-------------|-------------------|
+| `enroll` | Enroll customer in membership | - |
+| `deactivate` | Deactivate membership card | - |
+| `reactivate` | Reactivate membership card | - |
+| `adjust` | Add/deduct points manually | `points`, `reason`, `type` |
+
+### Self-Service Endpoint
+
+```http
+POST /api/v1/customers/me/membership
+Authorization: Bearer <customer_token>
+
+{ "action": "enroll" }
+```
+
+Only `enroll` action is available for self-service.
+
+### Examples
+
+**Enroll customer:**
+```json
+{ "action": "enroll" }
+```
+
+**Deactivate membership:**
+```json
+{ "action": "deactivate" }
+```
+
+**Add bonus points (admin):**
+```json
+{
+  "action": "adjust",
+  "points": 500,
+  "reason": "Birthday bonus",
+  "type": "bonus"
+}
+```
+
+**Deduct points (correction):**
+```json
+{
+  "action": "adjust",
+  "points": -100,
+  "reason": "Refund adjustment",
+  "type": "correction"
+}
+```
+
+### Adjustment Types
+
+| Type | Description | Affects Lifetime |
+|------|-------------|------------------|
+| `bonus` | Promotional/reward points | Yes (counts for tier) |
+| `correction` | Error fix | No |
+| `manual_redemption` | Manual points usage | No (tracks in redeemed) |
+| `redemption` | POS/checkout redemption | No (tracks in redeemed) |
+| `expiry` | Expired points removal | No |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "customer_id",
+    "name": "Rahim Ahmed",
+    "membership": {
+      "cardId": "MBR-12345678",
+      "isActive": true,
+      "enrolledAt": "2025-01-01T00:00:00Z",
+      "points": { "current": 500, "lifetime": 500, "redeemed": 0 },
+      "tier": "Silver"
+    }
+  },
+  "adjustment": {
+    "points": 500,
+    "type": "bonus",
+    "reason": "Birthday bonus",
+    "balanceBefore": 0,
+    "balanceAfter": 500
+  },
+  "message": "Points adjusted: +500"
+}
+```
+
+> **Note:** Enrollment requires membership to be enabled in Platform Config (`membership.enabled: true`).
+
+### Membership Data in Customer Response
+
+When a customer has a membership card, it's included in all customer responses:
+
+```json
+{
+  "_id": "customer_id",
+  "name": "Rahim Ahmed",
+  "phone": "01712345678",
+  "membership": {
+    "cardId": "MBR-12345678",
+    "isActive": true,
+    "enrolledAt": "2025-01-01T00:00:00Z",
+    "points": {
+      "current": 2150,
+      "lifetime": 2500,
+      "redeemed": 350
+    },
+    "tier": "Gold"
+  }
+}
+```
+
+### Lookup by Membership Card
+
+```http
+GET /api/v1/customers?membership.cardId=MBR-12345678
+Authorization: Bearer <token>
+```
+
+### Membership Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `membership.cardId` | string | Unique card ID (e.g., `MBR-12345678`) |
+| `membership.isActive` | boolean | Card active status |
+| `membership.enrolledAt` | date | Enrollment timestamp |
+| `membership.points.current` | number | Available points for redemption |
+| `membership.points.lifetime` | number | Total points earned (for tier calculation) |
+| `membership.points.redeemed` | number | Total points redeemed historically |
+| `membership.tier` | string | Current tier (Bronze, Silver, Gold, Platinum) |
+| `membership.tierOverride` | string | Manual tier override (for VIP customers) |
+
+### Using Membership at POS
+
+When processing a POS order with a membership customer:
+
+1. **Scan/Enter Card ID**: Pass `membershipCardId` in POS order request
+2. **Auto Lookup**: Customer is resolved from card ID
+3. **Tier Discount**: Auto-applied based on tier configuration
+4. **Points Earned**: Calculated from order total and tier multiplier
+5. **Receipt**: Shows membership info (card, tier, points earned, discount)
+
+See [POS API Guide](commerce/pos.md#6-membership-cards) for full details.
 
 ---
 
@@ -410,13 +593,29 @@ interface Customer {
   tags: string[];
   notes?: string;
   isActive: boolean;
+  membership?: CustomerMembership; // Loyalty card (null if not enrolled)
 
-  // Virtuals
-  tier: 'bronze' | 'silver' | 'gold' | 'platinum';
+  // Virtuals (read-only)
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum';  // Revenue-based (analytics only)
   defaultAddress?: CustomerAddress;
 
   createdAt: Date;
   updatedAt: Date;
+}
+
+interface CustomerMembership {
+  cardId: string;               // e.g., "MBR-12345678"
+  isActive: boolean;
+  enrolledAt: Date;
+  points: {
+    current: number;            // Available for redemption
+    lifetime: number;           // Total earned (for tier calculation)
+    redeemed: number;           // Total redeemed historically
+  };
+  tier: string;                 // Points-based tier (provides discounts)
+  tierOverride?: string;        // Manual override for VIP customers
+  tierOverrideReason?: string;
+  tierOverrideBy?: string;      // User ID who set override
 }
 
 interface CustomerAddress {
@@ -448,8 +647,8 @@ interface CustomerStats {
     refunded: number;
   };
   revenue: {
-    total: number;
-    lifetime: number;
+    total: number;              // In BDT
+    lifetime: number;           // In BDT
   };
   firstOrderDate?: Date;
   lastOrderDate?: Date;
@@ -481,6 +680,6 @@ interface CustomerStats {
 1. **POS Quick Lookup:** Use `?phone=<phone>` for exact match, `?phone[contains]=<partial>` for partial, `?search=<query>` for fuzzy
 2. **Customer Creation:** Don't call create endpoint - pass customer data in POS/checkout payload
 3. **Address Selection:** Use `customer.defaultAddress` virtual for pre-selecting shipping address
-4. **Customer Tiers:** Display `customer.tier` for loyalty program visibility
-5. **Stats Display:** Show order count and lifetime revenue from `customer.stats`
+4. **Loyalty Tier Display:** Use `customer.membership?.tier` for loyalty program benefits (discounts). Use `customer.tier` only for analytics/segmentation
+5. **Stats Display:** Show order count and lifetime revenue from `customer.stats` (values are in BDT)
 6. **Filter Syntax:** Use `field=value` or `field[operator]=value`, NOT `filter[field]=value`

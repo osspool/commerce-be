@@ -24,7 +24,6 @@ export const referenceSchema = {
   referenceId: {
     type: Schema.Types.ObjectId,
     refPath: 'referenceModel',
-    index: true,
   },
   referenceModel: {
     type: String,

@@ -459,7 +459,10 @@ Example: `REQ-202512-0042` (42nd request of December 2025)
 {
   "action": "fulfill",
   "documentType": "delivery_challan",
-  "remarks": "Urgent shipment"
+  "remarks": "Urgent shipment",
+  "items": [
+    { "productId": "...", "variantSku": "SKU-RED-M", "quantity": 4 }
+  ]
 }
 
 // Cancel request
@@ -498,6 +501,11 @@ pending → approved → fulfilled
     ↓ (reject/cancel)
   rejected / cancelled
 ```
+
+**Fulfillment notes:**
+- If `items` is omitted on `fulfill`, approved quantities are sent.
+- If `items` is provided, any item not listed defaults to `0`.
+- `quantityFulfilled` is tracked per item and rolled into `totalQuantityFulfilled`.
 
 **Priority Levels:** `low`, `normal` (default), `high`, `urgent`
 

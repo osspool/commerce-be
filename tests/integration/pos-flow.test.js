@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mongoose from 'mongoose';
 // import { createTestUser, createTestProduct, createTestBranch, createTestStock } from '../helpers/test-data.js';
 import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
+import Transaction from '../../modules/transaction/transaction.model.js';
 
 describe('POS Flow Integration', () => {
   let app;
@@ -140,6 +141,55 @@ describe('POS Flow Integration', () => {
     expect(response.statusCode).toBe(400);
     const body = response.json();
     expect(body.message).toMatch(/Insufficient stock/);
+  });
+
+  it('should create a POS order with split payments', async () => {
+    const orderPayload = {
+      items: [{
+        productId: product._id,
+        quantity: 1,
+        price: 500,
+      }],
+      branchId: branch._id,
+      payments: [
+        { method: 'cash', amount: 300 },
+        { method: 'bkash', amount: 200, reference: 'TRX-SPLIT-1' },
+      ],
+      deliveryMethod: 'pickup',
+    };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/pos/orders',
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: orderPayload,
+    });
+
+    if (response.statusCode !== 201) {
+      console.error('POS Create Order (Split) Error:', response.body);
+    }
+
+    expect(response.statusCode).toBe(201);
+    const order = response.json().data;
+
+    expect(order.currentPayment.method).toBe('split');
+    expect(order.currentPayment.amount).toBe(50000);
+    expect(order.currentPayment.payments?.length).toBe(2);
+
+    // Transaction is created asynchronously for better POS latency
+    // Poll for transaction with timeout (typical async pattern for tests)
+    let transaction = null;
+    for (let i = 0; i < 20; i++) {
+      transaction = await Transaction.findOne({
+        referenceModel: 'Order',
+        referenceId: order._id,
+      }).lean();
+      if (transaction) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    expect(transaction).toBeTruthy();
+    expect(transaction?.paymentDetails?.payments?.length).toBe(2);
   });
 
   it('should generate a receipt', async () => {

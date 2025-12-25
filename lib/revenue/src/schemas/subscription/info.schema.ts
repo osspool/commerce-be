@@ -29,19 +29,16 @@ export const subscriptionInfoSchema = new Schema(
       type: String,
       enum: SUBSCRIPTION_STATUS_VALUES,
       default: 'pending',
-      index: true,
     },
     isActive: {
       type: Boolean,
       default: false,
-      index: true,
     },
     startDate: {
       type: Date,
     },
     endDate: {
       type: Date,
-      index: true,
     },
     canceledAt: {
       type: Date,
@@ -67,4 +64,3 @@ export const subscriptionInfoSchema = new Schema(
 );
 
 export default subscriptionInfoSchema;
-
