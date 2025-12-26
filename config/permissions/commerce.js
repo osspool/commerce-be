@@ -3,47 +3,47 @@ import { groups } from './roles.js';
 export const products = {
   list: [],
   get: [],
-  create: groups.adminOnly,
-  update: groups.adminOnly,
-  remove: groups.adminOnly,
-  deleted: groups.adminOnly,
-  restore: groups.adminOnly,
+  create: groups.storeAdmin,
+  update: groups.storeAdmin,
+  remove: groups.storeAdmin,
+  deleted: groups.storeAdmin,
+  restore: groups.storeAdmin,
   syncStock: groups.inventoryStaff,
 };
 
 export const categories = {
   list: [],
   get: [],
-  create: groups.adminOnly,
-  update: groups.adminOnly,
+  create: groups.storeAdmin,
+  update: groups.storeAdmin,
   // createCrudRouter expects `remove` for DELETE /:id
-  remove: groups.adminOnly,
-  admin: groups.adminOnly,
+  remove: groups.storeAdmin,
+  admin: groups.storeAdmin,
   syncCounts: groups.inventoryStaff,
 };
 
 export const coupons = {
-  list: groups.adminOnly,
-  get: groups.adminOnly,
-  create: groups.adminOnly,
-  update: groups.adminOnly,
-  remove: groups.adminOnly,
+  list: groups.storeAdmin,
+  get: groups.storeAdmin,
+  create: groups.storeAdmin,
+  update: groups.storeAdmin,
+  remove: groups.storeAdmin,
   validate: groups.userOrAdmin,
 };
 
 export const orders = {
-  list: groups.adminOnly,
+  list: groups.storeAdmin,
   get: groups.authenticated,
   create: groups.userOnly,
-  update: groups.adminOnly,
-  remove: groups.adminOnly,
+  update: groups.storeAdmin,
+  remove: groups.storeAdmin,
   my: groups.userOnly,
   cancel: groups.userOrAdmin,
   cancelRequest: groups.userOrAdmin,
-  updateStatus: groups.adminOnly,
-  fulfill: groups.adminOnly,
-  refund: groups.adminOnly,
-  shippingAdmin: groups.adminOnly,
+  updateStatus: groups.storeAdmin,
+  fulfill: groups.storeAdmin,
+  refund: groups.storeAdmin,
+  shippingAdmin: groups.storeAdmin,
   shippingGet: groups.userOrAdmin,
 };
 
@@ -63,12 +63,12 @@ export const reviews = {
 export const branches = {
   list: groups.storeStaff,
   get: groups.storeStaff,
-  create: groups.adminOnly,
-  update: groups.adminOnly,
-  remove: groups.adminOnly,
+  create: groups.storeAdmin,
+  update: groups.storeAdmin,
+  remove: groups.storeAdmin,
   byCode: groups.storeStaff,
   default: groups.storeStaff,
-  setDefault: groups.adminOnly,
+  setDefault: groups.storeAdmin,
 };
 
 export const pos = {

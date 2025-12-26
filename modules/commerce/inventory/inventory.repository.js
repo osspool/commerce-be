@@ -290,22 +290,6 @@ class InventoryRepository extends Repository {
       .lean();
   }
 
-  async getLowStock(branchId = null, threshold = null) {
-    const branch = branchId || (await branchRepository.getDefaultBranch())._id;
-    const query = { branch, isActive: { $ne: false } };
-
-    if (threshold !== null) {
-      query.quantity = { $lte: threshold, $gt: 0 };
-    } else {
-      query.needsReorder = true;
-    }
-
-    return this.Model.find(query)
-      .populate('product', 'name slug images')
-      .sort({ quantity: 1 })
-      .lean();
-  }
-
   async getMovements(filters = {}, options = {}) {
     const {
       page,

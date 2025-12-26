@@ -494,20 +494,5 @@ class PersistentJobQueue extends EventEmitter {
 // Create singleton instance
 export const jobQueue = new PersistentJobQueue();
 
-// Register handlers for common job types
-export function registerDefaultHandlers() {
-  // Inventory consistency check job
-  jobQueue.registerHandler(JOB_TYPES.INVENTORY_CONSISTENCY_CHECK, async () => {
-    const { checkInventoryConsistency } = await import('#modules/commerce/inventory/stockSync.util.js');
-    await checkInventoryConsistency();
-  });
-
-  // Stock alert job
-  jobQueue.registerHandler(JOB_TYPES.STOCK_ALERT, async (job) => {
-    const { productId, branchId, quantity, reorderPoint } = job.data;
-    logger.info({ productId, branchId, quantity, reorderPoint }, 'Low stock alert');
-    // TODO: Send notification
-  });
-}
 
 export default jobQueue;

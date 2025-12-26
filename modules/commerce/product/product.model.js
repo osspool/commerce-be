@@ -117,7 +117,7 @@ const productSchema = new Schema({
   // Style tags (enum set) for quick filtering like ?style=street
   style: [{
     type: String,
-    enum: ['casual', 'street', 'urban', 'desi', 'formal', 'sport', 'ethnic', 'party'],
+    // enum: ['casual', 'street', 'urban', 'desi', 'formal', 'sport', 'ethnic', 'party'],
   }],
 
   // NEW: Variation attributes (defines what variations exist)

@@ -14,7 +14,6 @@ import { createVerifiedOperationalExpenseTransaction } from '#modules/transactio
  * - lookup: Barcode/SKU scan
  * - getPosProducts: Products with branch stock
  * - bulkImport: Adjust stock (single or bulk)
- * - getLowStock: Low stock alerts
  * - getMovements: Audit trail
  */
 class InventoryController extends BaseController {
@@ -24,7 +23,6 @@ class InventoryController extends BaseController {
     this.lookup = this.lookup.bind(this);
     this.getPosProducts = this.getPosProducts.bind(this);
     this.bulkImport = this.bulkImport.bind(this);
-    this.getLowStock = this.getLowStock.bind(this);
     this.getMovements = this.getMovements.bind(this);
   }
 
@@ -342,22 +340,8 @@ class InventoryController extends BaseController {
   }
 
   // ============================================
-  // ALERTS & AUDIT
+  // AUDIT
   // ============================================
-
-  async getLowStock(req, reply) {
-    const { branchId, threshold } = req.query;
-
-    const items = await this.service.getLowStock(
-      branchId,
-      threshold ? parseInt(threshold) : null
-    );
-
-    return reply.send({
-      success: true,
-      data: items,
-    });
-  }
 
   async getMovements(req, reply) {
     const {

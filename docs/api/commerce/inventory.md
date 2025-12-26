@@ -509,39 +509,11 @@ pending → approved → fulfilled
 
 **Priority Levels:** `low`, `normal` (default), `high`, `urgent`
 
-### Stock viewing & audit
+### Stock audit
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/inventory/low-stock` | Low stock alerts |
 | GET | `/api/v1/inventory/movements` | Stock movement audit trail |
-
-**Low-stock query parameters:**
-| Param | Description |
-|-------|-------------|
-| `branchId` | Filter by branch (defaults to user's branch) |
-| `threshold` | Custom threshold override (defaults to product's `reorderPoint`) |
-
-**Low-stock response:**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "_id": "stockentry_id",
-      "product": {
-        "_id": "product_id",
-        "name": "Cotton T-Shirt",
-        "slug": "cotton-tshirt"
-      },
-      "variantSku": "TSHIRT-M-RED",
-      "quantity": 3,
-      "reorderPoint": 10,
-      "needsReorder": true
-    }
-  ]
-}
-```
 
 **Movements query parameters:**
 | Param | Description |

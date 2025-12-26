@@ -42,34 +42,32 @@ const paymentMethodSchema = new Schema({
 });
 
 // Payment method type-specific validation
-paymentMethodSchema.pre('validate', function(next) {
+paymentMethodSchema.pre('validate', function() {
   const method = this;
 
   if (method.type === 'mfs') {
     if (!method.provider) {
-      return next(new Error('MFS payment method requires provider (bkash, nagad, rocket, upay)'));
+      throw new Error('MFS payment method requires provider (bkash, nagad, rocket, upay)');
     }
     if (!method.walletNumber) {
-      return next(new Error('MFS payment method requires walletNumber'));
+      throw new Error('MFS payment method requires walletNumber');
     }
   }
 
   if (method.type === 'bank_transfer') {
     if (!method.bankName) {
-      return next(new Error('Bank transfer requires bankName'));
+      throw new Error('Bank transfer requires bankName');
     }
     if (!method.accountNumber) {
-      return next(new Error('Bank transfer requires accountNumber'));
+      throw new Error('Bank transfer requires accountNumber');
     }
   }
 
   if (method.type === 'card') {
     if (!method.cardTypes || method.cardTypes.length === 0) {
-      return next(new Error('Card payment method requires at least one cardType'));
+      throw new Error('Card payment method requires at least one cardType');
     }
   }
-
-  next();
 });
 
 /**

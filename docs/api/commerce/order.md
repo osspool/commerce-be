@@ -505,6 +505,7 @@ Authorization: Bearer <token>
 > - Users can cancel their own orders; admins can cancel any order.
 > - Cancellation is blocked only when the order is already `cancelled` or `delivered` (otherwise allowed).
 > - Set `refund: true` to trigger a refund when payment is verified.
+> - **Membership Points:** If customer redeemed points during checkout, they are automatically restored to their account on cancellation. See [Customer API - Points Lifecycle](../customer.md#points-lifecycle--restoration).
 
 ---
 
@@ -950,7 +951,9 @@ Authorization: Bearer <admin_token>
 }
 ```
 
-> Omit `amount` for full refund. Amount is in paisa.
+> **Notes:**
+> - Omit `amount` for full refund. Amount is in paisa.
+> - **Membership Points:** If customer redeemed points during checkout, they are automatically restored to their account on refund. See [Customer API - Points Lifecycle](../customer.md#points-lifecycle--restoration).
 
 ---
 

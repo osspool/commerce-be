@@ -5,6 +5,7 @@ export const roles = Object.freeze({
   FINANCE_MANAGER: 'finance-manager',
   FINANCE_ADMIN: 'finance-admin',
   STORE_MANAGER: 'store-manager',
+  STORE_STAFF: 'store-staff',
   WAREHOUSE_STAFF: 'warehouse-staff',
   WAREHOUSE_ADMIN: 'warehouse-admin',
 });
@@ -16,8 +17,9 @@ export const groups = Object.freeze({
   superadminOnly: [roles.SUPERADMIN],
   userOnly: [roles.USER],
   userOrAdmin: [roles.USER, roles.ADMIN],
-  storeStaff: [roles.ADMIN, roles.STORE_MANAGER],
+  storeAdmin: [roles.ADMIN, roles.STORE_MANAGER, roles.WAREHOUSE_ADMIN, roles.FINANCE_ADMIN],
+  storeStaff: [roles.ADMIN, roles.STORE_MANAGER, roles.STORE_STAFF],
   financeStaff: [roles.ADMIN, roles.FINANCE_ADMIN, roles.FINANCE_MANAGER],
   warehouseStaff: [roles.ADMIN, roles.SUPERADMIN, roles.WAREHOUSE_ADMIN, roles.WAREHOUSE_STAFF],
-  inventoryStaff: [roles.ADMIN, roles.SUPERADMIN, roles.WAREHOUSE_ADMIN, roles.WAREHOUSE_STAFF, roles.STORE_MANAGER],
+  inventoryStaff: [roles.ADMIN, roles.SUPERADMIN, roles.WAREHOUSE_ADMIN, roles.WAREHOUSE_STAFF, roles.STORE_MANAGER, roles.STORE_STAFF],
 });

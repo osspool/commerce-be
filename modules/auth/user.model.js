@@ -115,6 +115,7 @@ const userSchema = new Schema(
         'finance-manager',
         'finance-admin',
         'store-manager',
+        'store-staff',
         'warehouse-staff',
         'warehouse-admin',
       ],

@@ -520,6 +520,54 @@ When processing a POS order with a membership customer:
 
 See [POS API Guide](commerce/pos.md#6-membership-cards) for full details.
 
+### Points Lifecycle & Restoration
+
+**Points Earning:**
+- Points are earned when orders reach `delivered` or `completed` status
+- Calculated based on final order total (after all discounts)
+- Tier multiplier applied based on customer's membership tier
+
+**Points Redemption:**
+- Points are deducted immediately when order is created with `pointsToRedeem`
+- Deduction reflected in `membership.points.current` (decremented) and `membership.points.redeemed` (incremented)
+- Conversion rate defined in platform config (e.g., 10 points = 1 BDT discount)
+
+**Automatic Points Restoration:**
+
+Points are automatically restored in these scenarios:
+
+1. **Order Cancellation** (`status` → `cancelled`)
+   - Redeemed points restored to `membership.points.current`
+   - `membership.points.redeemed` decremented by the same amount
+   - Restoration happens automatically (no manual adjustment needed)
+   - Restoration is idempotent (cancelling same order multiple times won't restore twice)
+
+2. **Payment Refund** (`currentPayment.status` → `refunded`)
+   - Same restoration logic as cancellation
+   - Points restored even if order was delivered before refund
+   - Only redeemed points are restored (not earned points)
+
+**Example Flow:**
+
+```json
+// 1. Before order (initial state)
+"membership": {
+  "points": { "current": 500, "lifetime": 500, "redeemed": 0 }
+}
+
+// 2. After order with 100 points redeemed
+"membership": {
+  "points": { "current": 400, "lifetime": 500, "redeemed": 100 }
+}
+
+// 3. After order cancellation (points restored)
+"membership": {
+  "points": { "current": 500, "lifetime": 500, "redeemed": 0 }
+}
+```
+
+> **Important:** Restoration only applies to redeemed points. Earned points (from completed orders) are not affected by cancellations/refunds. If you need to reverse earned points, use the points adjustment API with `type: 'correction'`.
+
 ---
 
 ## Address Management

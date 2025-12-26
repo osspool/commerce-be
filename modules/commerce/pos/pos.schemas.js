@@ -142,6 +142,12 @@ export const createOrderSchema = {
         description: 'Membership card ID (e.g., "MBR-12345678"). When provided: customer auto-resolved, tier discount applied, points earned.',
         maxLength: 50,
       },
+      // Points redemption (requires membershipCardId)
+      pointsToRedeem: {
+        type: 'integer',
+        minimum: 0,
+        description: 'Points to redeem for discount. Capped at platform maxRedeemPercent of order total.',
+      },
     },
     required: ['items'],
   },

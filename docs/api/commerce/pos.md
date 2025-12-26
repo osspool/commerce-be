@@ -130,6 +130,7 @@ GET /api/v1/pos/lookup?code=BARCODE123&branchId=xxx
 POST /api/v1/pos/orders
 ```
 
+**Single payment example:**
 ```json
 {
   "items": [
@@ -148,13 +149,32 @@ POST /api/v1/pos/orders
     "amount": 1000,
     "reference": "TRX123456"
   },
-  "payments": [
-    { "method": "cash", "amount": 300 },
-    { "method": "bkash", "amount": 200, "reference": "TRX-SPLIT-1" }
-  ],
   "discount": 50,
   "deliveryMethod": "pickup",
   "idempotencyKey": "pos_2025_12_16_0001"
+}
+```
+
+**Split payment example:**
+```json
+{
+  "items": [
+    {
+      "productId": "xxx",
+      "variantSku": "TSHIRT-M-RED",
+      "quantity": 2,
+      "price": 500
+    }
+  ],
+  "branchId": "xxx",
+  "customer": { "name": "John", "phone": "01712345678" },
+  "payments": [
+    { "method": "cash", "amount": 300 },
+    { "method": "bkash", "amount": 700, "reference": "TRX-SPLIT-1" }
+  ],
+  "discount": 50,
+  "deliveryMethod": "pickup",
+  "idempotencyKey": "pos_2025_12_16_0002"
 }
 ```
 
@@ -166,7 +186,8 @@ POST /api/v1/pos/orders
 | items[].variantSku | Conditional | Required for variant products |
 | branchId | | Branch ID (default if omitted) |
 | branchSlug | | Branch slug (optional; takes priority over `branchId`) |
-| payment | | Payment details |
+| payment | | Single payment method (object). Mutually exclusive with `payments` |
+| payments | | Split payments array. Mutually exclusive with `payment` |
 | discount | | Discount amount in BDT |
 | deliveryMethod | | `pickup` (default) or `delivery` |
 | deliveryAddress | | Required if delivery |
@@ -184,27 +205,60 @@ POST /api/v1/pos/orders
 - `deliveryAddress.recipientPhone` **required**, format: `01XXXXXXXXX` (Bangladesh 11-digit)
 - `deliveryAddress.addressLine1`, `city`, etc.
 
-### Payment Object
+### Payment Options
+
+POS orders support **two payment modes** (mutually exclusive):
+
+#### Option 1: Single Payment (use `payment` field)
+
+For orders paid with a single method, provide the top-level `payment` object:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | method | string | `cash`, `bkash`, `nagad`, `rocket`, `bank_transfer`, `card` (from platform config) |
 | amount | number | Payment amount (defaults to order total) |
 | reference | string | Transaction ID (for MFS/card payments) |
-| payments | array | Optional split payments array (see below) |
 
-**Split payments (optional):**
-- Provide `payments[]` to accept multiple methods for a single order.
-- If `payments[]` is present, omit `payment` to avoid ambiguity.
-- The sum of `payments[].amount` must equal the order total.
+**Example:**
+```json
+{
+  "items": [...],
+  "payment": {
+    "method": "bkash",
+    "amount": 1000,
+    "reference": "TRX123456"
+  }
+}
+```
+
+#### Option 2: Split Payments (use `payments` field)
+
+For orders paid with **multiple methods**, provide the top-level `payments` array:
+
+**Rules:**
+- Use `payments[]` array instead of `payment` object
+- Sum of all `payments[].amount` must equal order total
+- If `payments[]` is present, omit `payment` field
 
 **Split payment entry fields:**
+
 | Field | Type | Description |
 |-------|------|-------------|
 | method | string | `cash`, `bkash`, `nagad`, `rocket`, `bank_transfer`, `card` |
 | amount | number | Amount for this method (BDT) |
 | reference | string | Transaction ID (optional, for non-cash) |
 | details | object | Method-specific fields (walletNumber, bankName, etc.) |
+
+**Example:**
+```json
+{
+  "items": [...],
+  "payments": [
+    { "method": "cash", "amount": 300 },
+    { "method": "bkash", "amount": 700, "reference": "TRX-SPLIT-1" }
+  ]
+}
+```
 
 ### Idempotency
 
@@ -218,11 +272,22 @@ POST /api/v1/pos/orders
 | 409 | `REQUEST_IN_PROGRESS` | Same key is currently being processed |
 | 409 | `DUPLICATE_REQUEST` | Same key but different payload (tampering) |
 
-### Payment Notes
+### Payment Behavior
 
-- If `payment` is omitted, the server treats the order as `cash` and sets amount to the order total.
-- If `payments` is provided, the server stores `currentPayment.method = "split"` and includes the breakdown.
-- `currentPayment.amount` in the order response is stored in **paisa** (smallest unit). Convert to BDT for display.
+**Default (no payment field):**
+- If both `payment` and `payments` are omitted, server defaults to cash payment for the full order total
+
+**Single payment (`payment` field):**
+- Server stores `currentPayment.method` as the provided method
+- `currentPayment.amount` reflects the payment amount
+
+**Split payments (`payments` field):**
+- Server stores `currentPayment.method = "split"`
+- Server includes the full breakdown in `currentPayment.payments[]`
+- Sum of all payments must equal order total (server validates)
+
+**Response format:**
+- `currentPayment.amount` is always in **paisa** (smallest unit). Divide by 100 for BDT display.
 
 ### Stock Validation
 
@@ -237,7 +302,7 @@ Before checkout, the server validates stock availability:
 
 ### Create Order Response
 
-**Success Response (201):**
+**Success Response (201) - Single Payment:**
 ```json
 {
   "success": true,
@@ -276,6 +341,31 @@ Before checkout, the server validates stock availability:
 }
 ```
 
+**Success Response (201) - Split Payments:**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "order_id",
+    "source": "pos",
+    "status": "delivered",
+    ...
+    "totalAmount": 1000,
+    "currentPayment": {
+      "amount": 100000,
+      "method": "split",
+      "status": "verified",
+      "payments": [
+        { "method": "cash", "amount": 30000, "status": "verified" },
+        { "method": "bkash", "amount": 70000, "reference": "TRX-SPLIT-1", "status": "verified" }
+      ]
+    },
+    ...
+  },
+  "message": "Order created successfully"
+}
+```
+
 **Idempotent Response (200):**
 ```json
 {
@@ -296,7 +386,7 @@ Before checkout, the server validates stock availability:
 GET /api/v1/pos/orders/:orderId/receipt
 ```
 
-**Response:**
+**Response (single payment):**
 
 ```json
 {
@@ -322,11 +412,7 @@ GET /api/v1/pos/orders/:orderId/receipt
     "payment": {
       "method": "bkash",
       "amount": 950,
-      "reference": "TRX123456",
-      "payments": [
-        { "method": "cash", "amount": 300 },
-        { "method": "bkash", "amount": 650, "reference": "TRX123456" }
-      ]
+      "reference": "TRX123456"
     },
     "membership": {
       "cardId": "MBR-12345678",
@@ -334,6 +420,27 @@ GET /api/v1/pos/orders/:orderId/receipt
       "pointsEarned": 15,
       "tierDiscount": 50
     }
+  }
+}
+```
+
+**Response (split payments):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "orderId": "xxx",
+    "orderNumber": "A1B2C3D4",
+    "payment": {
+      "method": "split",
+      "amount": 950,
+      "payments": [
+        { "method": "cash", "amount": 300 },
+        { "method": "bkash", "amount": 650, "reference": "TRX-SPLIT-1" }
+      ]
+    },
+    ...
   }
 }
 ```
@@ -375,7 +482,10 @@ When VAT is enabled, receipts include:
 - **Membership Discounts (Real-Time):** See [Section 6.11](#611-client-side-discount-calculations-performance-optimization) for complete guide on client-side tier discount and points redemption calculations. Cache platform config once and calculate locally for instant UI updates.
 - **VAT in UI:** Cache platform VAT config (`GET /api/v1/platform/config`) and product/category VAT rates locally so the UI can show VAT per line instantly. Server remains source-of-truth and returns the final VAT breakdown in the order response.
 - **Fast checkout preview:** Compute totals client-side for responsiveness, but keep sending only `items`, `discount`, `membershipCardId`, `pointsToRedeem`, and `delivery` fields. The server recalculates everything to prevent tampering.
-- **Receipt without extra round-trip:** Use the `POST /api/v1/pos/orders` response to print a basic receipt immediately. If you need full branch/cashier metadata or VAT invoice fields, call the receipt endpoint.
+- **Receipt Printing (Recommended Workflow):**
+  - **For immediate printing:** Use the order data from `POST /api/v1/pos/orders` response directly. It contains all necessary fields (items, totals, payment, VAT, membership) for printing a complete receipt.
+  - **For reprinting later:** Use `GET /api/v1/pos/orders/:orderId/receipt` endpoint which returns a formatted receipt object with populated branch/cashier metadata.
+  - **No extra API call needed:** The create order response includes complete receipt data. The dedicated receipt endpoint is optional and primarily useful for reprints or when you need specific formatting.
 - **Discounts:** Support fixed/percentage discounts in UI and pass the total discount in `discount`. Keep a clear audit trail in UI (reason, approvedBy, manager PIN).
 - **Mismatch handling:** If client-side totals differ from server response, show the server values and log the difference for audit.
 
@@ -696,6 +806,19 @@ Points redemption rules (from Platform Config):
   }
 }
 ```
+
+**Points Restoration on Cancel/Refund:**
+
+If a membership order is cancelled or refunded, redeemed points are automatically restored to the customer's account:
+
+- **Order Cancelled:** Points restored when `status` changes to `cancelled`
+- **Payment Refunded:** Points restored when `currentPayment.status` changes to `refunded`
+- **No Manual Adjustment Needed:** Restoration happens automatically in the background
+- **Idempotent:** Restoration is safe to retry (won't restore twice)
+
+**Example:** Customer redeemed 100 points (had 500) → order created (now 400) → order cancelled → 100 points restored automatically (back to 500).
+
+> **Note:** Only redeemed points are restored. Earned points from completed orders are not affected by later cancellations. For more details, see [Customer API - Points Lifecycle](../customer.md#points-lifecycle--restoration).
 
 ---
 

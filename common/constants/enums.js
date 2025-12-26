@@ -16,20 +16,32 @@ export const STATUS = {
 export const STATUS_VALUES = Object.values(STATUS);
 
 // Job enums (common)
+// Note: Module-specific job types are defined in their respective *.jobs.js files
+// e.g., POS_JOB_TYPES in #modules/commerce/pos/pos.jobs.js
 export const JOB_TYPES = {
+  // System jobs
   STALE_SESSION_CLEANUP: 'stale-session-cleanup',
+  // Inventory jobs (legacy - use INVENTORY_JOB_TYPES from inventory.jobs.js)
   STOCK_ALERT: 'STOCK_ALERT',
   INVENTORY_CONSISTENCY_CHECK: 'INVENTORY_CONSISTENCY_CHECK',
+  // POS jobs (legacy - use POS_JOB_TYPES from pos.jobs.js)
+  POS_CREATE_TRANSACTION: 'POS_CREATE_TRANSACTION',
 };
 export const JOB_TYPE_VALUES = [
+  // Export jobs
   'ORDER_EXPORT',
   'PRODUCT_EXPORT',
+  // Inventory jobs
   'INVENTORY_SYNC',
   'STOCK_ALERT',
   'INVENTORY_CONSISTENCY_CHECK',
+  // System jobs
   'STALE_SESSION_CLEANUP',
-  'TEST_JOB', // For testing
-  'ZOMBIE_JOB', // For testing stale job recovery
+  // POS jobs
+  'POS_CREATE_TRANSACTION',
+  // Test jobs
+  'TEST_JOB',
+  'ZOMBIE_JOB',
 ];
 
 

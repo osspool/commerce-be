@@ -12,7 +12,8 @@ import revenuePlugin from '#common/plugins/revenue.plugin.js';
 import { errorHandler } from '#common/utils/errors.js';
 import config from './config/index.js';
 import compress from '@fastify/compress';
-import { jobQueue, registerDefaultHandlers } from '#modules/job/JobQueue.js';
+import { jobQueue } from '#modules/job/JobQueue.js';
+import { registerAllJobHandlers } from '#modules/job/job.registry.js';
 
 async function app(fastify) {
   // ============================================
@@ -59,7 +60,7 @@ async function app(fastify) {
   // 7.5 BACKGROUND JOB QUEUE
   // ============================================
   try {
-    registerDefaultHandlers();
+    await registerAllJobHandlers(); // Registers all module job handlers
     jobQueue.startPolling();
     fastify.addHook('onClose', async () => {
       await jobQueue.shutdown();

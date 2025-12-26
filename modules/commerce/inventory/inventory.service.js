@@ -19,6 +19,11 @@ import logger from '#common/utils/logger.js';
  * - Repository event integration for cache invalidation and alerts
  */
 class InventoryService {
+  /**
+   * Resolve whether a product/variant is active for stock operations.
+   * SECURITY: Fails closed - returns false on lookup errors to prevent
+   * selling/restoring disabled or deleted SKUs during DB errors.
+   */
   async _resolveEntryIsActive(productId, variantSku = null) {
     try {
       const Product = mongoose.model('Product');
@@ -26,7 +31,8 @@ class InventoryService {
         .select('isActive deletedAt variants.sku variants.isActive')
         .lean();
 
-      if (!product) return true;
+      // Product not found - treat as inactive (fail closed)
+      if (!product) return false;
       if (product.isActive === false || product.deletedAt != null) return false;
 
       if (variantSku) {
@@ -35,8 +41,10 @@ class InventoryService {
       }
 
       return true;
-    } catch {
-      return true;
+    } catch (error) {
+      // SECURITY: Fail closed on lookup errors - don't allow operations on unknown state
+      logger.warn('Product isActive lookup failed, failing closed', { productId, variantSku, error: error.message });
+      return false;
     }
   }
 
@@ -45,6 +53,10 @@ class InventoryService {
     await inventoryRepository.emitAsync('after:update', { result, context }).catch(() => {});
   }
 
+  /**
+   * Batch resolve isActive status for multiple items.
+   * SECURITY: Fails closed - returns false for unknown products or on errors.
+   */
   async _resolveDesiredIsActiveForItems(items) {
     try {
       const Product = mongoose.model('Product');
@@ -57,7 +69,8 @@ class InventoryService {
       return (productId, variantSku) => {
         const pid = productId?.toString?.() || String(productId);
         const product = byId.get(pid);
-        if (!product) return true;
+        // SECURITY: Product not found - fail closed
+        if (!product) return false;
         if (product.isActive === false || product.deletedAt != null) return false;
         if (variantSku) {
           const v = (product.variants || []).find(x => x?.sku === variantSku);
@@ -65,8 +78,10 @@ class InventoryService {
         }
         return true;
       };
-    } catch {
-      return () => true;
+    } catch (error) {
+      // SECURITY: Fail closed on lookup errors
+      logger.warn('Batch product isActive lookup failed, failing closed', { error: error.message });
+      return () => false;
     }
   }
   /**

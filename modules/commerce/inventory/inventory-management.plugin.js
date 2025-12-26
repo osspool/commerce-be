@@ -39,14 +39,13 @@ import { inventoryActionRegistry } from './inventory.actions.js';
  *   GET  /inventory/requests/:id        - Get request details
  *   POST /inventory/requests/:id/action - State transitions: approve|reject|fulfill|cancel
  *
- * STOCK VIEWING (2 endpoints):
- *   GET  /inventory/low-stock           - Low stock alerts
+ * STOCK VIEWING (1 endpoint):
  *   GET  /inventory/movements           - Stock movement audit trail
  *
  * ADJUSTMENTS (1 endpoint):
  *   POST /inventory/adjustments         - Stock corrections (with optional lostAmount for transaction)
  *
- * Total: 15 endpoints (down from 25+)
+ * Total: 14 endpoints (down from 25+)
  */
 async function inventoryManagementPlugin(fastify) {
   // ============================================
@@ -236,14 +235,6 @@ async function inventoryManagementPlugin(fastify) {
   // STOCK VIEWING
   // ============================================
   createRoutes(fastify, [
-    {
-      method: 'GET',
-      url: '/inventory/low-stock',
-      summary: 'Get low stock alerts',
-      description: 'List items below reorder point or custom threshold.',
-      authRoles: permissions.inventory.alerts,
-      handler: inventoryController.getLowStock,
-    },
     {
       method: 'GET',
       url: '/inventory/movements',

@@ -3,9 +3,7 @@ import { inventoryService } from '../inventory/index.js';
 import { branchRepository } from '../branch/index.js';
 import customerRepository from '../../customer/customer.repository.js';
 import orderRepository from '../order/order.repository.js';
-import { getRevenue } from '#common/plugins/revenue.plugin.js';
 import { fromSmallestUnit, toSmallestUnit } from '@classytic/revenue';
-import Transaction from '#modules/transaction/transaction.model.js';
 import platformRepository from '#modules/platform/platform.repository.js';
 import { getBatchCostPrices } from '../order/order.utils.js';
 import { filterOrderCostPriceByUser } from '../order/order.costPrice.utils.js';
@@ -27,6 +25,8 @@ import {
   releasePoints,
 } from '../../customer/membership.utils.js';
 import { idempotencyService } from '../core/index.js';
+import { jobQueue } from '#modules/job/JobQueue.js';
+import { POS_JOB_TYPES } from './pos.jobs.js';
 
 /**
  * POS Controller
@@ -589,67 +589,28 @@ class PosController {
       // No post-order deduction needed - this prevents the race condition
       // where an order could be created with discount but points not deducted.
 
-      // ===== ASYNC TRANSACTION CREATION (fire-and-forget) =====
-      // Transaction is created in background to reduce POS response latency.
-      // Order is already persisted; transaction links asynchronously.
-      // Industry best practice: POS response < 200ms, background reconciliation.
-      const orderId = order._id;
-      const orderIdempotencyKey = order.idempotencyKey || `pos_${orderId}`;
-      const customerId = resolvedCustomer?._id?.toString() || 'walk-in';
-      const asyncBranchId = branch._id;
-      const branchIdStr = branch._id.toString();
-      const branchCode = branch.code;
-      const asyncCashierId = cashier._id;
-      const cashierIdStr = cashier._id.toString();
-      const vatInvoiceNumber = order.vat?.invoiceNumber || null;
-      const vatSellerBin = order.vat?.sellerBin || null;
-      const isSplitPayment = currentPayment.method === 'split';
-      const paymentMethod = currentPayment.method;
-      const paymentReference = currentPayment.reference;
-      const paymentPayments = currentPayment.payments;
-
-      setImmediate(async () => {
-        try {
-          const revenue = getRevenue();
-          const amountInPaisa = toSmallestUnit(totalAmount, 'BDT');
-
-          const { transaction } = await revenue.monetization.create({
-            data: { customerId, referenceId: orderId, referenceModel: 'Order' },
-            planKey: 'one_time',
-            monetizationType: 'purchase',
-            amount: amountInPaisa,
-            currency: 'BDT',
-            gateway: 'manual',
-            paymentData: {
-              method: paymentMethod,
-              trxId: paymentReference,
-              ...(paymentPayments && { payments: paymentPayments }),
-            },
-            metadata: {
-              orderId: orderId.toString(),
-              source: 'pos',
-              branch: branchIdStr,
-              branchCode,
-              terminalId,
-              cashierId: cashierIdStr,
-              vatInvoiceNumber,
-              vatSellerBin,
-              isSplitPayment,
-            },
-            idempotencyKey: orderIdempotencyKey,
-          });
-
-          if (transaction) {
-            await Promise.all([
-              Transaction.findByIdAndUpdate(transaction._id, { source: 'pos', branch: asyncBranchId }),
-              revenue.payments.verify(transaction._id, { verifiedBy: asyncCashierId }),
-              orderRepository.update(orderId, { 'currentPayment.transactionId': transaction._id }),
-            ]);
-          }
-        } catch (error) {
-          // Log but don't fail - transaction will be reconciled by background job
-          console.error('[POS] Async transaction creation failed:', error.message);
-        }
+      // ===== DURABLE TRANSACTION CREATION (via Job Queue) =====
+      // Transaction job is persisted to MongoDB for guaranteed delivery.
+      // If process crashes, job will be recovered and retried automatically.
+      // Uses idempotency key to prevent duplicate transactions on retry.
+      await jobQueue.add({
+        type: POS_JOB_TYPES.CREATE_TRANSACTION,
+        priority: 10, // High priority for financial operations
+        data: {
+          orderId: order._id.toString(),
+          customerId: resolvedCustomer?._id?.toString() || 'walk-in',
+          totalAmount,
+          branchId: branch._id.toString(),
+          branchCode: branch.code,
+          cashierId: cashier._id.toString(),
+          paymentMethod: currentPayment.method,
+          paymentReference: currentPayment.reference,
+          paymentPayments: currentPayment.payments,
+          vatInvoiceNumber: order.vat?.invoiceNumber || null,
+          vatSellerBin: order.vat?.sellerBin || null,
+          terminalId,
+          idempotencyKey: order.idempotencyKey || `pos_${order._id}`,
+        },
       });
 
       return reply.code(201).send({
