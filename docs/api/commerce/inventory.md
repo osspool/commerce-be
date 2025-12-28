@@ -89,6 +89,70 @@ To build a robust retail management system, follow this strict flow of goods:
    - Receiver branch `StockEntry.costPrice` is updated from the transfer (weighted average if existing stock exists).
 5. **Sub-branches** can request stock, receive transfers, and do limited corrections.
 
+## Cross-Branch Stock Visibility
+
+Users can view stock levels in branches other than their own using the `branchId` parameter.
+
+### Viewing Stock in Another Branch
+
+**Product lookup with branch:**
+```http
+GET /api/v1/pos/lookup?code=SKU-123&branchId=BRANCH_ID
+```
+
+**Browse products with branch stock:**
+```http
+GET /api/v1/pos/products?branchId=BRANCH_ID
+```
+
+If `branchId` is omitted, the user's default branch is used.
+
+**Response includes branch-specific stock:**
+```json
+{
+  "success": true,
+  "branch": { "_id": "branch_id", "code": "DHK", "name": "Dhaka Store" },
+  "summary": {
+    "totalItems": 150,
+    "totalQuantity": 2500,
+    "lowStockCount": 12,
+    "outOfStockCount": 5
+  },
+  "docs": [
+    {
+      "name": "Cotton T-Shirt",
+      "sku": "TSHIRT-001",
+      "branchStock": {
+        "quantity": 45,
+        "variants": [
+          { "sku": "TSHIRT-M-RED", "quantity": 20 },
+          { "sku": "TSHIRT-L-BLUE", "quantity": 25 }
+        ],
+        "inStock": true,
+        "lowStock": false
+      }
+    }
+  ]
+}
+```
+
+**Permission notes:**
+- Users with `inventory.view` can view stock for branches they have access to.
+- Admin/superadmin can view stock for any branch.
+
+### Stock Movements Across Branches
+
+View stock movements for any branch (with appropriate permissions):
+```http
+GET /api/v1/inventory/movements?branchId=BRANCH_ID
+```
+
+### Limitations
+
+- Each request returns stock for **one branch at a time**.
+- There is no endpoint that aggregates stock across all branches in a single response.
+- For multi-branch stock overview, query each branch separately or use the admin dashboard.
+
 ## Endpoints (Overview)
 
 > **Pattern Note:** This API follows the **Stripe action-based pattern** for state transitions.
@@ -456,12 +520,14 @@ Example: `REQ-202512-0042` (42nd request of December 2025)
 { "action": "reject", "reason": "Out of stock at head office" }
 
 // Fulfill approved request → creates Transfer (challan)
+// Head office assigns carton numbers here for label printing
 {
   "action": "fulfill",
   "documentType": "delivery_challan",
   "remarks": "Urgent shipment",
   "items": [
-    { "productId": "...", "variantSku": "SKU-RED-M", "quantity": 4 }
+    { "productId": "...", "variantSku": "SKU-RED-M", "quantity": 4, "cartonNumber": "C-01" },
+    { "productId": "...", "variantSku": "SKU-BLUE-L", "quantity": 6, "cartonNumber": "C-02" }
   ]
 }
 
@@ -502,10 +568,39 @@ pending → approved → fulfilled
   rejected / cancelled
 ```
 
+**Partial Approval & Fulfillment (Manager Quantity Control):**
+
+Managers can modify quantities at both approval and fulfillment stages:
+
+| Stage | Field | Behavior |
+|-------|-------|----------|
+| **Approve** | `quantityApproved` | Can be less than `quantityRequested`. Defaults to full requested amount if not specified. |
+| **Fulfill** | `quantity` | Can be less than `quantityApproved`. Cannot exceed approved amount. Defaults to approved amount if not specified. |
+
+**Example flow:** Branch A requests 10 units → Head office approves 8 → Head office fulfills 5 (creates challan for 5 units)
+
+**Quantity tracking per item:**
+```json
+{
+  "product": "product_id",
+  "quantityRequested": 10,
+  "quantityApproved": 8,
+  "quantityFulfilled": 5
+}
+```
+
 **Fulfillment notes:**
 - If `items` is omitted on `fulfill`, approved quantities are sent.
 - If `items` is provided, any item not listed defaults to `0`.
 - `quantityFulfilled` is tracked per item and rolled into `totalQuantityFulfilled`.
+- Status becomes `partial_fulfilled` when `totalQuantityFulfilled < totalQuantityApproved`.
+
+**Carton Labeling (for printing):**
+- Sub-branches only request quantities—they don't know how head office will pack.
+- Head office assigns `cartonNumber` during fulfillment (e.g., `"C-01"`, `"C-02"`).
+- The `cartonNumber` flows into the created Transfer for label printing and tracking.
+- Each item can have a different carton number for grouping shipments.
+- Use consistent carton numbering per challan (e.g., `CHN-202512-0042-C01`).
 
 **Priority Levels:** `low`, `normal` (default), `high`, `urgent`
 

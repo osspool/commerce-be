@@ -16,7 +16,7 @@ import Product from '../../modules/commerce/product/product.model.js';
 import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
 import StockMovement from '../../modules/commerce/inventory/stockMovement.model.js';
 import transferService from '../../modules/commerce/inventory/transfer/transfer.service.js';
-import inventoryService from '../../modules/commerce/inventory/inventory.service.js';
+import { stockSyncService } from '../../modules/commerce/inventory/services/index.js';
 import {
   createTestBranch,
   createTestProduct,
@@ -153,7 +153,7 @@ describe('Inventory Transfers & Movements', () => {
   });
 
   it('creates recount movement when notes include "recount"', async () => {
-    await inventoryService.setStock(
+    await stockSyncService.setStock(
       product._id,
       null,
       subBranch._id,

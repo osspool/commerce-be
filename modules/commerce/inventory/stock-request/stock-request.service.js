@@ -101,7 +101,7 @@ class StockRequestService {
       throw new Error('Only pending requests can be approved');
     }
 
-    // Update approved quantities
+    // Update approved quantities and optional carton assignments
     for (const item of request.items) {
       const approved = approvedItems?.find(
         a => a.itemId?.toString() === item._id.toString() ||
@@ -111,6 +111,11 @@ class StockRequestService {
 
       // Default to full requested quantity if not specified
       item.quantityApproved = approved?.quantityApproved ?? item.quantityRequested;
+
+      // Allow carton assignment during approval
+      if (approved?.cartonNumber) {
+        item.cartonNumber = approved.cartonNumber;
+      }
     }
 
     // Check if anything was approved
@@ -221,11 +226,15 @@ class StockRequestService {
 
         item.quantityFulfilled = resolvedQty;
 
+        // Carton number priority: override > item (from approval) > null
+        const cartonNumber = override?.cartonNumber || item.cartonNumber || null;
+
         return {
           productId: item.product,
           variantSku: item.variantSku,
           quantity: resolvedQty,
           productName: item.productName,
+          cartonNumber,
           notes: item.notes,
         };
       })

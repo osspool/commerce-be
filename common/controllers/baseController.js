@@ -1,9 +1,13 @@
-import { queryParser } from '@classytic/mongokit/utils';
+import { QueryParser } from '@classytic/mongokit';
 
 class BaseController {
   constructor(service, schemaOptions = {}) {
     this.service = service;
     this.schemaOptions = schemaOptions;
+    this.queryParser = new QueryParser({
+      enableLookups: true,
+      enableAggregations: false, // Enable per-route if needed for advanced queries
+    });
 
     this.create = this.create.bind(this);
     this.getAll = this.getAll.bind(this);
@@ -20,8 +24,13 @@ class BaseController {
 
   async getAll(req, reply) {
     const rawQuery = req.validated?.query || req.query;
-    const queryParams = queryParser.parseQuery(rawQuery);
+    const queryParams = this.queryParser.parse(rawQuery);
     const options = this._buildContext(req);
+
+    // Check if query includes lookups (custom field joins)
+    if (queryParams.lookups && queryParams.lookups.length > 0) {
+      return this._getAllWithLookups(reply, queryParams, options);
+    }
 
     // MongoKit Repository.getAll() expects:
     // First arg: { page/after, limit, filters, sort, search }
@@ -39,9 +48,30 @@ class BaseController {
       ...options,
       // Merge populate from queryParams (parsed from URL) with options
       populate: queryParams.populate || options.populate,
+      // Merge select from queryParams if provided
+      ...(queryParams.select && { select: queryParams.select }),
     };
 
     const result = await this.service.getAll(paginationParams, repoOptions);
+    return reply.code(200).send({ success: true, ...result });
+  }
+
+  /**
+   * Handle queries with custom field lookups (e.g., joining on slug instead of ObjectId)
+   * Example URL: ?lookup[department]=slug&status=active&page=1
+   */
+  async _getAllWithLookups(reply, queryParams, options) {
+    const lookupOptions = {
+      filters: queryParams.filters,
+      lookups: queryParams.lookups,
+      sort: queryParams.sort,
+      page: queryParams.page,
+      limit: queryParams.limit,
+      select: queryParams.select,
+      session: options.session,
+    };
+
+    const result = await this.service.lookupPopulate(lookupOptions);
     return reply.code(200).send({ success: true, ...result });
   }
 

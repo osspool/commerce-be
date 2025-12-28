@@ -7,12 +7,14 @@ import posPlugin from './pos/pos.plugin.js';
 import branchPlugin from './branch/branch.plugin.js';
 import inventoryManagementPlugin from './inventory/inventory-management.plugin.js';
 import { categoryPlugin } from './category/index.js';
+import { sizeGuidePlugin } from './size-guide/index.js';
 
 /**
  * Commerce Plugin
  *
  * Registers all commerce-related routes:
  * - Categories (slug-based, for product organization)
+ * - Size Guides (dynamic size templates for products)
  * - Products (with category slug reference)
  * - Coupons
  * - Cart
@@ -26,6 +28,7 @@ import { categoryPlugin } from './category/index.js';
  */
 export default async function commercePlugin(fastify) {
   await fastify.register(categoryPlugin);
+  await fastify.register(sizeGuidePlugin);
   await fastify.register(productPlugin);
   await fastify.register(couponPlugin);
   await fastify.register(cartPlugin);

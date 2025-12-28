@@ -25,6 +25,22 @@ class LRUCache {
       // Add to end
       this.cache.set(key, value);
     }
+
+    delete(key) {
+      this.cache.delete(key);
+    }
+
+    clear() {
+      this.cache.clear();
+    }
+
+    keys() {
+      return this.cache.keys();
+    }
+
+    get size() {
+      return this.cache.size;
+    }
   }
 
   export default LRUCache;

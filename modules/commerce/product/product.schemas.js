@@ -17,9 +17,10 @@ export const productSchemaOptions = {
     'stats.totalSales': { systemManaged: true },
   },
   query: {
-    allowedPopulate: [], // images carry URLs + variants directly; no populate needed
+    allowedPopulate: ['sizeGuide'], // Allow populating size guide reference
     filterableFields: {
       category: { type: 'string' },
+      sizeGuide: { type: 'objectId' },
       style: { type: 'string' },
       tags: { type: 'string' },
       basePrice: { type: 'number' },

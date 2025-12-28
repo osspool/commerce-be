@@ -2,7 +2,6 @@ import BaseController from '#common/controllers/baseController.js';
 import productRepository from './product.repository.js';
 import { productSchemaOptions } from './product.schemas.js';
 import { filterCostPriceByRole } from './product.utils.js';
-import { queryParser } from '@classytic/mongokit/utils';
 import { syncProduct } from '../inventory/stockSync.util.js';
 
 class ProductController extends BaseController {
@@ -19,8 +18,18 @@ class ProductController extends BaseController {
   // Override getAll to filter cost prices
   async getAll(req, reply) {
     const rawQuery = req.validated?.query || req.query;
-    const queryParams = queryParser.parseQuery(rawQuery);
+    const queryParams = this.queryParser.parse(rawQuery);
     const options = this._buildContext(req);
+
+    // Check if query includes lookups (custom field joins)
+    if (queryParams.lookups && queryParams.lookups.length > 0) {
+      const result = await this._getAllWithLookups(reply, queryParams, options);
+      // Filter cost prices for lookup results
+      if (result.data) {
+        result.data = filterCostPriceByRole(result.data, req.user);
+      }
+      return result;
+    }
 
     const paginationParams = {
       ...(queryParams.page !== undefined && { page: queryParams.page }),
@@ -34,6 +43,7 @@ class ProductController extends BaseController {
     const repoOptions = {
       ...options,
       populate: queryParams.populate || options.populate,
+      ...(queryParams.select && { select: queryParams.select }),
     };
 
     const result = await this.service.getAll(paginationParams, repoOptions);
@@ -106,7 +116,7 @@ class ProductController extends BaseController {
    */
   async getDeleted(req, reply) {
     const rawQuery = req.validated?.query || req.query;
-    const queryParams = queryParser.parseQuery(rawQuery);
+    const queryParams = this.queryParser.parse(rawQuery);
     const options = this._buildContext(req);
 
     const paginationParams = {

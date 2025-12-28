@@ -46,31 +46,32 @@ class CMSController extends BaseController {
   }
 
   /**
-   * Update CMS page by slug (admin only)
+   * Update or create CMS page by slug (admin only)
    * PATCH /cms/:slug
    */
   async updateBySlug(req, reply) {
     const { slug } = req.params;
-    const updates = { ...req.body };
+    const updates = { ...req.body, slug };
 
     // Do not allow slug updates through payload to avoid mismatches
-    if ('slug' in updates) {
+    if ('slug' in req.body) {
       delete updates.slug;
+      updates.slug = slug; // Force slug from URL
     }
 
-    // Find page by slug first
-    const page = await CMSRepository.getByQuery({ slug });
-
-    if (!page) {
-      return reply.code(404).send({
-        success: false,
-        message: `Page with slug "${slug}" not found`,
-      });
+    // Ensure name defaults to slug if not provided
+    if (!updates.name) {
+      updates.name = slug;
     }
 
-    // Update by ID
-    const updated = await CMSRepository.update(page._id, updates);
-    return reply.code(200).send({ success: true, data: updated });
+    // Simple upsert: update if exists, create if doesn't
+    const page = await CMSRepository.Model.findOneAndUpdate(
+      { slug },
+      { $set: updates },
+      { upsert: true, new: true, runValidators: true }
+    );
+
+    return reply.code(200).send({ success: true, data: page });
   }
 }
 

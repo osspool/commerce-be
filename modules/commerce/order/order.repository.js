@@ -14,7 +14,7 @@ import * as productStats from '#modules/commerce/product/product.stats.js';
 import { onMembershipPointsEarned } from '#modules/customer/customer.stats.js';
 
 // Inventory service for stock restoration
-import inventoryService from '#modules/commerce/inventory/inventory.service.js';
+import { stockTransactionService } from '#modules/commerce/inventory/index.js';
 
 // Membership utils for points restoration
 import { releasePoints } from '#modules/customer/membership.utils.js';
@@ -295,7 +295,7 @@ class OrderRepository extends Repository {
   }
 
   /**
-   * Restore stock to inventory using inventoryService
+   * Restore stock to inventory using stockTransactionService
    * Properly restores StockEntry and creates audit trail
    */
   async _restoreOrderStock(order) {
@@ -311,7 +311,7 @@ class OrderRepository extends Repository {
       const branchId = order.branch || null;
 
       // Restore stock via inventory service (updates StockEntry + creates movements)
-      await inventoryService.restoreBatch(
+      await stockTransactionService.restoreBatch(
         items,
         branchId,
         { model: 'Order', id: order._id },

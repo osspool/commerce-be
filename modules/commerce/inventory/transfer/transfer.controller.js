@@ -251,6 +251,108 @@ class TransferController {
       });
     }
   }
+
+  /**
+   * Export transfers to CSV
+   * GET /inventory/transfers/export
+   *
+   * Query params:
+   * - status: Filter by status
+   * - senderBranch: Filter by sender branch
+   * - receiverBranch: Filter by receiver branch
+   * - transferType: Filter by type
+   * - startDate/endDate: Date range filter
+   * - limit: Max records to export (default: 10000, max: 50000)
+   *
+   * Returns CSV file with all transfer data for archival purposes.
+   * Users should export data before the 2-year TTL cleanup.
+   */
+  async exportTransfers(req, reply) {
+    try {
+      const { limit, ...filters } = req.query;
+      const exportLimit = Math.min(parseInt(limit) || 10000, 50000);
+
+      const result = await transferService.listTransfers(filters, {
+        limit: exportLimit,
+        sort: '-createdAt',
+        populate: true,
+      });
+
+      // Convert to CSV
+      const csvRows = [];
+
+      // CSV Header
+      csvRows.push([
+        'Transfer ID',
+        'Challan Number',
+        'Transfer Type',
+        'Document Type',
+        'Status',
+        'Sender Branch ID',
+        'Sender Branch Name',
+        'Receiver Branch ID',
+        'Receiver Branch Name',
+        'Total Items',
+        'Total Quantity',
+        'Total Value',
+        'Created At',
+        'Created By',
+        'Approved At',
+        'Approved By',
+        'Dispatched At',
+        'Dispatched By',
+        'Received At',
+        'Received By',
+        'Vehicle Number',
+        'Driver Name',
+        'Driver Phone',
+        'Remarks',
+      ].join(','));
+
+      // CSV Data
+      for (const transfer of result.docs || []) {
+        const row = [
+          transfer._id,
+          transfer.challanNumber || '',
+          transfer.transferType || '',
+          transfer.documentType || '',
+          transfer.status || '',
+          transfer.senderBranch?._id || transfer.senderBranch || '',
+          transfer.senderBranch?.name ? `"${transfer.senderBranch.name.replace(/"/g, '""')}"` : '',
+          transfer.receiverBranch?._id || transfer.receiverBranch || '',
+          transfer.receiverBranch?.name ? `"${transfer.receiverBranch.name.replace(/"/g, '""')}"` : '',
+          transfer.totalItems || 0,
+          transfer.totalQuantity || 0,
+          transfer.totalValue || 0,
+          transfer.createdAt ? new Date(transfer.createdAt).toISOString() : '',
+          transfer.createdBy || '',
+          transfer.approvedAt ? new Date(transfer.approvedAt).toISOString() : '',
+          transfer.approvedBy || '',
+          transfer.dispatchedAt ? new Date(transfer.dispatchedAt).toISOString() : '',
+          transfer.dispatchedBy || '',
+          transfer.receivedAt ? new Date(transfer.receivedAt).toISOString() : '',
+          transfer.receivedBy || '',
+          transfer.transport?.vehicleNumber || '',
+          transfer.transport?.driverName || '',
+          transfer.transport?.driverPhone || '',
+          transfer.remarks ? `"${transfer.remarks.replace(/"/g, '""')}"` : '',
+        ];
+        csvRows.push(row.join(','));
+      }
+
+      const csv = csvRows.join('\n');
+      const filename = `transfers-${new Date().toISOString().split('T')[0]}.csv`;
+
+      reply.header('Content-Type', 'text/csv');
+      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      return reply.send(csv);
+    } catch (error) {
+      return reply.code(500).send({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
 }
 
 export default new TransferController();

@@ -5,8 +5,12 @@ import StockMovement from './stockMovement.model.js';
 import branchRepository from '../branch/branch.repository.js';
 import { createMemoryCacheAdapter } from '#common/adapters/memoryCache.adapter.js';
 import { syncProduct } from './stockSync.util.js';
+import LRUCache from '#utils/LRUCache.js';
 
 const inventoryCacheAdapter = createMemoryCacheAdapter({ maxSize: 1000 });
+const BARCODE_CACHE_MAX = 5000;
+const PRODUCT_SKU_CACHE_MAX = 3000;
+const PRODUCT_META_CACHE_MAX = 2000;
 
 /**
  * Inventory Repository (read-focused)
@@ -16,7 +20,7 @@ const inventoryCacheAdapter = createMemoryCacheAdapter({ maxSize: 1000 });
  * - Hot-path caching (local Map) + MongoKit cachePlugin for general queries
  *
  * Does not own:
- * - Writes/mutations (those live in inventory.service.js)
+ * - Writes/mutations (those live in services/stock-*.service.js)
  *
  * Important:
  * - All stock mutations should emit `after:update` on this repository to keep
@@ -37,9 +41,9 @@ class InventoryRepository extends Repository {
       }),
     ]);
 
-    this._barcodeCache = new Map();
-    this._productSkuCache = new Map();
-    this._productMetaCache = new Map();
+    this._barcodeCache = new LRUCache(BARCODE_CACHE_MAX);
+    this._productSkuCache = new LRUCache(PRODUCT_SKU_CACHE_MAX);
+    this._productMetaCache = new LRUCache(PRODUCT_META_CACHE_MAX);
     this._productSyncTimers = new Map();
     this._movementRepo = new Repository(StockMovement, [], {
       defaultLimit: 50,
@@ -242,6 +246,7 @@ class InventoryRepository extends Repository {
 
     if (productResult?.product) {
       const desiredVariantSku = productResult.matchedVariant?.sku || null;
+      const isVariableProduct = productResult.product.variants?.length > 0;
 
       const productId = productResult.product._id?.toString?.() || String(productResult.product._id);
       const sku = productResult.product.sku?.trim?.() || null;
@@ -249,14 +254,42 @@ class InventoryRepository extends Repository {
         this._productSkuCache.set(productId, { sku, expireAt: Date.now() + 10 * 60 * 1000 });
       }
 
-      // Find StockEntry with branch stock
+      // For variable products scanned by parent SKU, aggregate all variant stock
+      if (isVariableProduct && !desiredVariantSku) {
+        const variantEntries = await this.Model.find({
+          product: productResult.product._id,
+          branch,
+          ...(!includeInactive ? { isActive: { $ne: false } } : {}),
+        })
+          .select('variantSku quantity costPrice')
+          .lean();
+
+        const totalQuantity = variantEntries.reduce((sum, e) => sum + (e.quantity || 0), 0);
+        const variantStock = variantEntries.map(e => ({
+          sku: e.variantSku,
+          quantity: e.quantity || 0,
+          costPrice: e.costPrice,
+        }));
+
+        const value = {
+          product: productResult.product,
+          variantSku: null,
+          quantity: totalQuantity,
+          variantStock,
+          source: 'inventory',
+        };
+        this._barcodeCache.set(cacheKey, { value, expireAt: Date.now() + 30000 });
+        return value;
+      }
+
+      // Find StockEntry with branch stock (simple product or specific variant)
       const resolvedEntry = await this.Model.findOne({
         product: productResult.product._id,
         variantSku: desiredVariantSku,
         branch,
         ...(!includeInactive ? { isActive: { $ne: false } } : {}),
       })
-        .populate('product', 'name slug images basePrice sku barcode variants')
+        .populate('product', 'name slug images basePrice sku barcode variants category discount vatRate costPrice')
         .lean();
 
       if (resolvedEntry) {

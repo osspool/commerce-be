@@ -1,6 +1,6 @@
 import orderRepository from '../order.repository.js';
 import { ORDER_STATUS, PAYMENT_STATUS, SHIPPING_STATUS } from '../order.enums.js';
-import { inventoryService } from '../../inventory/index.js';
+import { stockTransactionService } from '../../inventory/index.js';
 import { branchRepository } from '../../branch/index.js';
 import { stockService } from '../../core/index.js';
 import { getVatConfig } from '../vat.utils.js';
@@ -121,7 +121,7 @@ export async function fulfillOrderWorkflow(orderId, options = {}) {
 
   const decrementResult = order.stockReservationId
     ? await stockService.commitReservation(order.stockReservationId, reference, actorId)
-    : await inventoryService.decrementBatch(stockItems, branch._id, reference, actorId);
+    : await stockTransactionService.decrementBatch(stockItems, branch._id, reference, actorId);
 
   if (!decrementResult.success) {
     const error = new Error(decrementResult.error || 'Insufficient stock');

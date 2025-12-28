@@ -1,7 +1,7 @@
 import users from './users.js';
 import customers from './customers.js';
 import transactions from './transactions.js';
-import commerce, { products, categories, coupons, orders, cart, reviews, branches, pos } from './commerce.js';
+import commerce, { products, categories, sizeGuides, coupons, orders, cart, reviews, branches, pos } from './commerce.js';
 import platform from './platform.js';
 import analytics from './analytics.js';
 import exportPerms from './export.js';
@@ -14,6 +14,7 @@ const permissions = {
   transactions,
   products,
   categories,
+  sizeGuides,
   coupons,
   orders,
   cart,

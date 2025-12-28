@@ -114,6 +114,10 @@ const productSchema = new Schema({
   category: { type: String, required: true, trim: true, lowercase: true },
   parentCategory: { type: String, trim: true, lowercase: true, default: null },
 
+  // Size guide reference (optional)
+  // References SizeGuide._id for displaying size information on product pages
+  sizeGuide: { type: Schema.Types.ObjectId, ref: 'SizeGuide', default: null },
+
   // Style tags (enum set) for quick filtering like ?style=street
   style: [{
     type: String,

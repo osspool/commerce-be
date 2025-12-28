@@ -1,20 +1,22 @@
 import BaseController from '#common/controllers/baseController.js';
 import inventoryRepository from './inventory.repository.js';
-import inventoryService from './inventory.service.js';
 import { inventorySchemaOptions } from './inventory.schemas.js';
 import { branchRepository } from '../branch/index.js';
 import { filterCostPriceByRole } from '../product/product.utils.js';
 import logger from '#common/utils/logger.js';
 import { createVerifiedOperationalExpenseTransaction } from '#modules/transaction/utils/operational-transactions.js';
 
+// Import specialized services directly
+import { stockLookupService, stockSyncService, stockMovementService } from './services/index.js';
+
 /**
- * Inventory Controller - Simplified
+ * Inventory Controller
  *
  * Core operations:
- * - lookup: Barcode/SKU scan
+ * - lookup: Barcode/SKU scan (uses stockLookupService)
  * - getPosProducts: Products with branch stock
- * - bulkImport: Adjust stock (single or bulk)
- * - getMovements: Audit trail
+ * - bulkImport: Adjust stock (uses stockSyncService)
+ * - getMovements: Audit trail (uses stockMovementService)
  */
 class InventoryController extends BaseController {
   constructor() {
@@ -24,6 +26,7 @@ class InventoryController extends BaseController {
     this.getPosProducts = this.getPosProducts.bind(this);
     this.bulkImport = this.bulkImport.bind(this);
     this.getMovements = this.getMovements.bind(this);
+    this.exportMovements = this.exportMovements.bind(this);
   }
 
   // ============================================
@@ -45,7 +48,7 @@ class InventoryController extends BaseController {
       ? await branchRepository.getById(branchId)
       : await branchRepository.getDefaultBranch();
 
-    const entry = await this.service.getByBarcodeOrSku(code, branch?._id);
+    const entry = await stockLookupService.getByBarcodeOrSku(code, branch?._id);
 
     if (!entry) {
       return reply.code(404).send({
@@ -107,7 +110,7 @@ class InventoryController extends BaseController {
       limit: parseInt(params.limit) || 50,
     });
 
-    const summary = await this.service.getBranchStockSummary(branch._id);
+    const summary = await stockLookupService.getBranchStockSummary(branch._id);
     const filteredDocs = filterCostPriceByRole(result.docs, req.user);
 
     return reply.send({
@@ -186,7 +189,7 @@ class InventoryController extends BaseController {
     const getCurrentQuantity = async (adj) => {
       const cacheKey = String(adj.productId);
       if (!productStockCache.has(cacheKey)) {
-        const entries = await this.service.getProductStock(adj.productId, branch._id);
+        const entries = await stockLookupService.getProductStock(adj.productId, branch._id);
         const variantMap = new Map(
           (entries || []).map(e => [e.variantSku || null, e.quantity || 0])
         );
@@ -223,7 +226,7 @@ class InventoryController extends BaseController {
           }
         }
 
-        await inventoryService.setStock(
+        await stockSyncService.setStock(
           adj.productId,
           adj.variantSku || null,
           branch._id,
@@ -359,7 +362,7 @@ class InventoryController extends BaseController {
       cursor,
     } = req.query;
 
-    const result = await this.service.getMovements(
+    const result = await stockMovementService.getMovements(
       {
         productId: productId || product,
         branchId: branchId || branch,
@@ -380,6 +383,107 @@ class InventoryController extends BaseController {
       success: true,
       ...result,
     });
+  }
+
+  // ============================================
+  // EXPORT
+  // ============================================
+
+  /**
+   * Export stock movements to CSV
+   * GET /inventory/movements/export
+   *
+   * Query params (same as getMovements):
+   * - productId/product: Filter by product
+   * - branchId/branch: Filter by branch
+   * - type: Movement type filter
+   * - startDate/endDate: Date range filter
+   * - limit: Max records to export (default: 10000, max: 50000)
+   *
+   * Returns CSV file with all movement data for archival purposes.
+   * Users should export data before the 2-year TTL cleanup.
+   */
+  async exportMovements(req, reply) {
+    const {
+      productId,
+      product,
+      branchId,
+      branch,
+      type,
+      startDate,
+      endDate,
+      limit,
+    } = req.query;
+
+    const exportLimit = Math.min(parseInt(limit) || 10000, 50000);
+
+    const result = await stockMovementService.getMovements(
+      {
+        productId: productId || product,
+        branchId: branchId || branch,
+        type,
+        startDate,
+        endDate,
+      },
+      {
+        limit: exportLimit,
+        sort: '-createdAt',
+        populate: ['product', 'branch', 'stockEntry'],
+      }
+    );
+
+    // Convert to CSV
+    const csvRows = [];
+
+    // CSV Header
+    csvRows.push([
+      'Movement ID',
+      'Date',
+      'Type',
+      'Product ID',
+      'Product Name',
+      'Product SKU',
+      'Variant SKU',
+      'Branch ID',
+      'Branch Name',
+      'Quantity Change',
+      'Balance After',
+      'Cost Per Unit',
+      'Reference Model',
+      'Reference ID',
+      'Actor ID',
+      'Notes',
+    ].join(','));
+
+    // CSV Data
+    for (const movement of result.docs || []) {
+      const row = [
+        movement._id,
+        movement.createdAt ? new Date(movement.createdAt).toISOString() : '',
+        movement.type || '',
+        movement.product?._id || movement.product || '',
+        movement.product?.name ? `"${movement.product.name.replace(/"/g, '""')}"` : '',
+        movement.product?.sku || '',
+        movement.variantSku || '',
+        movement.branch?._id || movement.branch || '',
+        movement.branch?.name ? `"${movement.branch.name.replace(/"/g, '""')}"` : '',
+        movement.quantity || 0,
+        movement.balanceAfter || 0,
+        movement.costPerUnit || '',
+        movement.reference?.model || '',
+        movement.reference?.id || '',
+        movement.actor || '',
+        movement.notes ? `"${movement.notes.replace(/"/g, '""')}"` : '',
+      ];
+      csvRows.push(row.join(','));
+    }
+
+    const csv = csvRows.join('\n');
+    const filename = `stock-movements-${new Date().toISOString().split('T')[0]}.csv`;
+
+    reply.header('Content-Type', 'text/csv');
+    reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+    return reply.send(csv);
   }
 }
 

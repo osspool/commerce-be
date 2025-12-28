@@ -4,7 +4,7 @@ import transferRepository from './transfer.repository.js';
 import StockEntry from '../stockEntry.model.js';
 import StockMovement from '../stockMovement.model.js';
 import branchRepository from '../../branch/branch.repository.js';
-import inventoryService from '../inventory.service.js';
+import { stockTransactionService, stockAvailabilityService } from '../services/index.js';
 import logger from '#common/utils/logger.js';
 import { createStateMachine } from '#common/utils/state-machine.js';
 
@@ -202,7 +202,7 @@ class TransferService {
     transferState.assert('approve', transfer.status, createStatusError, 'Only draft transfers can be approved');
 
     // Validate stock availability at sender (head office)
-    const availability = await inventoryService.checkAvailability(
+    const availability = await stockAvailabilityService.checkAvailability(
       transfer.items.map(item => ({
         productId: item.product,
         variantSku: item.variantSku,
@@ -261,7 +261,7 @@ class TransferService {
       }));
 
       // Decrement stock from sender (head office)
-      const decrementResult = await inventoryService.decrementBatch(
+      const decrementResult = await stockTransactionService.decrementBatch(
         stockItems,
         transfer.senderBranch,
         { model: 'Challan', id: transfer._id },
@@ -323,7 +323,7 @@ class TransferService {
     );
 
     if (usedSession) {
-      await inventoryService.emitStockEvents(decrementedItems, true);
+      await stockTransactionService.emitStockEvents(decrementedItems, true);
     }
 
     logger.info({ transferId, challanNumber: transfer.challanNumber }, 'Transfer dispatched');
@@ -422,7 +422,7 @@ class TransferService {
       let restoreResult = { success: true, restoredItems: [] };
       // Increment stock at receiver branch
       if (stockItems.length > 0) {
-        restoreResult = await inventoryService.restoreBatch(
+        restoreResult = await stockTransactionService.restoreBatch(
           stockItems,
           transfer.receiverBranch,
           { model: 'Challan', id: transfer._id },
@@ -483,7 +483,7 @@ class TransferService {
     );
 
     if (usedSession) {
-      await inventoryService.emitStockEvents(restoredItems, false);
+      await stockTransactionService.emitStockEvents(restoredItems, false);
     }
 
     logger.info({

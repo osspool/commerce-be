@@ -52,7 +52,7 @@ export function createMemoryCacheAdapter(options = {}) {
 
       // Check TTL
       if (entry.expireAt && entry.expireAt < now()) {
-        store.cache.delete(key);
+        store.delete(key);
         return null;
       }
 
@@ -77,7 +77,7 @@ export function createMemoryCacheAdapter(options = {}) {
      * @param {string} key - Cache key
      */
     async del(key) {
-      store.cache.delete(key);
+      store.delete(key);
     },
 
     /**
@@ -86,7 +86,7 @@ export function createMemoryCacheAdapter(options = {}) {
      */
     async clear(pattern) {
       if (!pattern || pattern === '*') {
-        store.cache.clear();
+        store.clear();
         return;
       }
 
@@ -95,9 +95,9 @@ export function createMemoryCacheAdapter(options = {}) {
       const regexPattern = '^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
       const regex = new RegExp(regexPattern);
 
-      for (const key of store.cache.keys()) {
+      for (const key of store.keys()) {
         if (regex.test(key)) {
-          store.cache.delete(key);
+          store.delete(key);
         }
       }
     },
@@ -108,7 +108,7 @@ export function createMemoryCacheAdapter(options = {}) {
      */
     stats() {
       return {
-        size: store.cache.size,
+        size: store.size,
         maxSize: store.maxSize,
       };
     },

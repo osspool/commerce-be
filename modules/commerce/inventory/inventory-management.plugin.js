@@ -166,6 +166,25 @@ async function inventoryManagementPlugin(fastify) {
     },
     {
       method: 'GET',
+      url: '/inventory/transfers/export',
+      summary: 'Export transfers to CSV',
+      description: `Export transfer records for archival purposes.
+
+**Important:** Completed/cancelled transfers older than 2 years are automatically deleted by TTL.
+Export your data regularly to maintain historical records for compliance and auditing.
+
+**Query params:**
+- \`status\`: Filter by status
+- \`senderBranch\`: Filter by sender branch
+- \`receiverBranch\`: Filter by receiver branch
+- \`transferType\`: Filter by type
+- \`startDate\`/\`endDate\`: Date range
+- \`limit\`: Max records (default: 10000, max: 50000)`,
+      authRoles: permissions.inventory.transferView,
+      handler: transferController.exportTransfers,
+    },
+    {
+      method: 'GET',
       url: '/inventory/transfers/:id',
       summary: 'Get transfer details',
       description: 'Get by ID or challan number (e.g., CHN-202512-0001)',
@@ -232,7 +251,7 @@ async function inventoryManagementPlugin(fastify) {
 
 
   // ============================================
-  // STOCK VIEWING
+  // STOCK VIEWING & EXPORT
   // ============================================
   createRoutes(fastify, [
     {
@@ -242,6 +261,24 @@ async function inventoryManagementPlugin(fastify) {
       description: 'Stock movement audit trail with filters.',
       authRoles: permissions.inventory.movements,
       handler: inventoryController.getMovements,
+    },
+    {
+      method: 'GET',
+      url: '/inventory/movements/export',
+      summary: 'Export stock movements to CSV',
+      description: `Export stock movements for archival purposes.
+
+**Important:** Stock movements older than 2 years are automatically deleted by TTL.
+Export your data regularly to maintain historical records for compliance and auditing.
+
+**Query params:**
+- \`productId\`: Filter by product
+- \`branchId\`: Filter by branch
+- \`type\`: Movement type (sale, return, adjustment, etc.)
+- \`startDate\`/\`endDate\`: Date range
+- \`limit\`: Max records (default: 10000, max: 50000)`,
+      authRoles: permissions.inventory.movements,
+      handler: inventoryController.exportMovements,
     },
   ], { tag: 'Inventory - Stock', basePath: '/api/v1/inventory' });
 

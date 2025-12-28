@@ -3,7 +3,6 @@ import {
   Repository,
   validationChainPlugin,
   requireField,
-  cascadePlugin,
   softDeletePlugin,
 } from '@classytic/mongokit';
 import Product from './product.model.js';
@@ -38,7 +37,6 @@ function slugify(name) {
  * Uses MongoKit plugins:
  * - validationChainPlugin: Required field validation
  * - softDeletePlugin: Soft delete with restore() and getDeleted()
- * - cascadePlugin: Deletes related StockEntry/StockMovement on hard delete
  *
  * Soft delete behavior:
  * - delete(id) → sets deletedAt = new Date()
@@ -46,6 +44,9 @@ function slugify(name) {
  * - restore(id) → provided by plugin, sets deletedAt = null
  * - getDeleted() → provided by plugin, returns deleted items
  * - TTL: Auto-purge after 30 days (plugin creates index)
+ *
+ * Note: Hard delete does NOT cascade to StockEntry/StockMovement.
+ * Historical inventory data is preserved for audit trail.
  */
 class ProductRepository extends Repository {
   constructor() {
@@ -59,12 +60,6 @@ class ProductRepository extends Repository {
         deletedField: 'deletedAt',
         filterMode: 'null', // Works with schema default: null
         ttlDays: 30,        // Auto-cleanup deleted products after 30 days
-      }),
-      cascadePlugin({
-        relations: [
-          { model: 'StockEntry', foreignKey: 'product' },
-          { model: 'StockMovement', foreignKey: 'product' },
-        ],
       }),
     ], {
       defaultLimit: 20,
@@ -392,16 +387,20 @@ class ProductRepository extends Repository {
    * @param {string} code - Barcode or SKU to search
    * @returns {Object|null} - Product with matched variant info, or null
    */
-  async getByBarcodeOrSku(code) {
+  async getByBarcodeOrSku(code, options = {}) {
     if (!code) return null;
 
     const trimmedCode = code.trim();
+    const activeFilter = { isActive: true, deletedAt: null };
+    const selectFields = options.select || 'name slug images basePrice sku barcode variants category discount vatRate costPrice';
 
     // First try product-level match (fast)
     let product = await this.Model.findOne({
       $or: [{ sku: trimmedCode }, { barcode: trimmedCode }],
-      isActive: true,
-    }).lean();
+      ...activeFilter,
+    })
+      .select(selectFields)
+      .lean();
 
     if (product) {
       return { product, matchedVariant: null };
@@ -413,8 +412,10 @@ class ProductRepository extends Repository {
         { 'variants.sku': trimmedCode },
         { 'variants.barcode': trimmedCode },
       ],
-      isActive: true,
-    }).lean();
+      ...activeFilter,
+    })
+      .select(selectFields)
+      .lean();
 
     if (product) {
       const matchedVariant = (product.variants || []).find(
@@ -630,8 +631,15 @@ class ProductRepository extends Repository {
 
   /**
    * ⚠️ HARD DELETE (Destructive - use with caution)
-   * Permanently removes product and all related inventory data
-   * Use only for test data cleanup or compliance (GDPR)
+   * Permanently removes product from catalog
+   *
+   * IMPORTANT: Does NOT delete related StockEntry/StockMovement records.
+   * Historical inventory data is preserved for audit trail and compliance.
+   *
+   * Use only for:
+   * - Test data cleanup
+   * - GDPR compliance (customer data, not inventory)
+   * - Duplicate product removal
    *
    * Note: Regular soft delete is handled by softDeletePlugin.delete()
    * Note: restore() is handled by softDeletePlugin.restore()
@@ -650,6 +658,7 @@ class ProductRepository extends Repository {
     eventBus.emitProductEvent('before.purge', { product });
 
     // Use Model.deleteOne to bypass softDeletePlugin
+    // Note: StockEntry and StockMovement records are NOT deleted (preserved for audit trail)
     await this.Model.deleteOne({ _id: productId });
 
     // Decrement category count

@@ -103,7 +103,6 @@ class CommerceClient {
   inventory = {
     list: (params) => this.request('GET', '/api/v1/inventory', { params }),
     retrieve: (id) => this.request('GET', `/api/v1/inventory/${id}`),
-    listLowStock: (params) => this.request('GET', '/api/v1/inventory/low-stock', { params }),
     adjust: (data) => this.request('POST', '/api/v1/inventory/adjustments', { body: data }),
     listMovements: (params) => this.request('GET', '/api/v1/inventory/movements', { params }),
 
@@ -444,17 +443,6 @@ describe('Commerce SDK - Comprehensive Test Suite', () => {
   describe('2. Inventory Management', () => {
 
     describe('2.1 Stock Queries', () => {
-      it('should list low stock alerts', async () => {
-        const result = await adminClient.inventory.listLowStock({
-          branchId: headOfficeBranch._id.toString(),
-        });
-
-        expect(result.success).toBe(true);
-        // Low stock returns { success, data: [...] }
-        expect(result.data).toBeDefined();
-        expect(Array.isArray(result.data)).toBe(true);
-      });
-
       it('should lookup product stock via POS endpoint', async () => {
         const result = await adminClient.pos.lookup({
           code: testProduct.sku,

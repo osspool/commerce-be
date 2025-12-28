@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { eventBus } from '#common/events/eventBus.js';
 import branchRepository from '../branch/branch.repository.js';
-import inventoryService from './inventory.service.js';
+import { stockSyncService } from './services/index.js';
 import logger from '#common/utils/logger.js';
 
 let handlersRegistered = false;
@@ -87,10 +87,10 @@ export function registerInventoryEventHandlers(options = {}) {
   eventBus.on('product:variants.changed', async ({ productId, disabledSkus, enabledSkus }) => {
     try {
       if (disabledSkus?.length > 0) {
-        await inventoryService.setVariantsActive(productId, disabledSkus, false);
+        await stockSyncService.setVariantsActive(productId, disabledSkus, false);
       }
       if (enabledSkus?.length > 0) {
-        await inventoryService.setVariantsActive(productId, enabledSkus, true);
+        await stockSyncService.setVariantsActive(productId, enabledSkus, true);
       }
     } catch (error) {
       logger.error({ err: error, productId }, 'Failed to update variant stock status');
@@ -100,7 +100,7 @@ export function registerInventoryEventHandlers(options = {}) {
   // When product deleted → deactivate all stock
   eventBus.on('product:deleted', async ({ productId, sku }) => {
     try {
-      await inventoryService.setProductStockActive(productId, false);
+      await stockSyncService.setProductStockActive(productId, false);
       logger.info({ sku: sku || productId }, 'Deactivated stock for deleted product');
     } catch (error) {
       logger.error({ err: error, productId }, 'Failed to deactivate product stock');
@@ -110,7 +110,7 @@ export function registerInventoryEventHandlers(options = {}) {
   // When product restored → reactivate all stock (derived from Product + Variant state)
   eventBus.on('product:restored', async ({ productId, sku }) => {
     try {
-      await inventoryService.syncProductStockIsActive(productId);
+      await stockSyncService.syncProductStockIsActive(productId);
       logger.info({ sku: sku || productId }, 'Reactivated stock for restored product');
     } catch (error) {
       logger.error({ err: error, productId }, 'Failed to reactivate product stock');
@@ -120,7 +120,7 @@ export function registerInventoryEventHandlers(options = {}) {
   // When product about to be purged → snapshot product data
   eventBus.on('product:before.purge', async ({ product }) => {
     try {
-      await inventoryService.snapshotProductBeforeDelete(product);
+      await stockSyncService.snapshotProductBeforeDelete(product);
       logger.info({ sku: product?.sku || product?._id }, 'Snapshotted product before purge');
     } catch (error) {
       logger.error({ err: error, productId: product?._id }, 'Failed to snapshot product before purge');

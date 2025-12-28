@@ -44,6 +44,8 @@ const requestItemSchema = new Schema({
     type: Map,
     of: String,
   },
+  // Carton number for grouping/printing (assigned during approval or fulfillment)
+  cartonNumber: String,
   // Requested quantity
   quantityRequested: {
     type: Number,

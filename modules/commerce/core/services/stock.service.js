@@ -12,7 +12,7 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import inventoryRepository from '../../inventory/inventory.repository.js';
-import { inventoryService } from '../../inventory/index.js';
+import { stockTransactionService } from '../../inventory/index.js';
 import branchRepository from '../../branch/branch.repository.js';
 import logger from '#common/utils/logger.js';
 import StockReservation from '../models/stockReservation.model.js';
@@ -768,12 +768,12 @@ class StockService {
   }
 
   // ===========================================================================
-  // Stock Operations (Delegates to inventoryService)
+  // Stock Operations (Delegates to stockTransactionService)
   // ===========================================================================
 
   /**
    * Decrement stock atomically
-   * Wrapper around inventoryService with validation
+   * Wrapper around stockTransactionService with validation
    *
    * @param {Array} items - Items to decrement
    * @param {string} branchId - Branch ID
@@ -790,7 +790,7 @@ class StockService {
       await this.validate(items, branchId);
     }
 
-    return inventoryService.decrementBatch(items, branchId, reference, actorId);
+    return stockTransactionService.decrementBatch(items, branchId, reference, actorId);
   }
 
   /**
@@ -803,7 +803,7 @@ class StockService {
    * @returns {Promise<{ success: boolean, restoredItems: Array }>}
    */
   async restore(items, branchId, reference, actorId) {
-    return inventoryService.restoreBatch(items, branchId, reference, actorId);
+    return stockTransactionService.restoreBatch(items, branchId, reference, actorId);
   }
 
   /**

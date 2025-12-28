@@ -9,7 +9,7 @@ import mongoose from 'mongoose';
 import Product from '../../modules/commerce/product/product.model.js';
 import Branch from '../../modules/commerce/branch/branch.model.js';
 import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import inventoryService from '../../modules/commerce/inventory/inventory.service.js';
+import { stockSyncService } from '../../modules/commerce/inventory/services/index.js';
 import { createTestBranch } from '../helpers/test-data.js';
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/bigboss-test';
@@ -71,7 +71,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
   describe('Simple Product Stock Adjustment', () => {
     it('should set stock for simple product', async () => {
       // Set stock to 50
-      const result = await inventoryService.setStock(
+      const result = await stockSyncService.setStock(
         simpleProduct._id.toString(),
         null, // no variantSku for simple products
         branch._id.toString(),
@@ -97,7 +97,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
 
     it('should update existing simple product stock', async () => {
       // First set to 30
-      await inventoryService.setStock(
+      await stockSyncService.setStock(
         simpleProduct._id.toString(),
         null,
         branch._id.toString(),
@@ -107,7 +107,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
       );
 
       // Then update to 75
-      const result = await inventoryService.setStock(
+      const result = await stockSyncService.setStock(
         simpleProduct._id.toString(),
         null,
         branch._id.toString(),
@@ -145,7 +145,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
       console.log('Quantity:', quantity);
 
       // Set stock
-      const result = await inventoryService.setStock(
+      const result = await stockSyncService.setStock(
         productId,
         variantSku,
         branchId,
@@ -184,7 +184,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
 
     it('should update existing variant stock', async () => {
       // First set to 10
-      await inventoryService.setStock(
+      await stockSyncService.setStock(
         variantProduct._id.toString(),
         'BUTTERCHIC-OLIVE-S',
         branch._id.toString(),
@@ -194,7 +194,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
       );
 
       // Then update to 25
-      const result = await inventoryService.setStock(
+      const result = await stockSyncService.setStock(
         variantProduct._id.toString(),
         'BUTTERCHIC-OLIVE-S',
         branch._id.toString(),
@@ -218,7 +218,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
 
     it('should handle multiple variants independently', async () => {
       // Set stock for variant 1
-      await inventoryService.setStock(
+      await stockSyncService.setStock(
         variantProduct._id.toString(),
         'BUTTERCHIC-OLIVE-S',
         branch._id.toString(),
@@ -228,7 +228,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
       );
 
       // Set stock for variant 2
-      await inventoryService.setStock(
+      await stockSyncService.setStock(
         variantProduct._id.toString(),
         'BUTTERCHIC-OLIVE-M',
         branch._id.toString(),
@@ -238,7 +238,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
       );
 
       // Set stock for variant 3
-      await inventoryService.setStock(
+      await stockSyncService.setStock(
         variantProduct._id.toString(),
         'BUTTERCHIC-BLACK-S',
         branch._id.toString(),
@@ -279,7 +279,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
       expect(stockEntry).toBeNull();
 
       // Set stock (should create new entry)
-      await inventoryService.setStock(
+      await stockSyncService.setStock(
         variantProduct._id.toString(),
         'BUTTERCHIC-OLIVE-S',
         branch._id.toString(),
@@ -301,7 +301,7 @@ describe('POS Stock Adjustment (Service Layer)', () => {
     });
 
     it('should handle quantity 0', async () => {
-      await inventoryService.setStock(
+      await stockSyncService.setStock(
         simpleProduct._id.toString(),
         null,
         branch._id.toString(),

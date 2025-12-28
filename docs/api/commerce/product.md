@@ -449,7 +449,7 @@ GET /api/v1/products/:id
 
 **Query Parameters:**
 - `select`: Space or comma-separated fields to select
-- `populate`: Not supported (images store URLs directly with variants; category is stored as string)
+- `populate`: `sizeGuide` - Populate size guide reference with full size guide data
 
 **Response:**
 ```json
@@ -468,6 +468,7 @@ GET /api/v1/products/:id
     "quantity": 50,
     "category": "electronics",
     "parentCategory": "audio",
+    "sizeGuide": null,
     "images": [
       {
         "url": "https://cdn.example.com/products/premium-headphones/hero.webp",
@@ -618,6 +619,7 @@ GET /api/v1/products/slug/:slug
 
 **Query Parameters:**
 - `select`: Space or comma-separated fields to select
+- `populate`: `sizeGuide` - Populate size guide reference with full size guide data
 
 **Response:** Same shape as Get by ID.
 
@@ -777,6 +779,7 @@ POST /api/v1/products
   "parentCategory": "audio",
   "sku": "HEADPHONES-001",
   "barcode": "1234567890123",
+  "sizeGuide": "676a3f8b9c123456789abcde",
   "images": [
     {
       "url": "https://cdn.example.com/products/premium-headphones/hero.webp",
@@ -832,6 +835,7 @@ POST /api/v1/products
 **Optional Admin Fields:**
 - `costPrice` (number, min: 0) - For profit calculations. Visibility is role-based (see "Role-Based Field Filtering" below).
 - `vatRate` (number, 0-100) - Product-specific VAT rate override. `null` = inherit from category/platform (see "VAT Rate Configuration" above).
+- `sizeGuide` (ObjectId) - Reference to size guide template. Use `?populate=sizeGuide` to fetch full size guide data. See [Size Guide API](size-guide.md) for details.
 
 **Variant Fields:**
 - `variationAttributes` (array) - Defines variation dimensions. Backend auto-generates variants.
@@ -1091,6 +1095,7 @@ Recomputes `product.quantity` and `stockProjection.variants` from StockEntry tot
 | Filter | Operator | Example | Description |
 |--------|----------|---------|-------------|
 | `category` | eq | `?category=electronics` | Filter by category |
+| `sizeGuide` | eq | `?sizeGuide=676a3f8b...` | Filter by size guide ID |
 | `style` | eq | `?style=street` | Filter by style enum |
 | `tags` | eq | `?tags=wireless` | Filter by tag |
 | `basePrice[gte]` | gte | `?basePrice[gte]=100` | Price >= 100 |
@@ -1135,7 +1140,7 @@ Recomputes `product.quantity` and `stockProjection.variants` from StockEntry tot
 |-----------|------|-------------|
 | `select` | string | Space or comma-separated fields to select |
 | `lean` | boolean | Return plain objects instead of Mongoose documents (default: true) |
-| `populate` | - | Not supported (images are plain URLs) |
+| `populate` | string | `sizeGuide` - Populate size guide reference |
 
 ---
 
@@ -1193,6 +1198,8 @@ Recomputes `product.quantity` and `stockProjection.variants` from StockEntry tot
 | Highly rated | `GET /api/v1/products?averageRating[gte]=4&limit=12&sort=-averageRating` | Only returns items with rating >= 4. |
 | Search box | `GET /api/v1/products?search=wireless%20headphones&limit=12` | Full-text search across name/description/tags. |
 | Product detail (with images) | `GET /api/v1/products/:id` | Images include `variants.thumbnail`/`variants.medium` URLs for fast rendering. |
+| Product with size guide | `GET /api/v1/products/:id?populate=sizeGuide` | Includes full size guide data for displaying size table on product page. |
+| Products by size guide | `GET /api/v1/products?sizeGuide=676a3f8b...&limit=20` | Filter all products using a specific size guide. |
 | Recommendations widget | `GET /api/v1/products/:productId/recommendations` | Returns up to 4 related items (same category, by sales). |
 
 ### Example 1: Simple Product Listing (Offset Pagination)
@@ -1438,6 +1445,76 @@ GET /api/v1/products?numReviews[gte]=1&sort=-averageRating&limit=10
 
 ---
 
+### Example 11: Get Product with Size Guide
+
+**Request:**
+```http
+GET /api/v1/products/676a3f8b9c123456789abcde?populate=sizeGuide
+```
+
+**Description:** Fetch product with full size guide data for displaying size table
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "676a3f8b9c123456789abcde",
+    "name": "Classic Cotton T-Shirt",
+    "slug": "classic-cotton-t-shirt",
+    "basePrice": 799,
+    "currentPrice": 799,
+    "category": "t-shirts",
+    "sizeGuide": {
+      "_id": "676a3f8b9c123456789abcdf",
+      "name": "T-Shirts & Tops",
+      "slug": "t-shirts-tops",
+      "description": "Size guide for t-shirts and tops",
+      "measurementUnit": "inches",
+      "measurementLabels": ["Chest", "Length", "Shoulder", "Sleeve"],
+      "sizes": [
+        {
+          "name": "S",
+          "measurements": {
+            "chest": "36-38",
+            "length": "27",
+            "shoulder": "17",
+            "sleeve": "8"
+          }
+        },
+        {
+          "name": "M",
+          "measurements": {
+            "chest": "38-40",
+            "length": "28",
+            "shoulder": "18",
+            "sleeve": "8.5"
+          }
+        },
+        {
+          "name": "L",
+          "measurements": {
+            "chest": "40-42",
+            "length": "29",
+            "shoulder": "19",
+            "sleeve": "9"
+          }
+        }
+      ],
+      "note": "All measurements are in inches. For the best fit, measure a similar garment that fits you well.",
+      "isActive": true,
+      "displayOrder": 1
+    },
+    "images": [],
+    "isActive": true,
+    "createdAt": "2025-12-28T00:00:00.000Z",
+    "updatedAt": "2025-12-28T00:00:00.000Z"
+  }
+}
+```
+
+---
+
 ## Frontend Integration Examples
 
 ### React - Infinite Scroll
@@ -1487,7 +1564,80 @@ function ProductList() {
 }
 ```
 
+---
 
+### React - Product with Size Guide
+
+```javascript
+import { useState, useEffect } from 'react';
+
+function ProductDetail({ productId }) {
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchProduct = async () => {
+      // Fetch product with populated size guide
+      const response = await fetch(`/api/v1/products/${productId}?populate=sizeGuide`);
+      const data = await response.json();
+      setProduct(data.data);
+      setLoading(false);
+    };
+
+    fetchProduct();
+  }, [productId]);
+
+  if (loading) return <div>Loading...</div>;
+  if (!product) return <div>Product not found</div>;
+
+  return (
+    <div>
+      <h1>{product.name}</h1>
+      <p>{product.description}</p>
+      <p>Price: ${product.currentPrice}</p>
+
+      {/* Display Size Guide if available */}
+      {product.sizeGuide && (
+        <div className="size-guide">
+          <h3>Size Guide: {product.sizeGuide.name}</h3>
+          {product.sizeGuide.description && (
+            <p>{product.sizeGuide.description}</p>
+          )}
+
+          <table>
+            <thead>
+              <tr>
+                <th>Size</th>
+                {product.sizeGuide.measurementLabels.map(label => (
+                  <th key={label}>{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {product.sizeGuide.sizes.map(size => (
+                <tr key={size.name}>
+                  <td>{size.name}</td>
+                  {product.sizeGuide.measurementLabels.map(label => {
+                    const key = label.toLowerCase().replace(/\s+/g, '_');
+                    return <td key={key}>{size.measurements[key] || '-'}</td>;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {product.sizeGuide.note && (
+            <p className="note">{product.sizeGuide.note}</p>
+          )}
+          <p className="unit">
+            All measurements are in {product.sizeGuide.measurementUnit}.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
 
 ---
 

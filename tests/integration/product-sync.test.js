@@ -108,37 +108,29 @@ describe('Product Stock Sync', () => {
 
     const [smallVariant, mediumVariant] = variantProduct.variants;
 
-    await StockEntry.create({
-      product: variantProduct._id,
-      branch: headOffice._id,
-      variantSku: smallVariant.sku,
-      quantity: 3,
-      isActive: true,
-    });
+    await StockEntry.updateOne(
+      { product: variantProduct._id, branch: headOffice._id, variantSku: smallVariant.sku },
+      { $set: { quantity: 3, isActive: true } },
+      { upsert: true }
+    );
 
-    await StockEntry.create({
-      product: variantProduct._id,
-      branch: subBranch._id,
-      variantSku: smallVariant.sku,
-      quantity: 5,
-      isActive: true,
-    });
+    await StockEntry.updateOne(
+      { product: variantProduct._id, branch: subBranch._id, variantSku: smallVariant.sku },
+      { $set: { quantity: 5, isActive: true } },
+      { upsert: true }
+    );
 
-    await StockEntry.create({
-      product: variantProduct._id,
-      branch: headOffice._id,
-      variantSku: mediumVariant.sku,
-      quantity: 2,
-      isActive: true,
-    });
+    await StockEntry.updateOne(
+      { product: variantProduct._id, branch: headOffice._id, variantSku: mediumVariant.sku },
+      { $set: { quantity: 2, isActive: true } },
+      { upsert: true }
+    );
 
-    await StockEntry.create({
-      product: variantProduct._id,
-      branch: subBranch._id,
-      variantSku: mediumVariant.sku,
-      quantity: 4,
-      isActive: true,
-    });
+    await StockEntry.updateOne(
+      { product: variantProduct._id, branch: subBranch._id, variantSku: mediumVariant.sku },
+      { $set: { quantity: 4, isActive: true } },
+      { upsert: true }
+    );
 
     const response = await app.inject({
       method: 'POST',

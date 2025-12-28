@@ -13,7 +13,6 @@ import { createOrderWorkflow } from './workflows/index.js';
 import cartRepository from '#modules/commerce/cart/cart.repository.js';
 import { idempotencyService } from '../core/index.js';
 import { filterOrderCostPriceByUser } from './order.costPrice.utils.js';
-import { queryParser } from '@classytic/mongokit/utils';
 
 class OrderController extends BaseController {
   constructor() {
@@ -143,8 +142,18 @@ class OrderController extends BaseController {
   // Override getAll/getById to prevent leaking cost fields to non-privileged roles
   async getAll(req, reply) {
     const rawQuery = req.validated?.query || req.query;
-    const queryParams = queryParser.parseQuery(rawQuery);
+    const queryParams = this.queryParser.parse(rawQuery);
     const options = this._buildContext(req);
+
+    // Check if query includes lookups (custom field joins)
+    if (queryParams.lookups && queryParams.lookups.length > 0) {
+      const result = await this._getAllWithLookups(reply, queryParams, options);
+      // Filter cost prices for lookup results
+      if (result.data) {
+        result.data = filterOrderCostPriceByUser(result.data, req.user);
+      }
+      return result;
+    }
 
     const paginationParams = {
       ...(queryParams.page !== undefined && { page: queryParams.page }),
@@ -158,6 +167,7 @@ class OrderController extends BaseController {
     const repoOptions = {
       ...options,
       populate: queryParams.populate || options.populate,
+      ...(queryParams.select && { select: queryParams.select }),
     };
 
     const result = await this.service.getAll(paginationParams, repoOptions);

@@ -22,6 +22,14 @@ export const categories = {
   syncCounts: groups.inventoryStaff,
 };
 
+export const sizeGuides = {
+  list: [],
+  get: [],
+  create: groups.storeAdmin,
+  update: groups.storeAdmin,
+  remove: groups.storeAdmin,
+};
+
 export const coupons = {
   list: groups.storeAdmin,
   get: groups.storeAdmin,
@@ -75,4 +83,4 @@ export const pos = {
   access: groups.storeStaff,
 };
 
-export default { products, categories, coupons, orders, cart, reviews, branches, pos };
+export default { products, categories, sizeGuides, coupons, orders, cart, reviews, branches, pos };

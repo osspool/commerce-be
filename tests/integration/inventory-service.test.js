@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
-import inventoryService from '../../modules/commerce/inventory/inventory.service.js';
+import { stockTransactionService, stockAvailabilityService } from '../../modules/commerce/inventory/services/index.js';
 import inventoryRepository from '../../modules/commerce/inventory/inventory.repository.js';
 import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
 import Product from '../../modules/commerce/product/product.model.js';
@@ -67,7 +67,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
       const eventPromise = createEventSpy(inventoryRepository, 'after:update');
 
       // Decrement stock
-      const result = await inventoryService.decrementBatch(
+      const result = await stockTransactionService.decrementBatch(
         [{ productId: product._id, variantSku: null, quantity: 5, productName: product.name }],
         branch._id,
         { model: 'Order', id: testOrderId },
@@ -90,7 +90,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
       expect(cached1.quantity).toBe(50);
 
       // Decrement stock
-      await inventoryService.decrementBatch(
+      await stockTransactionService.decrementBatch(
         [{ productId: product._id, variantSku: null, quantity: 10 }],
         branch._id
       );
@@ -106,7 +106,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
       expect(cached1.quantity).toBe(50);
 
       // Decrement stock
-      await inventoryService.decrementBatch(
+      await stockTransactionService.decrementBatch(
         [{ productId: product._id, variantSku: null, quantity: 7 }],
         branch._id
       );
@@ -122,7 +122,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
         { $set: { reorderPoint: 45, needsReorder: false } }
       );
 
-      await inventoryService.decrementBatch(
+      await stockTransactionService.decrementBatch(
         [{ productId: product._id, variantSku: null, quantity: 10 }],
         branch._id
       );
@@ -159,7 +159,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
   describe('restoreBatch - Event Emissions', () => {
     it('should emit after:update events for each restored item', async () => {
       // Decrement first
-      await inventoryService.decrementBatch(
+      await stockTransactionService.decrementBatch(
         [{ productId: product._id, variantSku: null, quantity: 20 }],
         branch._id
       );
@@ -168,7 +168,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
       const eventPromise = createEventSpy(inventoryRepository, 'after:update');
 
       // Restore stock
-      const result = await inventoryService.restoreBatch(
+      const result = await stockTransactionService.restoreBatch(
         [{ productId: product._id, variantSku: null, quantity: 20 }],
         branch._id,
         { model: 'Order', id: testOrderId },
@@ -184,7 +184,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
 
     it('should invalidate barcode cache after restore', async () => {
       // Decrement first
-      await inventoryService.decrementBatch(
+      await stockTransactionService.decrementBatch(
         [{ productId: product._id, variantSku: null, quantity: 20 }],
         branch._id
       );
@@ -194,7 +194,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
       expect(entry.quantity).toBe(30);
 
       // Restore
-      await inventoryService.restoreBatch(
+      await stockTransactionService.restoreBatch(
         [{ productId: product._id, variantSku: null, quantity: 20 }],
         branch._id
       );
@@ -214,7 +214,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
       }));
 
       // Decrement both
-      const result = await inventoryService.decrementBatch(
+      const result = await stockTransactionService.decrementBatch(
         [
           { productId: product._id, variantSku: null, quantity: 10 },
           { productId: product2._id, variantSku: null, quantity: 25 },
@@ -241,7 +241,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
         quantity: 5,
       }));
 
-      const result = await inventoryService.decrementBatch(
+      const result = await stockTransactionService.decrementBatch(
         [
           { productId: product._id, variantSku: null, quantity: 10 },
           { productId: lowStockProduct._id, variantSku: null, quantity: 50 }, // More than available
@@ -254,7 +254,7 @@ describe('Inventory Service - Event Emissions & Cache', () => {
     });
 
     it('should check availability without modifying stock', async () => {
-      const result = await inventoryService.checkAvailability(
+      const result = await stockAvailabilityService.checkAvailability(
         [
           { productId: product._id, variantSku: null, quantity: 10 },
           { productId: product._id, variantSku: null, quantity: 100 }, // More than available

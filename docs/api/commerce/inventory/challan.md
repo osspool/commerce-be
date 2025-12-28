@@ -281,7 +281,7 @@ GET /api/v1/inventory/transfers
 | `productSku` | string | Product SKU (snapshot) |
 | `variantSku` | string | Variant SKU (null for simple products) |
 | `variantAttributes` | Map | Variant attributes (e.g., `{ "size": "M", "color": "Red" }`) |
-| `cartonNumber` | string | Optional carton number for grouping/printing |
+| `cartonNumber` | string | Carton number for label printing (assigned by head office) |
 | `quantity` | number | Quantity to transfer |
 | `quantityReceived` | number | Quantity actually received (for partial receipt) |
 | `costPrice` | number | Cost price per unit |
@@ -376,6 +376,80 @@ Query these for detailed audit:
 ```http
 GET /api/v1/inventory/movements?type=transfer_out&reference.id=<transferId>
 ```
+
+## Carton Labeling (Print Labels)
+
+Carton numbers enable tracking and label printing for physical shipments.
+
+### Assigning Carton Numbers
+
+Cartons are assigned by **head office** when creating or fulfilling transfers:
+
+**Direct transfer creation:**
+```json
+{
+  "receiverBranchId": "SUB_BRANCH_ID",
+  "items": [
+    { "productId": "...", "variantSku": "SKU-RED-M", "quantity": 10, "cartonNumber": "C-01" },
+    { "productId": "...", "variantSku": "SKU-BLUE-L", "quantity": 5, "cartonNumber": "C-01" },
+    { "productId": "...", "variantSku": "SKU-GREEN-S", "quantity": 8, "cartonNumber": "C-02" }
+  ]
+}
+```
+
+**Fulfilling stock request:**
+```json
+{
+  "action": "fulfill",
+  "items": [
+    { "itemId": "request_item_id", "quantity": 10, "cartonNumber": "C-01" },
+    { "itemId": "request_item_id", "quantity": 5, "cartonNumber": "C-02" }
+  ]
+}
+```
+
+### Carton Label Format (Recommended)
+
+For unique tracking, combine challan number with carton:
+
+```
+┌─────────────────────────────────────┐
+│  CHN-202512-0042                    │
+│  Carton: C-01 of 3                  │
+│                                     │
+│  To: Dhaka Store (DHK)              │
+│  Items: 2 products, 15 units        │
+│                                     │
+│  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄                   │
+│  █ QR: CHN-202512-0042-C01 █        │
+│  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                   │
+└─────────────────────────────────────┘
+```
+
+### Grouping Items by Carton
+
+Query items by carton for printing:
+
+```javascript
+// Group transfer items by carton
+const cartons = transfer.items.reduce((acc, item) => {
+  const key = item.cartonNumber || 'unassigned';
+  if (!acc[key]) acc[key] = [];
+  acc[key].push(item);
+  return acc;
+}, {});
+
+// Result: { "C-01": [...], "C-02": [...] }
+```
+
+### Carton Tracking Notes
+
+| Field | Usage |
+|-------|-------|
+| `cartonNumber` | Arbitrary string (e.g., "C-01", "BOX-A", "1/3") |
+| Unique ID | Combine: `{challanNumber}-{cartonNumber}` |
+| Same carton | Multiple items can share a carton number |
+| No carton | Items without cartonNumber ship "loose" |
 
 ## Data Retention
 

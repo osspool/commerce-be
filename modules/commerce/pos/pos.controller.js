@@ -1,5 +1,5 @@
 import productRepository from '../product/product.repository.js';
-import { inventoryService } from '../inventory/index.js';
+import { stockTransactionService } from '../inventory/index.js';
 import { branchRepository } from '../branch/index.js';
 import customerRepository from '../../customer/customer.repository.js';
 import orderRepository from '../order/order.repository.js';
@@ -405,7 +405,7 @@ class PosController {
       // decrementBatch uses findOneAndUpdate with $inc and quantity >= check
       // This is atomic and handles insufficient stock without separate validation
       // (Saves one DB roundtrip vs validate-then-decrement pattern)
-      const decrementResult = await inventoryService.decrementBatch(
+      const decrementResult = await stockTransactionService.decrementBatch(
         stockItems,
         branch._id,
         { model: 'Order' },
@@ -429,7 +429,7 @@ class PosController {
         const reserveResult = await reservePoints(resolvedCustomer._id, actualPointsRedeemed);
         if (!reserveResult.success) {
           // Points no longer available - restore stock and fail
-          await inventoryService.restoreBatch(
+          await stockTransactionService.restoreBatch(
             stockItems,
             branch._id,
             { model: 'Order', id: null },
@@ -568,7 +568,7 @@ class PosController {
       } catch (error) {
         // Rollback: restore stock and release points on failure
         if (didDecrement) {
-          await inventoryService.restoreBatch(
+          await stockTransactionService.restoreBatch(
             stockItems,
             branch._id,
             { model: 'Order', id: null },
