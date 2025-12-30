@@ -43,6 +43,7 @@
     "@classytic/notifications": "^0.0.1",
     "@classytic/revenue": "^1.0.6",
     "@classytic/revenue-manual": "^0.1.0",
+    "@classytic/shared-types": "^1.0.1",
     "@fastify/compress": "^8.3.0",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.1.0",
