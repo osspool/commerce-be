@@ -30,7 +30,7 @@ describe('Variant System Integration', () => {
     StockEntry = mongoose.models.StockEntry;
 
     // Import repository for variant generation (happens via repository events)
-    productRepository = (await import('../../modules/commerce/product/product.repository.js')).default;
+    productRepository = (await import('../../modules/catalog/products/product.repository.js')).default;
 
     // Create test branch
     await Branch.deleteMany({ code: 'VAR-TEST' });

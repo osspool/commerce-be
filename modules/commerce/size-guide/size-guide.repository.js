@@ -6,7 +6,7 @@ import {
     cachePlugin,
 } from '@classytic/mongokit';
 import SizeGuide from './size-guide.model.js';
-import { getSharedCacheAdapter } from '#common/adapters/memoryCache.adapter.js';
+import { getSharedCacheAdapter } from '#shared/adapters/memoryCache.adapter.js';
 
 const sizeGuideCacheAdapter = getSharedCacheAdapter({ maxSize: 200 });
 

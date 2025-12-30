@@ -4,7 +4,7 @@ import {
   addVatToExclusive,
   calculateLineVatAmount,
   extractVatFromInclusive,
-} from '../modules/commerce/order/vat.utils.js';
+} from '../modules/sales/orders/vat.utils.js';
 
 describe('VAT utils', () => {
   it('extracts VAT correctly for VAT-inclusive totals', () => {

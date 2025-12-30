@@ -8,10 +8,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
 import Branch from '../../modules/commerce/branch/branch.model.js';
-import Product from '../../modules/commerce/product/product.model.js';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import purchaseService from '../../modules/commerce/inventory/purchase/purchase.service.js';
-import transferService from '../../modules/commerce/inventory/transfer/transfer.service.js';
+import Product from '../../modules/catalog/products/product.model.js';
+import { StockEntry } from '../../modules/inventory/stock/models/index.js';
+import purchaseService from '../../modules/inventory/purchase/purchase.service.js';
+import transferService from '../../modules/inventory/transfer/transfer.service.js';
 
 import { createTestProduct } from '../helpers/test-data.js';
 

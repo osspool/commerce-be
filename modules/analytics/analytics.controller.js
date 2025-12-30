@@ -1,7 +1,7 @@
 import Transaction from '#modules/transaction/transaction.model.js';
-import Customer from '#modules/customer/customer.model.js';
-import Order from '#modules/commerce/order/order.model.js';
-import { ORDER_STATUS, PAYMENT_STATUS } from '#modules/commerce/order/order.enums.js';
+import Customer from '#modules/sales/customers/customer.model.js';
+import Order from '#modules/sales/orders/order.model.js';
+import { ORDER_STATUS, PAYMENT_STATUS } from '#modules/sales/orders/order.enums.js';
 
 /**
  * Analytics Controller

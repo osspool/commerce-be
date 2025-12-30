@@ -3,8 +3,10 @@ import path from 'node:path';
 import { Repository, methodRegistryPlugin, mongoOperationsPlugin, batchOperationsPlugin } from '@classytic/mongokit';
 import Archive from './archive.model.js';
 import Transaction from '#modules/transaction/transaction.model.js';
+import { createDefaultLoader } from '#core/utils/lazy-import.js';
 
 const ARCHIVE_DIR = path.resolve(process.cwd(), 'storage', 'archives');
+const loadStockMovementModel = createDefaultLoader('#modules/inventory/stockMovement.model.js');
 
 export class ArchiveRepository extends Repository {
   constructor(model = Archive) {
@@ -39,7 +41,7 @@ export class ArchiveRepository extends Repository {
     if (type === 'transaction') {
       Model = Transaction;
     } else if (type === 'stock_movement') {
-      const StockMovement = (await import('#modules/commerce/inventory/stockMovement.model.js')).default;
+      const StockMovement = await loadStockMovementModel();
       Model = StockMovement;
     } else {
       throw new Error(`Unsupported archive type: ${type}. Supported types: transaction, stock_movement`);

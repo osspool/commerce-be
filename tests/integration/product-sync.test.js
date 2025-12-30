@@ -6,9 +6,9 @@ process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
 import Branch from '../../modules/commerce/branch/branch.model.js';
-import Product from '../../modules/commerce/product/product.model.js';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import productRepository from '../../modules/commerce/product/product.repository.js';
+import Product from '../../modules/catalog/products/product.model.js';
+import { StockEntry } from '../../modules/inventory/stock/models/index.js';
+import productRepository from '../../modules/catalog/products/product.repository.js';
 
 describe('Product Stock Sync', () => {
   let app;

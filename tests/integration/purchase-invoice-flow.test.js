@@ -8,11 +8,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
 import Branch from '../../modules/commerce/branch/branch.model.js';
-import Product from '../../modules/commerce/product/product.model.js';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import Supplier from '../../modules/commerce/inventory/supplier/supplier.model.js';
+import Product from '../../modules/catalog/products/product.model.js';
+import { StockEntry } from '../../modules/inventory/stock/models/index.js';
+import { Supplier } from '../../modules/inventory/supplier/index.js';
 import Transaction from '../../modules/transaction/transaction.model.js';
-import purchaseInvoiceService from '../../modules/commerce/inventory/purchase/purchase-invoice.service.js';
+import purchaseInvoiceService from '../../modules/inventory/purchase/purchase-invoice.service.js';
 import { createTestProduct } from '../helpers/test-data.js';
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/bigboss-test';

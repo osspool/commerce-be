@@ -1,4 +1,4 @@
-import { getApiSpec } from '#common/docs/apiDocs.js';
+import { getApiSpec } from '#core/docs/apiDocs.js';
 import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
 

@@ -5,11 +5,11 @@ process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import Branch from '../../modules/commerce/branch/branch.model.js';
-import Product from '../../modules/commerce/product/product.model.js';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import Order from '../../modules/commerce/order/order.model.js';
+import Product from '../../modules/catalog/products/product.model.js';
+import { StockEntry } from '../../modules/inventory/stock/models/index.js';
+import Order from '../../modules/sales/orders/order.model.js';
 import Transaction from '../../modules/transaction/transaction.model.js';
-import Customer from '../../modules/customer/customer.model.js';
+import Customer from '../../modules/sales/customers/customer.model.js';
 
 describe('POS + Branch E2E', () => {
   let app;

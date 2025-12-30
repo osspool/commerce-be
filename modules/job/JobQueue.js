@@ -14,8 +14,8 @@
 
 import EventEmitter from 'events';
 import Job from './job.model.js';
-import logger from '#common/utils/logger.js';
-import { JOB_TYPES } from '#common/constants/enums.js';
+import logger from '#core/utils/logger.js';
+import { JOB_TYPES } from '#shared/constants/enums.js';
 
 // Default configuration
 const DEFAULT_CONFIG = {

@@ -1,4 +1,4 @@
-import BaseController from '#common/controllers/baseController.js';
+import BaseController from '#core/base/BaseController.js';
 import branchRepository from './branch.repository.js';
 import { branchSchemaOptions } from './branch.schemas.js';
 

@@ -5,11 +5,10 @@ process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import StockMovement from '../../modules/commerce/inventory/stockMovement.model.js';
-import Transfer from '../../modules/commerce/inventory/transfer/transfer.model.js';
+import { StockEntry, StockMovement } from '../../modules/inventory/stock/models/index.js';
+import { Transfer } from '../../modules/inventory/transfer/index.js';
 import Branch from '../../modules/commerce/branch/branch.model.js';
-import Product from '../../modules/commerce/product/product.model.js';
+import Product from '../../modules/catalog/products/product.model.js';
 
 describe('Inventory E2E - Transfers & Movements', () => {
   let app;

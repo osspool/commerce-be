@@ -1,7 +1,7 @@
 import { Repository, cachePlugin } from '@classytic/mongokit';
 import PlatformConfig from './platform.model.js';
-import { getSharedCacheAdapter } from '#common/adapters/memoryCache.adapter.js';
-import { clearVatConfigCache } from '#modules/commerce/order/vat.utils.js';
+import { getSharedCacheAdapter } from '#shared/adapters/memoryCache.adapter.js';
+import { clearVatConfigCache } from '#modules/sales/orders/vat.utils.js';
 
 const platformCacheAdapter = getSharedCacheAdapter({ maxSize: 200 });
 

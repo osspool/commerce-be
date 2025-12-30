@@ -103,7 +103,7 @@ export const jobQueue = createJobQueue({ jobModel: Job, logger });
 // modules/job/job.registry.js
 export async function registerAllJobHandlers() {
   await import('#modules/commerce/pos/pos.jobs.js');
-  await import('#modules/commerce/inventory/inventory.jobs.js');
+  await import('#modules/inventory/inventory.jobs.js');
 }
 ```
 

@@ -50,14 +50,14 @@ describe('Job Registry Pattern', () => {
 
   describe('POS Job Types', () => {
     it('should export POS_JOB_TYPES correctly', async () => {
-      const { POS_JOB_TYPES } = await import('../../modules/commerce/pos/pos.jobs.js');
+      const { POS_JOB_TYPES } = await import('../../modules/sales/pos/pos.jobs.js');
 
       expect(POS_JOB_TYPES).toBeDefined();
       expect(POS_JOB_TYPES.CREATE_TRANSACTION).toBe('POS_CREATE_TRANSACTION');
     });
 
     it('should add POS transaction job to queue', async () => {
-      const { POS_JOB_TYPES } = await import('../../modules/commerce/pos/pos.jobs.js');
+      const { POS_JOB_TYPES } = await import('../../modules/sales/pos/pos.jobs.js');
 
       // Add job (without processing - just test queue insertion)
       const job = await jobQueue.add({
@@ -88,7 +88,7 @@ describe('Job Registry Pattern', () => {
 
   describe('Inventory Job Types', () => {
     it('should export INVENTORY_JOB_TYPES correctly', async () => {
-      const { INVENTORY_JOB_TYPES } = await import('../../modules/commerce/inventory/inventory.jobs.js');
+      const { INVENTORY_JOB_TYPES } = await import('../../modules/inventory/inventory.jobs.js');
 
       expect(INVENTORY_JOB_TYPES).toBeDefined();
       expect(INVENTORY_JOB_TYPES.CONSISTENCY_CHECK).toBe('INVENTORY_CONSISTENCY_CHECK');
@@ -96,7 +96,7 @@ describe('Job Registry Pattern', () => {
     });
 
     it('should add stock alert job to queue', async () => {
-      const { INVENTORY_JOB_TYPES } = await import('../../modules/commerce/inventory/inventory.jobs.js');
+      const { INVENTORY_JOB_TYPES } = await import('../../modules/inventory/inventory.jobs.js');
 
       const job = await jobQueue.add({
         type: INVENTORY_JOB_TYPES.STOCK_ALERT,
@@ -119,7 +119,7 @@ describe('Job Registry Pattern', () => {
 
   describe('Handler Testability', () => {
     it('should allow direct testing of POS handler function', async () => {
-      const { handleCreateTransaction } = await import('../../modules/commerce/pos/pos.jobs.js');
+      const { handleCreateTransaction } = await import('../../modules/sales/pos/pos.jobs.js');
 
       // Handler should be a function
       expect(typeof handleCreateTransaction).toBe('function');
@@ -127,7 +127,7 @@ describe('Job Registry Pattern', () => {
 
     it('should allow direct testing of inventory handler functions', async () => {
       const { handleConsistencyCheck, handleStockAlert } = await import(
-        '../../modules/commerce/inventory/inventory.jobs.js'
+        '../../modules/inventory/inventory.jobs.js'
       );
 
       expect(typeof handleConsistencyCheck).toBe('function');

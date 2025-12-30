@@ -4,9 +4,9 @@ process.env.COOKIE_SECRET = 'test-cookie-secret-key-1234567890123456';
 process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import Product from '#modules/commerce/product/product.model.js';
-import Customer from '#modules/customer/customer.model.js';
-import Category from '#modules/commerce/category/category.model.js';
+import Product from '#modules/catalog/products/product.model.js';
+import Customer from '#modules/sales/customers/customer.model.js';
+import Category from '#modules/catalog/categories/category.model.js';
 import Branch from '#modules/commerce/branch/branch.model.js';
 import PlatformConfig from '#modules/platform/platform.model.js';
 

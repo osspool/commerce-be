@@ -1,4 +1,4 @@
-import { getRevenue } from "#common/plugins/revenue.plugin.js";
+import { getRevenue } from "#shared/revenue/revenue.plugin.js";
 
 /**
  * Provider Webhook Handler

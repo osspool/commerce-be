@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { createError } from '@fastify/error';
 import userRepository from './user.repository.js';
-import customerRepository from '#modules/customer/customer.repository.js';
+import customerRepository from '#modules/sales/customers/customer.repository.js';
 import { generateTokens } from '#utils/generateToken.js';
 import { sendEmail } from '#utils/email.js';
 
@@ -294,6 +294,31 @@ export async function changePassword(userId, currentPassword, newPassword) {
   await userRepository.updatePassword(userId, newPassword);
 }
 
+/**
+ * Get user organizations (branches)
+ * @param {string} userId - User ID
+ * @returns {Promise<Array>} List of organizations/branches user has access to
+ */
+export async function getUserOrganizations(userId) {
+  const user = await userRepository.getById(userId);
+
+  if (!user) {
+    throw new NotFoundError('User not found');
+  }
+
+  // Return branches as organizations
+  const organizations = (user.branches || []).map(b => ({
+    id: b.branchId?.toString?.() || b.branchId,
+    code: b.branchCode,
+    name: b.branchName,
+    role: b.branchRole,
+    roles: b.roles || [],
+    isPrimary: b.isPrimary || false,
+  }));
+
+  return organizations;
+}
+
 export default {
   registerUser,
   loginUser,
@@ -303,4 +328,5 @@ export default {
   getUserProfile,
   updateUserProfile,
   changePassword,
+  getUserOrganizations,
 };

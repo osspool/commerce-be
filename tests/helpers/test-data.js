@@ -201,60 +201,8 @@ export function createTestOrder(customerId, productId, overrides = {}) {
   };
 }
 
-export function createTestShipment(orderId, overrides = {}) {
-  const delivery = overrides.delivery || overrides.parcel?.delivery;
-  return {
-    order: orderId,
-    provider: 'redx',
-    trackingId: `TRK-${Date.now()}`,
-    status: 'pickup-requested',
-
-    parcel: {
-      weight: 500,
-      value: 2000,
-      itemCount: 1,
-      description: 'Test parcel',
-      ...overrides.parcel,
-    },
-
-    pickup: {
-      storeId: 123,
-      ...overrides.pickup,
-    },
-
-    delivery: {
-      customerName: delivery?.customerName || 'John Doe',
-      customerPhone: delivery?.customerPhone || '01712345678',
-      address: delivery?.address || 'House 12, Road 5, Mohammadpur, Dhaka',
-      areaId: delivery?.areaId ?? 1,
-      areaName: delivery?.areaName || 'Mohammadpur',
-      ...overrides.delivery,
-    },
-
-    cashCollection: {
-      amount: 2000,
-      collected: false,
-      ...overrides.cashCollection,
-    },
-
-    charges: {
-      deliveryCharge: 60,
-      codCharge: 20,
-      totalCharge: 80,
-      ...overrides.charges,
-    },
-
-    timeline: overrides.timeline || [
-      {
-        status: 'pickup-requested',
-        message: 'Shipment created',
-        timestamp: new Date(),
-      },
-    ],
-
-    webhookCount: overrides.webhookCount ?? 0,
-  };
-}
+// Note: createTestShipment removed - shipping data is now embedded in Order.shipping
+// Use createTestOrder with shipping override instead
 
 export function createTestCustomer(overrides = {}) {
   return {

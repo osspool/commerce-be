@@ -1,5 +1,4 @@
-import fp from 'fastify-plugin';
-import { createRoutes } from '#routes/utils/createRoutes.js';
+import { createRoutes } from '#core/factories/createRoutes.js';
 import permissions from '#config/permissions.js';
 import { getStatement } from '#modules/transaction/handlers/statement.handler.js';
 import { getFinanceSummary } from './handlers/summary.handler.js';
@@ -40,4 +39,4 @@ async function financePlugin(fastify) {
   );
 }
 
-export default fp(financePlugin, { name: 'finance-plugin' });
+export default financePlugin;

@@ -1,6 +1,6 @@
-import { getRevenue } from "#common/plugins/revenue.plugin.js";
-import Order from "#modules/commerce/order/order.model.js";
-import { PAYMENT_STATUS } from "#modules/commerce/order/order.enums.js";
+import { getRevenue } from "#shared/revenue/revenue.plugin.js";
+import Order from "#modules/sales/orders/order.model.js";
+import { PAYMENT_STATUS } from "#modules/sales/orders/order.enums.js";
 
 /**
  * Manual Payment Verification Handler

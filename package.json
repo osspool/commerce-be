@@ -5,6 +5,8 @@
   "type": "module",
   "main": "index.js",
   "imports": {
+    "#core/*": "./core/*",
+    "#shared/*": "./shared/*",
     "#common/*": "./common/*",
     "#config/*": "./config/*",
     "#models/*": "./models/*",
@@ -17,11 +19,13 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
+    "worker": "node worker.js",
+    "worker:dev": "node --watch worker.js",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
-    "seed:categories": "node modules/commerce/category/seed-categories.js"
+    "seed:categories": "node modules/catalog/categories/seed-categories.js"
   },
   "engines": {
     "node": ">=24"

@@ -69,7 +69,7 @@ const challanNumber = `CHN-202512-${String(counter).padStart(4, '0')}`;
 - Store processed keys with TTL (24h)
 
 **Files to Modify:**
-- `routes/utils/createActionRouter.js` - Add idempotency middleware
+- `core/factories/createActionRouter.js` - Add idempotency middleware
 - `modules/commerce/inventory/transfer/transfer.service.js` - Check idempotency key
 - `modules/commerce/inventory/purchase/purchase-invoice.service.js` - Check idempotency key
 
@@ -421,7 +421,7 @@ INVENTORY_ARCHIVE_TTL_DAYS=1825    # 5 years in archive before delete
 - `modules/commerce/inventory/transfer/transfer.service.js`
 - `modules/commerce/inventory/purchase/purchase-invoice.service.js`
 - `modules/commerce/inventory/inventory.service.js`
-- `routes/utils/createActionRouter.js`
+- `core/factories/createActionRouter.js`
 
 ### Medium Priority (Phase 3-5)
 - `modules/commerce/inventory/transfer/transfer.repository.js` (new)

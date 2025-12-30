@@ -30,6 +30,7 @@ lerna-debug.log*
 *.sublime-workspace
 /lib
 /lib/*
+/packages
 
 # IDE - VSCode
 .vscode/*

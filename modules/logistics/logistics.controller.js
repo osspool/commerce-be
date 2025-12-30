@@ -1,6 +1,6 @@
 import logisticsService from './services/logistics.service.js';
 import config from '../../config/index.js';
-import Shipment from './models/shipment.model.js';
+import Order from '#modules/sales/orders/order.model.js';
 import { getSupportedProviders, getAllCircuitStatuses, resetCircuit } from '@classytic/bd-logistics';
 import bdAreas from '@classytic/bd-areas';
 import { DELIVERY_ZONES, estimateDeliveryCharge } from './utils/zones.js';
@@ -9,6 +9,7 @@ import { DELIVERY_ZONES, estimateDeliveryCharge } from './utils/zones.js';
  * Logistics Controller
  *
  * HTTP handlers for logistics operations.
+ * Shipment data is stored in Order.shipping (consolidated model).
  * Configuration is managed via .env (config/sections/logistics.config.js)
  */
 class LogisticsController {
@@ -21,13 +22,10 @@ class LogisticsController {
     this.getDistricts = this.getDistricts.bind(this);
     this.getDeliveryZones = this.getDeliveryZones.bind(this);
     this.estimateCharge = this.estimateCharge.bind(this);
-    this.createShipment = this.createShipment.bind(this);
-    this.getShipment = this.getShipment.bind(this);
     this.trackShipment = this.trackShipment.bind(this);
     this.cancelShipment = this.cancelShipment.bind(this);
     this.getPickupStores = this.getPickupStores.bind(this);
     this.calculateCharge = this.calculateCharge.bind(this);
-    this.updateShipmentStatus = this.updateShipmentStatus.bind(this);
     this.handleWebhook = this.handleWebhook.bind(this);
     this.getCircuitStatus = this.getCircuitStatus.bind(this);
     this.resetProviderCircuit = this.resetProviderCircuit.bind(this);
@@ -191,84 +189,20 @@ class LogisticsController {
   }
 
   // ============================================
-  // SHIPMENTS
+  // SHIPMENT UTILITIES
+  // Note: Create/Update shipping via POST/PATCH /orders/:id/shipping
   // ============================================
-
-  async createShipment(req, reply) {
-    const { orderId, ...options } = req.body;
-
-    if (!orderId) {
-      return reply.code(400).send({
-        success: false,
-        message: 'orderId is required',
-      });
-    }
-
-    try {
-      // Get order - import dynamically to avoid circular deps
-      const { default: orderRepository } = await import('../commerce/order/order.repository.js');
-      const order = await orderRepository.getById(orderId);
-
-      if (!order) {
-        return reply.code(404).send({
-          success: false,
-          message: 'Order not found',
-        });
-      }
-
-      const shipment = await logisticsService.createShipment(order, {
-        ...options,
-        userId: req.user?._id,
-      });
-
-      // Update order with shipment reference
-      await orderRepository.update(orderId, {
-        'shipping.trackingNumber': shipment.trackingId,
-        'shipping.provider': shipment.provider,
-        'shipping.shipmentId': shipment._id,
-      });
-
-      return reply.code(201).send({
-        success: true,
-        data: shipment,
-        message: 'Shipment created successfully',
-      });
-    } catch (error) {
-      return reply.code(400).send({
-        success: false,
-        message: error.message,
-      });
-    }
-  }
-
-  async getShipment(req, reply) {
-    const { id } = req.params;
-
-    const shipment = await Shipment.findById(id).populate('order', 'customerName totalAmount');
-
-    if (!shipment) {
-      return reply.code(404).send({
-        success: false,
-        message: 'Shipment not found',
-      });
-    }
-
-    return reply.send({
-      success: true,
-      data: shipment,
-    });
-  }
 
   async trackShipment(req, reply) {
     const { id } = req.params;
 
-    // Can be shipment ID or tracking ID
-    let shipment = await Shipment.findById(id);
-    if (!shipment) {
-      shipment = await Shipment.findByTrackingId(id);
+    // Find order by ID or tracking number
+    let order = await Order.findById(id);
+    if (!order) {
+      order = await logisticsService.findOrderByTrackingNumber(id);
     }
 
-    if (!shipment) {
+    if (!order || !order.shipping?.trackingNumber) {
       return reply.code(404).send({
         success: false,
         message: 'Shipment not found',
@@ -276,11 +210,15 @@ class LogisticsController {
     }
 
     try {
-      const result = await logisticsService.trackShipment(shipment.trackingId);
+      const result = await logisticsService.trackShipment(order.shipping.trackingNumber);
 
       return reply.send({
         success: true,
-        data: result,
+        data: {
+          orderId: result.order._id,
+          shipping: result.order.shipping,
+          tracking: result.tracking,
+        },
       });
     } catch (error) {
       return reply.code(400).send({
@@ -294,12 +232,13 @@ class LogisticsController {
     const { id } = req.params;
     const { reason } = req.body;
 
-    let shipment = await Shipment.findById(id);
-    if (!shipment) {
-      shipment = await Shipment.findByTrackingId(id);
+    // Find order by ID or tracking number
+    let order = await Order.findById(id);
+    if (!order) {
+      order = await logisticsService.findOrderByTrackingNumber(id);
     }
 
-    if (!shipment) {
+    if (!order || !order.shipping?.trackingNumber) {
       return reply.code(404).send({
         success: false,
         message: 'Shipment not found',
@@ -308,14 +247,17 @@ class LogisticsController {
 
     try {
       const result = await logisticsService.cancelShipment(
-        shipment.trackingId,
+        order.shipping.trackingNumber,
         reason || 'Cancelled by merchant',
         req.user?._id
       );
 
       return reply.send({
         success: true,
-        data: result.shipment,
+        data: {
+          orderId: result.order._id,
+          shipping: result.order.shipping,
+        },
         message: result.message,
       });
     } catch (error) {
@@ -425,67 +367,6 @@ class LogisticsController {
   }
 
   // ============================================
-  // MANUAL STATUS UPDATE
-  // ============================================
-
-  /**
-   * Manually update shipment status
-   * Same logic as webhook but triggered by admin
-   */
-  async updateShipmentStatus(req, reply) {
-    const { id } = req.params;
-    const { status, message, messageLocal } = req.body;
-
-    if (!status) {
-      return reply.code(400).send({
-        success: false,
-        message: 'status is required',
-      });
-    }
-
-    // Find shipment
-    let shipment = await Shipment.findById(id);
-    if (!shipment) {
-      shipment = await Shipment.findByTrackingId(id);
-    }
-
-    if (!shipment) {
-      return reply.code(404).send({
-        success: false,
-        message: 'Shipment not found',
-      });
-    }
-
-    try {
-      // Update status with timeline event
-      await shipment.updateStatus(
-        status,
-        message || `Status updated to ${status}`,
-        messageLocal,
-        { source: 'manual', updatedBy: req.user?._id }
-      );
-
-      // Handle delivered status
-      if (status === 'delivered') {
-        shipment.cashCollection.collected = true;
-        shipment.cashCollection.collectedAt = new Date();
-        await shipment.save();
-      }
-
-      return reply.send({
-        success: true,
-        data: shipment,
-        message: `Shipment status updated to ${status}`,
-      });
-    } catch (error) {
-      return reply.code(400).send({
-        success: false,
-        message: error.message,
-      });
-    }
-  }
-
-  // ============================================
   // WEBHOOKS
   // ============================================
 
@@ -493,12 +374,10 @@ class LogisticsController {
     const { provider } = req.params;
 
     try {
-      const shipment = await logisticsService.processWebhook(provider, req.body);
+      const order = await logisticsService.processWebhook(provider, req.body);
 
-      if (shipment) {
-        // Emit event for order status update
-        // This can be handled by order module listener
-        req.server.log.info(`Webhook processed for shipment ${shipment.trackingId}: ${shipment.status}`);
+      if (order) {
+        req.server.log.info(`Webhook processed for order ${order._id}: ${order.shipping.status}`);
       }
 
       return reply.send({ success: true });

@@ -7,12 +7,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
 import Branch from '../../modules/commerce/branch/branch.model.js';
-import Product from '../../modules/commerce/product/product.model.js';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import StockRequest, { StockRequestStatus } from '../../modules/commerce/inventory/stock-request/stock-request.model.js';
-import Transfer from '../../modules/commerce/inventory/transfer/transfer.model.js';
-import InventoryCounter from '../../modules/commerce/inventory/inventoryCounter.model.js';
-import stockRequestService from '../../modules/commerce/inventory/stock-request/stock-request.service.js';
+import Product from '../../modules/catalog/products/product.model.js';
+import { StockEntry, InventoryCounter } from '../../modules/inventory/stock/models/index.js';
+import { StockRequest, StockRequestStatus } from '../../modules/inventory/stock-request/index.js';
+import { Transfer } from '../../modules/inventory/transfer/index.js';
+import stockRequestService from '../../modules/inventory/stock-request/stock-request.service.js';
 import { createTestBranch, createTestProduct } from '../helpers/test-data.js';
 
 const MONGO_URI = process.env.MONGO_URI || globalThis.__MONGO_URI__ || 'mongodb://localhost:27017/bigboss-test';

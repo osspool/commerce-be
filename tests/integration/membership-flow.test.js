@@ -88,12 +88,13 @@ describe('Membership Flow Integration', () => {
   it('should enroll customer in membership program', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: `/api/v1/customers/${customer._id}/enroll-membership`,
-      headers: { Authorization: `Bearer ${adminToken}` }
+      url: `/api/v1/customers/${customer._id}/membership`,
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: { action: 'enroll' }
     });
 
     const body = response.json();
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(201); // Resource created
     expect(body.success).toBe(true);
     expect(body.data.membership).toBeDefined();
     expect(body.data.membership.cardId).toMatch(/^TEST-\d{8}$/);
@@ -108,8 +109,9 @@ describe('Membership Flow Integration', () => {
   it('should reject duplicate enrollment', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: `/api/v1/customers/${customer._id}/enroll-membership`,
-      headers: { Authorization: `Bearer ${adminToken}` }
+      url: `/api/v1/customers/${customer._id}/membership`,
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: { action: 'enroll' }
     });
 
     expect(response.statusCode).toBe(409);
@@ -259,8 +261,9 @@ describe('Membership Flow Integration', () => {
   it('should deactivate membership', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: `/api/v1/customers/${customer._id}/deactivate-membership`,
-      headers: { Authorization: `Bearer ${adminToken}` }
+      url: `/api/v1/customers/${customer._id}/membership`,
+      headers: { Authorization: `Bearer ${adminToken}` },
+      payload: { action: 'deactivate' }
     });
 
     expect(response.statusCode).toBe(200);

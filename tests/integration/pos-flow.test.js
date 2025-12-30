@@ -6,7 +6,7 @@ process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mongoose from 'mongoose';
 // import { createTestUser, createTestProduct, createTestBranch, createTestStock } from '../helpers/test-data.js';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
+import { StockEntry } from '../../modules/inventory/stock/models/index.js';
 import Transaction from '../../modules/transaction/transaction.model.js';
 
 describe('POS Flow Integration', () => {

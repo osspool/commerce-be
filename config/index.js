@@ -9,6 +9,7 @@ import emailConfig from "./sections/email.config.js";
 import posConfig from "./sections/pos.config.js";
 import logisticsConfig from "./sections/logistics.config.js";
 import costPriceConfig from "./sections/costPrice.config.js";
+import workerConfig from "./sections/worker.config.js";
 
 
 class Config {
@@ -46,6 +47,7 @@ class Config {
         ...posConfig,
         ...logisticsConfig,
         ...costPriceConfig,
+        ...workerConfig,
     };
 
     return fullConfig;
@@ -58,11 +60,12 @@ const config = new Config().config;
 Object.freeze(config);
 Object.freeze(config.app); // Deep freeze some key sections if needed
 Object.freeze(config.db);
-Object.freeze(config.google);
-Object.freeze(config.stripe);
+// Object.freeze(config.google);
+// Object.freeze(config.stripe);
 Object.freeze(config.pos);
 Object.freeze(config.logistics);
 Object.freeze(config.costPrice);
+Object.freeze(config.worker);
 // Add more deep freezes for other sections if you want them immutable
 
 export default config;

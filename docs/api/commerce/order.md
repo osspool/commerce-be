@@ -22,96 +22,35 @@ Quick reference for frontend integration with the Order API.
 | `PATCH` | `/api/v1/orders/:id/status` | Admin | Update order status |
 | `POST` | `/api/v1/orders/:id/fulfill` | Admin | Ship order |
 | `POST` | `/api/v1/orders/:id/refund` | Admin | Refund order |
-| `POST` | `/api/v1/orders/:id/shipping` | Admin | Record shipping info (manual) |
+| `POST` | `/api/v1/orders/:id/shipping` | Admin | Create shipping (manual or RedX API) |
 | `PATCH` | `/api/v1/orders/:id/shipping` | Admin | Update shipping status |
 | `GET` | `/api/v1/orders/:id/shipping` | User/Admin | Get shipping info |
 | `POST` | `/webhooks/payments/manual/verify` | Superadmin | Verify manual payment (bkash/nagad/bank_transfer/cash) |
 | `POST` | `/webhooks/payments/manual/reject` | Superadmin | Reject manual payment (invalid/fraud) |
 
-**Logistics API (RedX Integration)**
+**Logistics Utilities**
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| `GET` | `/api/v1/logistics/pickup-stores` | Admin | List pickup stores from RedX |
-| `POST` | `/api/v1/logistics/shipments` | Admin | Create shipment via RedX API |
-| `GET` | `/api/v1/logistics/shipments/:id` | Admin | Get shipment details |
-| `GET` | `/api/v1/logistics/shipments/:id/track` | Admin | Track shipment via RedX API |
-| `POST` | `/api/v1/logistics/shipments/:id/cancel` | Admin | Cancel shipment |
-| `GET` | `/api/v1/logistics/charge` | Public | Calculate delivery charge |
+| `GET` | `/api/v1/logistics/pickup-stores` | Admin | List RedX pickup stores |
+| `GET` | `/api/v1/logistics/shipments/:id/track` | Admin | Track shipment via provider API |
+| `POST` | `/api/v1/logistics/shipments/:id/cancel` | Admin | Cancel shipment via provider API |
+| `GET` | `/api/v1/logistics/charge` | Public | Estimate delivery charge by zone |
 
 ---
 
 ## Checkout Flow (Cart → Order)
 
-**Simple flow:** FE sends delivery/payment/coupon, BE fetches cart items only.
-
 ```
-1. Shopping  → Add items to cart (POST /api/v1/cart/items)
-2. Checkout  → Fetch cart + platform config
-3. Order     → POST /api/v1/orders with delivery + payment info
-4. Backend   → Processes cart, validates coupon, reserves stock (temporary), creates order, clears cart
+1. Add items to cart     → POST /api/v1/cart/items
+2. Fetch checkout data   → GET /api/v1/cart + GET /api/v1/platform/config?select=paymentMethods,checkout
+3. Create order          → POST /api/v1/orders
 ```
 
-> **Stock behavior (web checkout):** Stock is **reserved** at checkout (in `StockEntry.reservedQuantity`) to prevent oversells, then **committed/decremented** when an admin fulfills the order. Reservations auto-expire if not fulfilled.
-> **Payment init failure:** If payment initialization fails, the backend cancels the order, marks payment as `failed`, and releases the reservation immediately.
+**Backend automatically:** Fetches cart, validates coupon, calculates prices, reserves stock, creates order + transaction, clears cart.
 
-### Frontend Checkout Flow
-
-```javascript
-// 1. Load checkout data
-const [cartRes, configRes] = await Promise.all([
-  fetch('/api/v1/cart', { headers: { Authorization: `Bearer ${token}` } }),
-  fetch('/api/v1/platform/config?select=paymentMethods,checkout')
-]);
-
-const { data: cart } = await cartRes.json();
-const { data: config } = await configRes.json();
-
-// 2. Display cart items, delivery zones, payment methods
-// Delivery pricing is provided by logistics estimate API
-const activePayments = config.paymentMethods.filter(pm => pm.isActive !== false);
-
-// Group payments by type for UI
-const mfsPayments = activePayments.filter(pm => pm.type === 'mfs');  // Providers: bkash, nagad, rocket, upay
-const bankPayments = activePayments.filter(pm => pm.type === 'bank_transfer');
-
-// 3. User enters/selects delivery address, delivery method, payment info
-
-// 4. Submit order payload
-// NOTE: For MFS payments, use 'provider' as paymentData.type (e.g., 'bkash', not 'mfs').
-// Only send providers supported by backend payment enums (bkash, nagad, rocket, bank_transfer, card, cash).
-// If you add a new provider (e.g., upay), ask backend to add it to PAYMENT_METHOD_VALUES.
-const orderPayload = {
-  idempotencyKey: crypto.randomUUID(), // Optional: prevents duplicate orders on retry
-  deliveryAddress: {
-    addressLine1: '123 Main St',
-    city: 'Dhaka',
-    phone: '01712345678',
-    // ... other address fields
-  },
-  delivery: {
-    method: selectedDeliveryZone.name,
-    price: selectedDeliveryZone.price
-  },
-  couponCode: appliedCoupon?.code || null,
-  paymentData: {
-    type: 'bkash', // From platform config provider/type
-    reference: trxId, // Optional
-    senderPhone: '01712345678', // Required for wallets
-    paymentDetails: { ... } // Optional
-  },
-  notes: 'Leave at door' // Optional
-};
-
-// 5. Place order → backend fetches cart, validates coupon, reserves inventory, creates order, clears cart
-const orderRes = await fetch('/api/v1/orders', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify(orderPayload)
-});
-```
-
-> **Backend handles:** Cart fetch (only source for products), coupon validation, price calculation, stock reservation, transaction creation, cart clearing.
+> **Stock:** Reserved at checkout, committed at fulfillment. Auto-expires if not fulfilled.
+> **Payment failure:** Order cancelled, stock released immediately.
 
 ---
 
@@ -241,9 +180,8 @@ Authorization: Bearer <token>
 - Clears cart on success
 - Commits/decrements stock on fulfillment (admin)
 
-#### Example 1: Cash on Delivery (COD)
+#### Example: Cash on Delivery (COD)
 
-**Request:**
 ```json
 {
   "deliveryAddress": {
@@ -255,74 +193,27 @@ Authorization: Bearer <token>
     "zoneId": 1,
     "city": "Dhaka"
   },
-  "delivery": {
-    "method": "standard",
-    "price": 60
-  },
-  "paymentData": {
-    "type": "cash"
-  },
-  "couponCode": "SAVE10",
-  "notes": "Leave at door"
-}
-```
-
-#### Example 2: bKash Payment (Manual Gateway)
-
-**Request:**
-```json
-{
-  "deliveryAddress": {
-    "recipientName": "Karim Ahmed",
-    "recipientPhone": "01712345678",
-    "addressLine1": "House 45, Road 12",
-    "areaId": 2,
-    "areaName": "Dhanmondi",
-    "zoneId": 1,
-    "city": "Dhaka"
-  },
-  "delivery": {
-    "method": "express",
-    "price": 120
-  },
-  "paymentData": {
-    "type": "bkash",
-    "reference": "BGH3K5L90P",
-    "senderPhone": "01712345678"
-  },
+  "delivery": { "method": "standard", "price": 60 },
+  "paymentData": { "type": "cash" },
   "couponCode": "SAVE10"
 }
 ```
 
-#### Example 3: Gift Order (with Recipient Name)
+#### Example: bKash Payment
 
-**Request:**
 ```json
 {
-  "deliveryAddress": {
-    "recipientName": "John Doe",
-    "recipientPhone": "01798765432",
-    "addressLine1": "House 23, CDA Avenue",
-    "areaId": 150,
-    "areaName": "Agrabad",
-    "zoneId": 3,
-    "city": "Chittagong"
-  },
-  "delivery": {
-    "method": "express",
-    "price": 120
-  },
+  "deliveryAddress": { /* same as above */ },
+  "delivery": { "method": "express", "price": 120 },
   "paymentData": {
     "type": "bkash",
     "reference": "BGH3K5L90P",
     "senderPhone": "01712345678"
-  },
-  "isGift": true,
-  "notes": "Birthday gift - please include greeting card"
+  }
 }
 ```
 
-> **Note:** For complete delivery address structure with Bangladesh location selection, see [Checkout API](checkout.md#step-1-location-selection)
+> **Gift orders:** Add `"isGift": true` to the payload. Use `deliveryAddress.recipientName` for the gift recipient.
 
 #### Request Body Fields
 
@@ -813,19 +704,50 @@ interface Order {
   };
   cancellationReason?: string;
 
-  // Shipping (courier integration)
+  // Shipping (consolidated - all shipment data embedded in Order)
   shipping?: {
-    provider: string;
+    provider: 'redx' | 'pathao' | 'steadfast' | 'paperfly' | 'sundarban' | 'sa_paribahan' | 'dhl' | 'fedex' | 'manual' | 'other';
     status: 'pending' | 'requested' | 'picked_up' | 'in_transit' | 'out_for_delivery' | 'delivered' | 'failed_attempt' | 'returned' | 'cancelled';
     trackingNumber?: string;
+    providerOrderId?: string;      // Provider's internal ID
+    providerStatus?: string;       // Raw status from provider (for debugging)
     trackingUrl?: string;
+    labelUrl?: string;
     consignmentId?: string;
     estimatedDelivery?: Date;
     requestedAt?: Date;
     pickedUpAt?: Date;
     deliveredAt?: Date;
+    // Pickup info (for provider API shipments)
+    pickup?: {
+      storeId?: number;
+      storeName?: string;
+      scheduledAt?: Date;
+    };
+    // Provider charges breakdown
+    charges?: {
+      deliveryCharge: number;
+      codCharge: number;
+      totalCharge: number;
+    };
+    // Cash on delivery tracking
+    cashCollection?: {
+      amount: number;
+      collected: boolean;
+      collectedAt?: Date;
+    };
+    // Webhook tracking
+    lastWebhookAt?: Date;
+    webhookCount?: number;
     metadata?: object;
-    history: Array<{ status: string; note: string; timestamp: Date }>;
+    history: Array<{
+      status: string;
+      note?: string;
+      noteLocal?: string;      // Bengali/local language note
+      actor?: string;
+      timestamp: Date;
+      raw?: object;            // Raw provider response for debugging
+    }>;
   };
   
   // Virtuals (backward compat)
@@ -983,9 +905,18 @@ pending → requested → picked_up → in_transit → out_for_delivery → deli
 | `returned` | Package returned to sender |
 | `cancelled` | Shipment cancelled |
 
-### Option 1: Manual Entry (Default)
+### Choose Your Shipping Method
 
-Record tracking info without calling provider API:
+| Method | When to Use | Endpoint |
+|--------|-------------|----------|
+| **Manual** | You book courier yourself (phone, walk-in) and just record tracking | `POST /orders/:id/shipping` |
+| **RedX API** | System automatically creates shipment via RedX | `POST /orders/:id/shipping` with `useProviderApi: true` |
+
+---
+
+### Manual Shipping (No API Integration)
+
+Use this when you've already booked a courier manually and just need to record the tracking info.
 
 ```http
 POST /api/v1/orders/:id/shipping
@@ -995,24 +926,22 @@ Authorization: Bearer <admin_token>
 **Request:**
 ```json
 {
-  "provider": "redx",
-  "trackingNumber": "REDX123456789",
-  "trackingUrl": "https://track.redx.com.bd/REDX123456789"
+  "provider": "other",
+  "trackingNumber": "COURIER123456",
+  "trackingUrl": "https://courier-website.com/track/COURIER123456"
 }
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "data": { /* shipping object */ },
-  "message": "Shipping requested via redx"
-}
-```
+**Use cases:** Local couriers, self-delivery, SA Paribahan, Sundarban (no API yet)
 
-### Option 1b: Create Shipment via Provider API (Inline)
+---
 
-Alternatively, use the `useProviderApi` flag to create a shipment via the logistics provider API directly:
+### RedX API Shipping (Automated)
+
+Use this to automatically create a shipment via RedX API. The system will:
+- Create parcel in RedX dashboard
+- Get tracking number automatically
+- Receive webhook updates for status changes
 
 ```http
 POST /api/v1/orders/:id/shipping
@@ -1024,88 +953,27 @@ Authorization: Bearer <admin_token>
 {
   "provider": "redx",
   "useProviderApi": true,
-  "weight": 500,
-  "instructions": "Handle with care"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "shipping": { /* order.shipping object */ },
-    "shipment": {
-      "_id": "shipment_id",
-      "trackingId": "21A427TU4BN3R",
-      "provider": "redx",
-      "status": "pending"
-    }
-  },
-  "message": "Shipment created via redx API"
-}
-```
-
-> **Note:** When `useProviderApi: true`, payment must be verified before shipping can be requested.
-
-### Option 2: Create Shipment via Logistics API (RedX)
-
-For automated shipment creation via RedX API:
-
-**Step 1: Get pickup stores (from RedX dashboard)**
-```http
-GET /api/v1/logistics/pickup-stores
-Authorization: Bearer <admin_token>
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "name": "Main Warehouse",
-      "address": "123 Main St, Mohammadpur",
-      "areaId": 1,
-      "areaName": "Mohammadpur(Dhaka)",
-      "phone": "01712345678"
-    }
-  ]
-}
-```
-
-**Step 2: Create shipment with selected pickup store**
-```http
-POST /api/v1/logistics/shipments
-Authorization: Bearer <admin_token>
-```
-
-```json
-{
-  "orderId": "order_id",
   "pickupStoreId": 1,
   "weight": 500,
   "instructions": "Handle with care"
 }
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "_id": "shipment_id",
-    "trackingId": "21A427TU4BN3R",
-    "provider": "redx",
-    "status": "pending",
-    "order": "order_id"
-  },
-  "message": "Shipment created successfully"
-}
-```
+| Field | Required | Description |
+|-------|----------|-------------|
+| `provider` | Yes | Must be `redx` for API integration |
+| `useProviderApi` | Yes | Set to `true` to trigger RedX API |
+| `pickupStoreId` | No | Pickup store ID (get from `/logistics/pickup-stores`) |
+| `weight` | No | Parcel weight in grams |
+| `instructions` | No | Special handling instructions |
 
-> **Note:** This automatically updates `order.shipping` with tracking info.
+**Response:** Returns `trackingId`, `providerOrderId`, and full `shipping` object with `charges` and `cashCollection`.
+
+**Requirements:**
+- Payment must be verified before creating RedX shipment (except COD)
+- RedX API credentials configured in environment
+
+**Get Pickup Stores:** `GET /api/v1/logistics/pickup-stores` (Admin)
 
 ### Update Shipping Status
 
@@ -1136,23 +1004,7 @@ GET /api/v1/logistics/shipments/:id/track
 Authorization: Bearer <admin_token>
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "shipment": { ... },
-    "tracking": {
-      "trackingId": "21A427TU4BN3R",
-      "status": "in-transit",
-      "timeline": [
-        { "message_en": "Package is created", "time": "2025-12-10T10:00:00Z" },
-        { "message_en": "Package is picked up", "time": "2025-12-10T14:00:00Z" }
-      ]
-    }
-  }
-}
-```
+> `:id` can be order ID or tracking number. Returns `shipping` object + live `tracking` timeline from provider.
 
 ### Get Shipping Info
 
@@ -1161,30 +1013,7 @@ GET /api/v1/orders/:id/shipping
 Authorization: Bearer <token>
 ```
 
-**Access rule:**
-- Regular users can only fetch shipping info for **their own** orders
-- Admins can fetch shipping info for any order
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "provider": "redx",
-    "status": "in_transit",
-    "trackingNumber": "21A427TU4BN3R",
-    "trackingUrl": "https://track.redx.com.bd/21A427TU4BN3R",
-    "shipmentId": "shipment_id",
-    "estimatedDelivery": "2025-12-15T00:00:00.000Z",
-    "requestedAt": "2025-12-10T10:00:00.000Z",
-    "pickedUpAt": "2025-12-10T14:00:00.000Z",
-    "history": [
-      { "status": "requested", "note": "Shipment created via RedX API", "timestamp": "..." },
-      { "status": "picked_up", "note": "Courier picked up package", "timestamp": "..." }
-    ]
-  }
-}
-```
+> Users can only fetch their own orders. Admins can fetch any. Returns stored `shipping` object from order.
 
 ### Cancel Shipment
 
@@ -1201,75 +1030,53 @@ Authorization: Bearer <admin_token>
 
 ---
 
-## Payment Verification Workflow
+## Logistics Webhook Processing
 
-### Payment Webhook Endpoints
+Logistics providers (RedX, Pathao, etc.) send webhooks when shipment status changes. The system processes these webhooks and updates `order.shipping` directly.
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/webhooks/payments/:provider` | Provider-signed | Automatic provider webhook (Stripe, SSLCommerz, bKash, Nagad; extensible) |
-| `POST` | `/webhooks/payments/manual/verify` | Superadmin | Manual verification for cash/mobile/bank-transfer payments |
-
-> Automatic provider webhooks are signature-validated by the payment library and update transactions/orders based on events (`payment.succeeded`, `payment.failed`, `refund.succeeded`, etc.). Keep `transaction.referenceModel` / `referenceId` and `metadata.senderPhone` fields populated for future online providers.
-
-### Manual Payment Verification (Admin)
-
-When customers pay via bKash/Nagad/etc or when COD payment is collected, admin verifies:
-
-**Step 1: Admin views order and sees customer's payment details:**
-- `order.currentPayment.reference` → Customer's TrxID (if provided)
-- `transaction.metadata.senderPhone` → Customer's phone number
-- `transaction.metadata.paymentReference` → Duplicate for quick lookup
-
-**Step 2: Admin verifies payment in provider panel (e.g., bKash merchant):**
-- Search by TrxID or sender phone
-- Confirm amount matches order total
-- Verify payment status in provider dashboard
-
-**Step 3: Admin calls verification endpoint:**
+### Webhook Endpoint
 
 ```http
-POST /webhooks/payments/manual/verify
-Authorization: Bearer <superadmin_token>
-Content-Type: application/json
+POST /webhooks/logistics/:provider
 ```
 
-```json
-{
-  "transactionId": "txn_id_from_order",
-  "notes": "Verified in bKash - TrxID: BGH3K5L90P, Sender: 01712345678"
-}
+> **Note:** This endpoint is provider-authenticated (signature validation) and not called by frontend.
+
+### How Webhooks Work
+
+```
+Provider (RedX) → Webhook → Backend → Find Order by trackingNumber → Update order.shipping → Save
 ```
 
-**Request body:**
-- `transactionId` (required) — Transaction to verify
-- `notes` (optional) — Verification notes (stored in metadata)
+1. **Provider sends webhook** with tracking number and status update
+2. **Backend parses webhook** using provider-specific adapter (e.g., `RedXProvider.parseWebhook()`)
+3. **Find order** by `shipping.trackingNumber` index (fast lookup)
+4. **Map provider status** to internal status (e.g., RedX `ready-for-delivery` → `picked_up`)
+5. **Update order.shipping** fields:
+   - `status` - Normalized shipping status
+   - `providerStatus` - Raw status from provider
+   - `lastWebhookAt` - Timestamp
+   - `webhookCount` - Increment counter
+   - `history` - Append status change entry
+   - Timestamps (`pickedUpAt`, `deliveredAt`) if applicable
+   - `cashCollection.collected` if COD delivered
+6. **Save order** - All changes are atomic
 
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Payment verified successfully",
-  "data": {
-    "transactionId": "txn_id",
-    "status": "verified",
-    "amount": 156000,
-    "category": "sales",
-    "verifiedAt": "2025-01-12T10:00:00.000Z",
-    "verifiedBy": "admin_user_id",
-    "entity": {
-      "referenceModel": "Order",
-      "referenceId": "order_id"
-    }
-  }
-}
-```
+### Provider Status Mapping
 
-**What happens after verification:**
-- `order.currentPayment.status` → `verified`
-- `order.status` → `confirmed`
-- Timeline event added
-- Customer receives confirmation email/notification
+| Provider Status (RedX) | Internal Status | Order Status |
+|------------------------|-----------------|--------------|
+| `pickup-requested` | `requested` | - |
+| `pickup-pending` | `requested` | - |
+| `picked-up`, `ready-for-delivery` | `picked_up` | `shipped` |
+| `in-transit`, `agent-hold` | `in_transit` | - |
+| `delivery-in-progress`, `out-for-delivery` | `out_for_delivery` | - |
+| `delivered` | `delivered` | `delivered` |
+| `agent-returning`, `returning` | `returned` | - |
+| `returned` | `returned` | - |
+| `on-hold` | (no change) | - |
+
+Webhooks update: `status`, `providerStatus`, `lastWebhookAt`, `webhookCount`, `history[]`, timestamps, and `cashCollection.collected` (if COD delivered).
 
 ---
 
@@ -1287,115 +1094,3 @@ Content-Type: application/json
 | 400 | Validation errors, invalid status transition |
 | 403 | Access denied (not your order) |
 | 404 | Order not found |
-
----
-
-## Frontend Tips
-
-### General
-
-1. **Cart-first checkout:** Always use cart as source of items; cart auto-clears on order success
-2. **Amounts in BDT:** Order amounts (`totalAmount`, `subtotal`, `deliveryCharge`) are in BDT. No conversion needed.
-3. **VAT calculation:** Backend auto-calculates VAT from product/category/platform cascade - frontend just displays `order.vat.amount`
-4. **Polling for status:** Poll `/my/:id` every 30s on order confirmation page
-5. **Cancellation:** Allow cancel when `status` is not `cancelled` or `delivered` (backend allows cancellation from `pending`, `processing`, `confirmed`)
-6. **Payment pending:** Show payment instructions when `currentPayment.status === 'pending'`
-7. **Gift orders:** Set `isGift: true` and use `deliveryAddress.recipientName` for gift recipient
-8. **Customer data:** Orders now include `customerName`, `customerPhone`, `customerEmail` (no populate needed)
-9. **VAT invoice:** Display `order.vat.invoiceNumber` when available (issued at checkout or fulfillment)
-
-### Checkout Page Setup
-
-```javascript
-// Build order payload (all required fields per schema)
-function buildOrderPayload(address, deliveryOption, paymentInfo, couponCode, notes) {
-  return {
-    deliveryAddress: {
-      // Required fields
-      recipientName: address.recipientName,
-      recipientPhone: address.recipientPhone,
-      addressLine1: address.addressLine1,
-      areaId: address.areaId,       // From bd-areas
-      areaName: address.areaName,   // From bd-areas
-      zoneId: address.zoneId,       // From bd-areas (1-6)
-      city: address.city,
-      // Optional fields
-      addressLine2: address.addressLine2,
-      division: address.division,
-      postalCode: address.postalCode,
-      providerAreaIds: address.providerAreaIds,
-    },
-    delivery: {
-      method: deliveryOption.name,
-      price: deliveryOption.price
-    },
-    paymentData: {
-      type: paymentInfo.type,
-      reference: paymentInfo.trxId,
-      senderPhone: paymentInfo.phone,
-      paymentDetails: paymentInfo.details
-    },
-    couponCode,
-    notes
-  };
-}
-```
-
-### Payment Flow
-
-**Option 1: Pay-first (Recommended for mobile wallets)**
-1. Customer adds items to cart during shopping
-2. At checkout, show payment methods (from `config.paymentMethods` array filtered by type: `mfs`)
-   - Each MFS method has: `provider`, `walletNumber`, `walletName`
-3. Customer pays via bKash/Nagad and gets TrxID
-4. Checkout form collects:
-   - Delivery address
-   - Selected delivery zone (name + price)
-   - Payment type (use `provider` value, e.g., 'bkash') + TrxID + sender phone
-5. Submit payload → backend processes cart, validates, creates order
-
-**Option 2: Order-first (COD)**
-1. Customer adds items to cart
-2. At checkout, enter address, select delivery method, choose `paymentData.type: "cash"`
-3. Submit payload → backend processes cart, creates order, clears cart
-4. Order created with `status: pending`, `paymentStatus: pending`
-5. Customer pays on delivery, admin verifies
-
-### Frontend Validation
-
-```javascript
-// Validate before submitting
-const validateCheckout = (address, delivery, paymentData) => {
-  // Required address fields (per schema)
-  if (!address?.recipientName || !address?.recipientPhone) {
-    return 'Please provide recipient name and phone';
-  }
-  if (!address?.addressLine1 || !address?.city) {
-    return 'Please provide complete delivery address';
-  }
-  if (!address?.areaId || !address?.areaName || !address?.zoneId) {
-    return 'Please select a valid delivery area';
-  }
-  if (!delivery?.method || delivery?.price === undefined) {
-    return 'Please select a delivery method';
-  }
-  if (!paymentData?.type) {
-    return 'Please select payment method';
-  }
-
-  // Phone validation
-  if (!/^01[0-9]{9}$/.test(address.recipientPhone)) {
-    return 'Please enter valid recipient phone number (01XXXXXXXXX)';
-  }
-
-  const { type, senderPhone } = paymentData;
-  if (['bkash', 'nagad', 'rocket'].includes(type)) {
-    if (!senderPhone || !/^01[0-9]{9}$/.test(senderPhone)) {
-      return 'Please enter valid sender phone number (01XXXXXXXXX)';
-    }
-  }
-
-  return null; // Valid
-};
-```
-

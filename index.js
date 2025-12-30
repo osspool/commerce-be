@@ -7,27 +7,64 @@ import Fastify from 'fastify';
 import closeWithGrace from 'close-with-grace';
 import config from './config/index.js';
 import app from './app.js';
-import { createFastifyLogger } from '#common/utils/logger.js';
-import logger from '#common/utils/logger.js';
-
-// Global error handlers (before anything else)
-process.on('uncaughtException', (error) => {
-  console.error(error);
-  logger.error('Uncaught exception', { error: error.message, stack: error.stack });
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error(reason);
-  logger.error('Unhandled rejection', { reason });
-  process.exit(1);
-});
+import { createFastifyLogger } from '#core/utils/logger.js';
+import logger from '#core/utils/logger.js';
 
 // Create server
 const server = Fastify({
   ...createFastifyLogger(),
   trustProxy: true,
   ajv: { customOptions: { coerceTypes: true, useDefaults: true, removeAdditional: false } },
+});
+
+let _isShuttingDown = false;
+async function shutdownAndExit(code, context) {
+  if (_isShuttingDown) return;
+  _isShuttingDown = true;
+
+  try {
+    logger.error(context, 'Fatal process error, attempting graceful shutdown');
+  } catch {
+    // ignore logger failures
+  }
+
+  // Force-exit safeguard (don't hang forever)
+  const forceExitTimer = setTimeout(() => {
+    // eslint-disable-next-line no-console
+    console.error('Shutdown timeout exceeded, forcing exit');
+    process.exit(code);
+  }, 10000);
+  forceExitTimer.unref();
+
+  try {
+    await server.close();
+  } catch (e) {
+    try {
+      logger.error({ err: e }, 'Error during shutdown');
+    } catch {
+      // ignore
+    }
+  } finally {
+    clearTimeout(forceExitTimer);
+    process.exit(code);
+  }
+}
+
+// Global error handlers (fail fast; safe only with a supervisor/restart policy)
+process.on('uncaughtException', (error) => {
+  // eslint-disable-next-line no-console
+  console.error(error);
+  shutdownAndExit(1, { error: error?.message, stack: error?.stack, type: 'uncaughtException' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  // eslint-disable-next-line no-console
+  console.error(reason);
+  shutdownAndExit(1, {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+    type: 'unhandledRejection',
+  });
 });
 
 // Graceful shutdown

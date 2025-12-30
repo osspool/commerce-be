@@ -18,7 +18,7 @@
  */
 
 import { jobQueue } from './JobQueue.js';
-import logger from '#common/utils/logger.js';
+import logger from '#core/utils/logger.js';
 
 /**
  * Registry of module job registration functions
@@ -45,10 +45,10 @@ export async function registerAllJobHandlers() {
   // Import all module job registrations
   // Using dynamic imports to avoid circular dependencies
   const modules = [
-    () => import('#modules/commerce/pos/pos.jobs.js'),
-    () => import('#modules/commerce/inventory/inventory.jobs.js'),
+    () => import('#modules/sales/pos/pos.jobs.js'),
+    () => import('#modules/inventory/inventory.jobs.js'),
     // Add more modules here as needed:
-    // () => import('#modules/commerce/order/order.jobs.js'),
+    // () => import('#modules/sales/orders/order.jobs.js'),
     // () => import('#modules/finance/finance.jobs.js'),
   ];
 

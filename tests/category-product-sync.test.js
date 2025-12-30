@@ -13,21 +13,32 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import { eventBus } from '#core/events/EventBus.js';
+import { handlers as categoryEventHandlers } from '#modules/catalog/categories/events.js';
 
 // Set required environment variables
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-123456789';
 process.env.COOKIE_SECRET = process.env.COOKIE_SECRET || 'test-cookie-secret-key-1234567890123456';
 
 // Import models and repositories after setting env
-import Category from '#modules/commerce/category/category.model.js';
-import Product from '#modules/commerce/product/product.model.js';
-import categoryRepository from '#modules/commerce/category/category.repository.js';
-import productRepository from '#modules/commerce/product/product.repository.js';
+import Category from '#modules/catalog/categories/category.model.js';
+import Product from '#modules/catalog/products/product.model.js';
+import categoryRepository from '#modules/catalog/categories/category.repository.js';
+import productRepository from '#modules/catalog/products/product.repository.js';
 
 let mongoServer;
+const _registeredEventHandlers = [];
 
 describe('Category-Product Synchronization', () => {
     beforeAll(async () => {
+        // Register domain event handlers explicitly for this test suite.
+        // These tests don't boot Fastify, so EventRegistry auto-discovery won't run.
+        for (const [eventName, handler] of Object.entries(categoryEventHandlers)) {
+            if (typeof handler !== 'function') continue;
+            eventBus.on(eventName, handler);
+            _registeredEventHandlers.push([eventName, handler]);
+        }
+
         // Start MongoDB Memory Server
         mongoServer = await MongoMemoryServer.create({
             instance: { dbName: 'test-category-sync' },
@@ -45,6 +56,12 @@ describe('Category-Product Synchronization', () => {
     });
 
     afterAll(async () => {
+        // Cleanup registered handlers to avoid leaking listeners into other tests
+        for (const [eventName, handler] of _registeredEventHandlers) {
+            if (typeof eventBus.off === 'function') eventBus.off(eventName, handler);
+            else if (typeof eventBus.removeListener === 'function') eventBus.removeListener(eventName, handler);
+        }
+
         if (mongoose.connection.readyState !== 0) {
             await mongoose.disconnect();
         }

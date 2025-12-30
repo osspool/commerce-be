@@ -269,6 +269,6 @@ landingPages: {
 
 See:
 - `config/permissions.js` - All permission definitions
-- `routes/utils/createCrudRouter.js` - How CRUD auth works
+- `core/factories/createCrudRouter.js` - How CRUD auth works
 - `lib/monetization/helpers/route-composer.js` - How custom routes work
 - This guide - Architecture patterns

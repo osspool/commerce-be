@@ -7,8 +7,8 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
-import Supplier from '../../modules/commerce/inventory/supplier/supplier.model.js';
-import supplierRepository from '../../modules/commerce/inventory/supplier/supplier.repository.js';
+import { Supplier } from '../../modules/inventory/supplier/index.js';
+import supplierRepository from '../../modules/inventory/supplier/supplier.repository.js';
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/bigboss-test';
 

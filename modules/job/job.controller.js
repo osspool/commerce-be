@@ -1,4 +1,4 @@
-import BaseController from '#common/controllers/baseController.js';
+import BaseController from '#core/base/BaseController.js';
 import jobRepository from './job.repository.js';
 import { jobSchemaOptions } from './schemas.js';
 

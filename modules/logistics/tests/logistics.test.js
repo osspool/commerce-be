@@ -5,9 +5,8 @@
  */
 
 import mongoose from 'mongoose';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
-import Shipment from '../models/shipment.model.js';
 import { RedXProvider } from '@classytic/bd-logistics/providers';
 import bdAreas from '@classytic/bd-areas';
 
@@ -23,6 +22,7 @@ describe('Logistics Module', () => {
   });
 
   // Note: LogisticsConfig model tests removed - config is loaded from .env
+  // Note: Shipment model tests removed - shipping data is now embedded in Order.shipping
   // See config/sections/logistics.config.js for configuration
 
   describe('Static Areas (bd-areas)', () => {
@@ -74,76 +74,6 @@ describe('Logistics Module', () => {
       areas.forEach(area => {
         expect(area.districtId).toBe('dhaka');
       });
-    });
-  });
-
-  describe('Shipment Model', () => {
-    let testOrderId;
-
-    beforeEach(async () => {
-      await Shipment.deleteMany({});
-      testOrderId = new mongoose.Types.ObjectId();
-    });
-
-    it('should create shipment with timeline', async () => {
-      const shipment = await Shipment.create({
-        order: testOrderId,
-        provider: 'redx',
-        trackingId: 'TEST123',
-        status: 'pickup-requested',
-        delivery: {
-          customerName: 'Test Customer',
-          customerPhone: '01700000000',
-          address: 'Test Address',
-        },
-        timeline: [{
-          status: 'pickup-requested',
-          message: 'Shipment created',
-          timestamp: new Date(),
-        }],
-      });
-
-      expect(shipment.trackingId).toBe('TEST123');
-      expect(shipment.timeline.length).toBe(1);
-    });
-
-    it('should find by tracking ID', async () => {
-      await Shipment.create({
-        order: testOrderId,
-        provider: 'redx',
-        trackingId: 'TRACK456',
-        status: 'in-transit',
-        delivery: {
-          customerName: 'Test',
-          customerPhone: '01700000000',
-          address: 'Test',
-        },
-      });
-
-      const found = await Shipment.findByTrackingId('TRACK456');
-      expect(found).not.toBeNull();
-      expect(found.status).toBe('in-transit');
-    });
-
-    it('should update status with timeline event', async () => {
-      const shipment = await Shipment.create({
-        order: testOrderId,
-        provider: 'redx',
-        trackingId: 'TRACK789',
-        status: 'pickup-requested',
-        delivery: {
-          customerName: 'Test',
-          customerPhone: '01700000000',
-          address: 'Test',
-        },
-        timeline: [],
-      });
-
-      await shipment.updateStatus('picked-up', 'Package picked up', 'প্যাকেজ পিক আপ হয়েছে');
-
-      expect(shipment.status).toBe('picked-up');
-      expect(shipment.timeline.length).toBe(1);
-      expect(shipment.timeline[0].message).toBe('Package picked up');
     });
   });
 

@@ -20,6 +20,8 @@ export default {
     jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
     deviceWebhookSecret: process.env.DEVICE_WEBHOOK_SECRET,
     disableCronJobs: parseBoolean(process.env.DISABLE_CRON_JOBS),
+    // Feature flags (keep simple: 0 = disabled, 1 = enabled)
+    trackProductViews: parseInt(process.env.TRACK_PRODUCT_VIEWS, 0) === 1,
   },
 
   rateLimit: {

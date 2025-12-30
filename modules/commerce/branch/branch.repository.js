@@ -6,7 +6,7 @@ import {
   cascadePlugin,
 } from '@classytic/mongokit';
 import Branch from './branch.model.js';
-import { emitBranchUpdated, emitBranchDeleted } from '#common/events/branch.handlers.js';
+import { emitBranchUpdated, emitBranchDeleted } from '#shared/events/branch.handlers.js';
 
 /**
  * Branch Repository

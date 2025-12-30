@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
-import InventoryCounter from '../../modules/commerce/inventory/inventoryCounter.model.js';
-import Purchase from '../../modules/commerce/inventory/purchase/purchase.model.js';
-import Transfer from '../../modules/commerce/inventory/transfer/transfer.model.js';
-import StockRequest from '../../modules/commerce/inventory/stock-request/stock-request.model.js';
-import Supplier from '../../modules/commerce/inventory/supplier/supplier.model.js';
+import { InventoryCounter } from '../../modules/inventory/stock/models/index.js';
+import { Purchase } from '../../modules/inventory/purchase/index.js';
+import { Transfer } from '../../modules/inventory/transfer/index.js';
+import { StockRequest } from '../../modules/inventory/stock-request/index.js';
+import { Supplier } from '../../modules/inventory/supplier/index.js';
 
 describe('Inventory Counter & Numbering', () => {
   let shouldDisconnect = false;

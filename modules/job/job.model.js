@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { STATUS_VALUES, JOB_TYPE_VALUES } from '#common/constants/enums.js';
+import { STATUS_VALUES, JOB_TYPE_VALUES } from '#shared/constants/enums.js';
 
 const jobSchema = new mongoose.Schema({
   type: {

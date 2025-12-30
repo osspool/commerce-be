@@ -11,9 +11,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import mongoose from 'mongoose';
 import { RedXProvider } from '@classytic/bd-logistics/providers';
-import Order from '../../modules/commerce/order/order.model.js';
-import Customer from '../../modules/customer/customer.model.js';
-import Product from '../../modules/commerce/product/product.model.js';
+import Order from '../../modules/sales/orders/order.model.js';
+import Customer from '../../modules/sales/customers/customer.model.js';
+import Product from '../../modules/catalog/products/product.model.js';
 import { createTestCustomer, createTestProduct, createTestOrder } from '../helpers/test-data.js';
 import { mockRedXApi } from '../helpers/test-utils.js';
 

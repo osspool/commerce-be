@@ -57,6 +57,9 @@ export const orders = {
 
 export const cart = {
   access: groups.userOrAdmin,
+  listAll: groups.storeAdmin, // Admin: list all carts
+  abandoned: groups.storeAdmin, // Admin: get abandoned carts for marketing
+  getUserCart: groups.storeAdmin, // Admin: view specific user's cart
 };
 
 export const reviews = {

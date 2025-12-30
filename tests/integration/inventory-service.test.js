@@ -9,10 +9,10 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
-import { stockTransactionService, stockAvailabilityService } from '../../modules/commerce/inventory/services/index.js';
-import inventoryRepository from '../../modules/commerce/inventory/inventory.repository.js';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import Product from '../../modules/commerce/product/product.model.js';
+import { stockTransactionService, stockAvailabilityService } from '../../modules/inventory/services/index.js';
+import inventoryRepository from '../../modules/inventory/inventory.repository.js';
+import { StockEntry } from '../../modules/inventory/stock/models/index.js';
+import Product from '../../modules/catalog/products/product.model.js';
 import Branch from '../../modules/commerce/branch/branch.model.js';
 import stockService from '../../modules/commerce/core/services/stock.service.js';
 import StockReservation from '../../modules/commerce/core/models/stockReservation.model.js';

@@ -6,10 +6,10 @@ process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import mongoose from 'mongoose';
 
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
+import { StockEntry } from '../../modules/inventory/stock/models/index.js';
 
-vi.mock('#common/plugins/revenue.plugin.js', async () => {
-  const actual = await vi.importActual('#common/plugins/revenue.plugin.js');
+vi.mock('#shared/revenue/revenue.plugin.js', async () => {
+  const actual = await vi.importActual('#shared/revenue/revenue.plugin.js');
   return {
     ...actual,
     getRevenue: () => ({

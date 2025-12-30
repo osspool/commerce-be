@@ -168,6 +168,9 @@ Align finance rules first, then lock the platform config accordingly.
   - [ ] Alerts configured
   - [ ] DB user uses least privilege
   - [ ] Network access restricted (IP allowlist / VPC peering)
+- Runtime
+  - [ ] Run the API (and worker, if used) under a supervisor/restart policy (systemd/PM2/Docker/K8s)
+  - [ ] Ensure health checks + auto-restart are working (kill the process and verify it returns)
 - Platform
   - [ ] Head office branch set
   - [ ] Default branch set

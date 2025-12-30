@@ -1,5 +1,3 @@
-import archiveService from '#modules/archive/archive.service.js';
-
 export async function initialize() {
   // Minimal scheduler: run once per month to reduce file churn
   // const MONTH_MS = 30 * 24 * 60 * 60 * 1000;

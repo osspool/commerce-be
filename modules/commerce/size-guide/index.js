@@ -8,4 +8,4 @@
 export { default as SizeGuide } from './size-guide.model.js';
 export { default as sizeGuideRepository } from './size-guide.repository.js';
 export { default as sizeGuideController } from './size-guide.controller.js';
-export { default as sizeGuidePlugin } from './size-guide.plugin.js';
+export { default as sizeGuidePlugin } from './routes.js';

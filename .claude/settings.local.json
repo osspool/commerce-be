@@ -8,7 +8,9 @@
       "Bash(dir:*)",
       "Bash(tree:*)",
       "Bash(node:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(cat:*)",
+      "Bash(timeout 10 npm start:*)"
     ],
     "deny": [],
     "ask": []

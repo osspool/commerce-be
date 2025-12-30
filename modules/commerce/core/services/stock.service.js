@@ -11,13 +11,12 @@
 
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import inventoryRepository from '../../inventory/inventory.repository.js';
-import { stockTransactionService } from '../../inventory/index.js';
+import inventoryRepository from '#modules/inventory/inventory.repository.js';
+import { stockTransactionService } from '#modules/inventory/index.js';
 import branchRepository from '../../branch/branch.repository.js';
-import logger from '#common/utils/logger.js';
+import logger from '#core/utils/logger.js';
 import StockReservation from '../models/stockReservation.model.js';
-import StockEntry from '../../inventory/stockEntry.model.js';
-import StockMovement from '../../inventory/stockMovement.model.js';
+import { StockEntry, StockMovement } from '#modules/inventory/stock/models/index.js';
 
 // Inline constants (minimal)
 const RESERVATION_TTL_MINUTES = 15;

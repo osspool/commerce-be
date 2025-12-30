@@ -1,8 +1,8 @@
 import config from '../../../config/index.js';
-import Shipment from '../models/shipment.model.js';
 import { createProvider } from '@classytic/bd-logistics/providers';
 import bdAreas from '@classytic/bd-areas';
 import platformRepository from '#modules/platform/platform.repository.js';
+import Order from '#modules/sales/orders/order.model.js';
 
 /**
  * Logistics Service
@@ -10,6 +10,7 @@ import platformRepository from '#modules/platform/platform.repository.js';
  * Main orchestrator for logistics operations.
  * Manages provider instances and coordinates shipment lifecycle.
  *
+ * Shipment data is stored in Order.shipping (consolidated model).
  * Configuration is loaded from .env via config/sections/logistics.config.js
  */
 class LogisticsService {
@@ -91,7 +92,7 @@ class LogisticsService {
 
     const {
       provider: providerName,
-      deliveryAreaId = order.deliveryAddress?.areaId, // Use from order address if not provided
+      deliveryAreaId = order.deliveryAddress?.areaId,
       pickupStoreId = logisticsSettings.defaultPickupStoreId,
       pickupAreaId = logisticsSettings.defaultPickupAreaId,
       weight,
@@ -103,13 +104,14 @@ class LogisticsService {
 
     // Determine COD amount: use explicit codAmount if provided, otherwise auto-calculate
     let cashCollectionAmount;
+    let isPrepaid = false;
     if (codAmount !== undefined) {
       cashCollectionAmount = codAmount;
     } else {
       // Auto-calculate: only collect cash on delivery for 'cash' payment method
       const paymentMethod = order.currentPayment?.method || order.paymentMethod || 'cash';
       const paymentStatus = order.currentPayment?.status || 'pending';
-      const isPrepaid = paymentMethod !== 'cash' && paymentStatus === 'verified';
+      isPrepaid = paymentMethod !== 'cash' && paymentStatus === 'verified';
       cashCollectionAmount = isPrepaid ? 0 : (order.totalAmount || 0);
     }
 
@@ -119,18 +121,14 @@ class LogisticsService {
       : await this.getDefaultProvider();
 
     // Resolve delivery area for provider
-    // Priority: options.providerAreaId > order.providerAreaIds[provider] > bdAreas lookup
     let resolvedAreaId = deliveryAreaId;
     let areaName = options.deliveryAreaName || order.deliveryAddress?.areaName;
 
     if (options.providerAreaId) {
-      // Explicit provider area ID passed in options
       resolvedAreaId = options.providerAreaId;
     } else if (order.deliveryAddress?.providerAreaIds?.[provider.name]) {
-      // Use provider-specific ID stored in order (from FE checkout)
       resolvedAreaId = order.deliveryAddress.providerAreaIds[provider.name];
     } else if (deliveryAreaId) {
-      // Fallback: resolve via bd-areas package
       const area = bdAreas.getArea(deliveryAreaId);
       if (area) {
         const providerAreaId = area.providers?.[provider.name];
@@ -142,15 +140,13 @@ class LogisticsService {
     }
 
     // Calculate charges if not provided
-    // COD charge only applies when there's cash to collect
     let charges = options.charges;
     if (!charges && resolvedAreaId && pickupAreaId) {
       try {
-        // ChargeParams expects: deliveryAreaId, pickupAreaId, cashCollectionAmount, weight
         charges = await provider.calculateCharge({
           deliveryAreaId: resolvedAreaId,
           pickupAreaId,
-          cashCollectionAmount, // COD amount (0 for prepaid)
+          cashCollectionAmount,
           weight: resolvedWeight,
         });
       } catch (error) {
@@ -165,87 +161,89 @@ class LogisticsService {
       pickupStoreId,
       weight: resolvedWeight,
       instructions,
-      cashCollectionAmount, // Pass the COD amount
+      cashCollectionAmount,
     });
 
-    // Create shipment record
-    const shipment = await Shipment.create({
-      order: order._id,
+    // Update order.shipping directly (consolidated model)
+    const now = new Date();
+    order.shipping = {
       provider: provider.name,
-      trackingId: result.trackingId,
+      status: 'requested',
+      trackingNumber: result.trackingId,
       providerOrderId: result.providerOrderId,
-      status: 'pickup-requested',
-      parcel: {
-        weight: resolvedWeight,
-        value: order.totalAmount,
-        itemCount: order.items?.length || 1,
-      },
+      providerStatus: 'pickup-requested',
+      requestedAt: now,
       pickup: {
         storeId: pickupStoreId,
       },
-      delivery: {
-        // For gift orders: use recipient info from deliveryAddress
-        customerName: order.deliveryAddress?.recipientName
-          || order.deliveryAddress?.name
-          || order.customerName,
-        customerPhone: order.deliveryAddress?.recipientPhone
-          || order.deliveryAddress?.phone
-          || order.customerPhone,
-        address: this._buildAddress(order.deliveryAddress),
-        areaId: resolvedAreaId,
-        areaName,
-      },
+      charges: charges || {},
       cashCollection: {
         amount: cashCollectionAmount,
-        isCod: !isPrepaid,
       },
-      charges: charges || {},
-      merchantInvoiceId: order._id.toString(),
-      createdBy: options.userId,
-      timeline: [{
-        status: 'pickup-requested',
-        message: 'Shipment created with provider',
-        timestamp: new Date(),
+      webhookCount: 0,
+      history: [{
+        status: 'requested',
+        note: `Shipment created via ${provider.name} API`,
+        timestamp: now,
       }],
-    });
+    };
 
-    return shipment;
+    await order.save();
+
+    return {
+      trackingId: result.trackingId,
+      providerOrderId: result.providerOrderId,
+      order,
+    };
+  }
+
+  /**
+   * Find order by tracking number
+   */
+  async findOrderByTrackingNumber(trackingNumber) {
+    return Order.findOne({ 'shipping.trackingNumber': trackingNumber });
   }
 
   /**
    * Track shipment and update status
-   * Also propagates status to order if changed
    */
-  async trackShipment(trackingId) {
+  async trackShipment(trackingNumber) {
     await this.initialize();
 
-    const shipment = await Shipment.findByTrackingId(trackingId);
-    if (!shipment) {
+    const order = await this.findOrderByTrackingNumber(trackingNumber);
+    if (!order) {
       throw new Error('Shipment not found');
     }
 
-    const provider = this.getProvider(shipment.provider);
-    const trackingData = await provider.trackShipment(trackingId);
+    const provider = this.getProvider(order.shipping.provider);
+    const trackingData = await provider.trackShipment(trackingNumber);
 
-    // Update shipment with latest status
-    if (trackingData.status !== shipment.status) {
+    // Update order.shipping with latest status
+    const currentStatus = order.shipping.status;
+    const newStatus = this._mapProviderStatus(trackingData.status);
+
+    if (newStatus && newStatus !== currentStatus) {
       const latestEvent = trackingData.timeline[trackingData.timeline.length - 1];
-      await shipment.updateStatus(
-        trackingData.status,
-        latestEvent?.message,
-        latestEvent?.messageLocal,
-        latestEvent?.raw
-      );
 
-      // Propagate to order shipping when status changes
-      await this._updateOrderShipping(shipment, {
-        message: latestEvent?.message,
-        messageLocal: latestEvent?.messageLocal,
+      order.shipping.status = newStatus;
+      order.shipping.providerStatus = trackingData.status;
+      this._updateTimestamps(order.shipping, newStatus);
+
+      order.shipping.history = order.shipping.history || [];
+      order.shipping.history.push({
+        status: newStatus,
+        note: latestEvent?.message,
+        noteLocal: latestEvent?.messageLocal,
+        timestamp: new Date(),
+        raw: latestEvent?.raw,
       });
+
+      await order.save();
+      console.info(`Order ${order._id} shipping updated to ${newStatus} from tracking`);
     }
 
     return {
-      shipment,
+      order,
       tracking: trackingData,
     };
   }
@@ -253,40 +251,45 @@ class LogisticsService {
   /**
    * Cancel shipment
    */
-  async cancelShipment(trackingId, reason, userId) {
+  async cancelShipment(trackingNumber, reason, userId) {
     await this.initialize();
 
-    const shipment = await Shipment.findByTrackingId(trackingId);
-    if (!shipment) {
+    const order = await this.findOrderByTrackingNumber(trackingNumber);
+    if (!order) {
       throw new Error('Shipment not found');
     }
 
     // Can only cancel if not delivered/returned
-    if (['delivered', 'returned'].includes(shipment.status)) {
-      throw new Error(`Cannot cancel shipment in status: ${shipment.status}`);
+    if (['delivered', 'returned'].includes(order.shipping.status)) {
+      throw new Error(`Cannot cancel shipment in status: ${order.shipping.status}`);
     }
 
-    const provider = this.getProvider(shipment.provider);
-    const result = await provider.cancelShipment(trackingId, reason);
+    const provider = this.getProvider(order.shipping.provider);
+    const result = await provider.cancelShipment(trackingNumber, reason);
 
     if (result.success) {
-      shipment.status = 'cancelled';
-      shipment.cancelledBy = userId;
-      shipment.cancelReason = reason;
-      shipment.addTimelineEvent('cancelled', reason);
-      await shipment.save();
+      order.shipping.status = 'cancelled';
+      order.shipping.providerStatus = 'cancelled';
+      order.shipping.history = order.shipping.history || [];
+      order.shipping.history.push({
+        status: 'cancelled',
+        note: reason,
+        actor: userId?.toString(),
+        timestamp: new Date(),
+      });
+      await order.save();
     }
 
     return {
       success: result.success,
       message: result.message,
-      shipment,
+      order,
     };
   }
 
   /**
    * Process webhook from provider
-   * Updates shipment and propagates status to order
+   * Updates order.shipping directly
    */
   async processWebhook(providerName, payload) {
     await this.initialize();
@@ -294,97 +297,83 @@ class LogisticsService {
     const provider = this.getProvider(providerName);
     const parsed = provider.parseWebhook(payload);
 
-    const shipment = await Shipment.findByTrackingId(parsed.trackingId);
-    if (!shipment) {
+    const order = await this.findOrderByTrackingNumber(parsed.trackingId);
+    if (!order) {
       console.warn(`Webhook for unknown shipment: ${parsed.trackingId}`);
       return null;
     }
 
-    // Update shipment
-    shipment.status = parsed.status;
-    shipment.providerStatus = parsed.providerStatus;
-    shipment.lastWebhookAt = new Date();
-    shipment.webhookCount += 1;
+    // Map provider status to order shipping status
+    const newStatus = this._mapProviderStatus(parsed.status);
 
-    shipment.addTimelineEvent(
-      parsed.status,
-      parsed.message,
-      parsed.messageLocal,
-      parsed.raw
-    );
+    // Update order.shipping
+    if (newStatus) {
+      order.shipping.status = newStatus;
+    }
+    order.shipping.providerStatus = parsed.providerStatus || parsed.status;
+    order.shipping.lastWebhookAt = new Date();
+    order.shipping.webhookCount = (order.shipping.webhookCount || 0) + 1;
 
-    // Handle delivered status
-    if (parsed.status === 'delivered') {
-      shipment.cashCollection.collected = true;
-      shipment.cashCollection.collectedAt = parsed.timestamp;
+    // Update timestamps based on status
+    this._updateTimestamps(order.shipping, newStatus);
+
+    // Handle delivered status - COD collected
+    if (parsed.status === 'delivered' && order.shipping.cashCollection) {
+      order.shipping.cashCollection.collected = true;
+      order.shipping.cashCollection.collectedAt = parsed.timestamp || new Date();
     }
 
-    await shipment.save();
+    // Add to history
+    order.shipping.history = order.shipping.history || [];
+    order.shipping.history.push({
+      status: newStatus || order.shipping.status,
+      note: parsed.message,
+      noteLocal: parsed.messageLocal,
+      timestamp: new Date(),
+      raw: parsed.raw,
+    });
 
-    // Propagate shipment status to order shipping
-    await this._updateOrderShipping(shipment, parsed);
+    await order.save();
+    console.info(`Order ${order._id} shipping updated to ${newStatus} from webhook`);
 
-    return shipment;
+    return order;
   }
 
   /**
-   * Update order shipping status when shipment status changes
-   * Maps logistics shipment statuses to order shipping statuses
+   * Map provider shipment status to order shipping status
    */
-  async _updateOrderShipping(shipment, parsedWebhook) {
-    try {
-      // Import shipping service (dynamic to avoid circular dependency)
-      const shippingService = (await import('../../commerce/order/shipping.service.js')).default;
+  _mapProviderStatus(providerStatus) {
+    const statusMap = {
+      'pickup-requested': 'requested',
+      'pickup-pending': 'requested',
+      'picked-up': 'picked_up',
+      'in-transit': 'in_transit',
+      'out-for-delivery': 'out_for_delivery',
+      'delivered': 'delivered',
+      'failed-attempt': 'failed_attempt',
+      'returning': 'returned',
+      'returned': 'returned',
+      'cancelled': 'cancelled',
+      'on-hold': null, // Don't update for on-hold
+    };
+    return statusMap[providerStatus] || null;
+  }
 
-      if (!shipment.order) {
-        console.warn(`Shipment ${shipment.trackingId} has no linked order`);
-        return;
-      }
-
-      // Map shipment status to shipping status
-      const statusMap = {
-        'pickup-requested': 'requested',
-        'pickup-pending': 'requested',
-        'picked-up': 'picked_up',
-        'in-transit': 'in_transit',
-        'out-for-delivery': 'out_for_delivery',
-        'delivered': 'delivered',
-        'returned': 'returned',
-        'cancelled': 'cancelled',
-        'on-hold': null, // Don't update order for on-hold
-      };
-
-      const orderShippingStatus = statusMap[shipment.status];
-
-      if (!orderShippingStatus) {
-        console.debug(`Shipment status ${shipment.status} does not map to order shipping status`);
-        return;
-      }
-
-      // Update order shipping via service (includes validation and events)
-      await shippingService.updateStatus(
-        shipment.order.toString(),
-        {
-          status: orderShippingStatus,
-          note: parsedWebhook.message || `Status updated via ${shipment.provider} webhook`,
-          metadata: {
-            provider: shipment.provider,
-            providerStatus: shipment.providerStatus,
-            trackingId: shipment.trackingId,
-            webhookReceivedAt: new Date(),
-          },
-        },
-        {
-          actorId: 'system',
-          allowBootstrap: true,
-          request: null,
-        }
-      );
-
-      console.info(`Order ${shipment.order} shipping updated to ${orderShippingStatus} from webhook`);
-    } catch (error) {
-      console.error(`Failed to update order shipping for shipment ${shipment.trackingId}:`, error.message);
-      // Don't throw - webhook processing should succeed even if order update fails
+  /**
+   * Update timestamps based on status
+   */
+  _updateTimestamps(shipping, status) {
+    const now = new Date();
+    switch (status) {
+      case 'requested':
+        shipping.requestedAt = shipping.requestedAt || now;
+        break;
+      case 'picked_up':
+        shipping.pickedUpAt = now;
+        break;
+      case 'delivered':
+        shipping.deliveredAt = now;
+        break;
     }
   }
 
@@ -394,7 +383,6 @@ class LogisticsService {
 
   /**
    * Get pickup stores from provider
-   * Admins create pickup stores via provider dashboard (e.g., RedX dashboard)
    */
   async getPickupStores(providerName) {
     await this.initialize();
@@ -434,7 +422,6 @@ class LogisticsService {
     const parts = [];
     if (address.addressLine1) parts.push(address.addressLine1);
     if (address.addressLine2) parts.push(address.addressLine2);
-    // Use areaName (preferred) or area (deprecated)
     const areaName = address.areaName || address.area;
     if (areaName) parts.push(areaName);
     if (address.city) parts.push(address.city);

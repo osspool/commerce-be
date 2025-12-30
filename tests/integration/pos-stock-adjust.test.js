@@ -6,10 +6,10 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
-import Product from '../../modules/commerce/product/product.model.js';
+import Product from '../../modules/catalog/products/product.model.js';
 import Branch from '../../modules/commerce/branch/branch.model.js';
-import StockEntry from '../../modules/commerce/inventory/stockEntry.model.js';
-import { stockSyncService } from '../../modules/commerce/inventory/services/index.js';
+import { StockEntry } from '../../modules/inventory/stock/models/index.js';
+import { stockSyncService } from '../../modules/inventory/services/index.js';
 import { createTestBranch } from '../helpers/test-data.js';
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/bigboss-test';
