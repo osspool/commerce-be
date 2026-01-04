@@ -43,7 +43,6 @@ export const POS_JOB_TYPES = {
  * @param {string} job.data.orderId - Order ID
  * @param {string} job.data.customerId - Customer ID or 'walk-in'
  * @param {number} job.data.totalAmount - Order total amount
- * @param {string} job.data.branchId - Branch ID
  * @param {string} job.data.branchCode - Branch code
  * @param {string} job.data.cashierId - Cashier user ID
  * @param {string} job.data.paymentMethod - Payment method
@@ -59,7 +58,6 @@ export async function handleCreateTransaction(job) {
     orderId,
     customerId,
     totalAmount,
-    branchId,
     branchCode,
     cashierId,
     paymentMethod,
@@ -67,6 +65,11 @@ export async function handleCreateTransaction(job) {
     paymentPayments,
     vatInvoiceNumber,
     vatSellerBin,
+    // VAT data for transaction tax fields
+    vatApplicable = false,
+    vatAmount = 0,
+    vatRate = 0,
+    vatPricesIncludeVat = true,
     terminalId,
     idempotencyKey,
   } = job.data;
@@ -77,8 +80,11 @@ export async function handleCreateTransaction(job) {
   const amountInPaisa = toSmallestUnit(totalAmount, 'BDT');
   const isSplitPayment = paymentMethod === 'split';
 
+  // Handle walk-in customers - don't pass invalid string to customerId
+  const resolvedCustomerId = customerId && customerId !== 'walk-in' ? customerId : null;
+
   const { transaction } = await revenue.monetization.create({
-    data: { customerId, referenceId: orderId, referenceModel: 'Order' },
+    data: { customerId: resolvedCustomerId, sourceId: orderId, sourceModel: 'Order' },
     planKey: 'one_time',
     monetizationType: 'purchase',
     amount: amountInPaisa,
@@ -92,7 +98,7 @@ export async function handleCreateTransaction(job) {
     metadata: {
       orderId: orderId.toString(),
       source: 'pos',
-      branch: branchId,
+      branchCode,
       branchCode,
       terminalId,
       cashierId,
@@ -104,8 +110,35 @@ export async function handleCreateTransaction(job) {
   });
 
   if (transaction) {
+    // Build tax update for finance reporting
+    const taxUpdate = {
+      source: 'pos',
+      branch: branchId,
+      branchCode,
+      // Populate tax fields from order VAT for cashflow reporting
+      tax: vatApplicable ? toSmallestUnit(vatAmount, 'BDT') : 0,
+      ...(vatApplicable && {
+        taxDetails: {
+          type: 'vat',
+          rate: (vatRate || 0) / 100, // Convert percentage to decimal
+          isInclusive: vatPricesIncludeVat,
+          jurisdiction: 'BD',
+        },
+      }),
+    };
+
+    const existing = await Transaction.findById(transaction._id)
+      .select('amount fee')
+      .lean();
+
+    if (existing?.amount !== undefined) {
+      const fee = existing.fee || 0;
+      const taxValue = taxUpdate.tax || 0;
+      taxUpdate.net = existing.amount - fee - taxValue;
+    }
+
     await Promise.all([
-      Transaction.findByIdAndUpdate(transaction._id, { source: 'pos', branch: branchId }),
+      Transaction.findByIdAndUpdate(transaction._id, taxUpdate),
       revenue.payments.verify(transaction._id, { verifiedBy: cashierId }),
       orderRepository.update(orderId, { 'currentPayment.transactionId': transaction._id }),
     ]);

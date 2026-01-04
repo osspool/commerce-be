@@ -16,7 +16,7 @@ export function buildFinanceSummary(rows) {
     const dateKey = row.dateKey;
     const branchCode = row.branchCode || 'N/A';
     const method = row.method || 'unknown';
-    const type = row.type || 'income';
+    const flow = row.flow || 'inflow';
     const amountBdt = toBdt(row.amountPaisa);
     const count = Number(row.count || 0);
 
@@ -37,7 +37,7 @@ export function buildFinanceSummary(rows) {
       existing.byMethod[method] = { incomeBdt: 0, expenseBdt: 0, netBdt: 0, count: 0 };
     }
 
-    if (type === 'expense') {
+    if (flow === 'outflow') {
       existing.totals.expenseBdt += amountBdt;
       existing.byMethod[method].expenseBdt += amountBdt;
     } else {
@@ -109,9 +109,9 @@ export async function getFinanceSummary(request, reply) {
   if (branchId) match.branch = branchId;
 
   if (startDate || endDate) {
-    match.transactionDate = {};
-    if (startDate) match.transactionDate.$gte = new Date(startDate);
-    if (endDate) match.transactionDate.$lte = new Date(endDate);
+    match.date = {};
+    if (startDate) match.date.$gte = new Date(startDate);
+    if (endDate) match.date.$lte = new Date(endDate);
   }
 
   // Default: only finalized transactions for dashboards.
@@ -135,7 +135,7 @@ export async function getFinanceSummary(request, reply) {
         dateKey: {
           $dateToString: {
             format: '%Y-%m-%d',
-            date: '$transactionDate',
+            date: '$date',
             timezone: 'Asia/Dhaka',
           },
         },
@@ -147,7 +147,7 @@ export async function getFinanceSummary(request, reply) {
           dateKey: '$dateKey',
           branchCode: { $ifNull: ['$branch.code', 'N/A'] },
           method: '$method',
-          type: '$type',
+          flow: '$flow',
         },
         amountPaisa: { $sum: '$amount' },
         count: { $sum: 1 },
@@ -159,7 +159,7 @@ export async function getFinanceSummary(request, reply) {
         dateKey: '$_id.dateKey',
         branchCode: '$_id.branchCode',
         method: '$_id.method',
-        type: '$_id.type',
+        flow: '$_id.flow',
         amountPaisa: 1,
         count: 1,
       },
@@ -170,4 +170,3 @@ export async function getFinanceSummary(request, reply) {
   const data = buildFinanceSummary(rows);
   return reply.send({ success: true, data });
 }
-

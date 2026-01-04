@@ -2,48 +2,116 @@
 
 Complete API reference for the BigBoss e-commerce platform.
 
+## Directory Structure
+
+```
+docs/api/
+├── auth/           # Authentication & authorization
+├── catalog/        # Products, categories
+├── commerce/       # Branch, coupon, size guides
+├── finance/        # Financial reporting, transactions
+├── inventory/      # Stock, purchases, transfers
+├── logistics/      # Shipping & logistics utilities
+├── media/          # File uploads
+├── platform/       # Platform configuration
+└── sales/          # Cart, checkout, orders, POS, customers
+```
+
+---
+
+## Catalog APIs
+
+Product catalog and categorization.
+
+| API | Description |
+|-----|-------------|
+| [Product](catalog/product.md) | Product catalog, variants, pricing |
+| [Category](catalog/category.md) | Category hierarchy and sync |
+| [Review](catalog/review.md) | Product reviews and ratings |
+
+---
+
+## Sales APIs
+
+Customer-facing sales flows.
+
+| API | Description |
+|-----|-------------|
+| [Cart](sales/cart.md) | Shopping cart management |
+| [Checkout](sales/checkout.md) | Web checkout flow |
+| [Order](sales/order.md) | Order lifecycle and fulfillment |
+| [POS](sales/pos.md) | Point of sale operations |
+| [Customer](sales/customer.md) | Customer profiles, addresses, membership |
+
+---
+
+## Inventory APIs
+
+Stock and supply chain management.
+
+| API | Description |
+|-----|-------------|
+| [Inventory](inventory/inventory.md) | Stock management overview |
+| [Purchases](inventory/purchases.md) | Supplier purchases, payments |
+| [Stock Movements](inventory/stock-movements.md) | Movement types, audit trail |
+| [Vendor](inventory/vendor.md) | Supplier management |
+| [Challan (Transfers)](inventory/challan.md) | Inter-branch transfers |
+
+---
+
+## Finance APIs
+
+Financial reporting and transactions.
+
+| API | Description |
+|-----|-------------|
+| [Transaction](finance/transaction.md) | Financial transactions, payments |
+| [Finance](finance/finance.md) | Finance dashboard, summaries, VAT reporting |
+
+---
+
 ## Commerce APIs
 
-Core e-commerce functionality.
+Multi-branch and promotions.
 
 | API | Description |
 |-----|-------------|
-| [Product](commerce/product.md) | Product catalog, variants, pricing |
-| [Category](commerce/category.md) | Category hierarchy and sync |
-| [Inventory](commerce/inventory.md) | Stock management, purchases, transfers |
-| [POS](commerce/pos.md) | Point of sale operations |
-| [Cart](commerce/cart.md) | Shopping cart management |
-| [Checkout](commerce/checkout.md) | Web checkout flow |
-| [Order](commerce/order.md) | Order lifecycle and fulfillment |
 | [Branch](commerce/branch.md) | Multi-branch configuration |
 | [Coupon](commerce/coupon.md) | Discount codes and promotions |
+| [Size Guide](commerce/size-guide.md) | Product sizing reference |
 
-### Inventory Reference
+---
 
-Detailed inventory subsystem documentation:
+## Logistics APIs
 
-| Reference | Description |
-|-----------|-------------|
-| [Stock Movements](commerce/inventory/stock-movements.md) | Movement types, audit trail, queries |
-| [Challan (Transfers)](commerce/inventory/challan.md) | Transfer workflow, status history |
-
-## Authentication & Users
+Shipping utilities and provider integrations.
 
 | API | Description |
 |-----|-------------|
-| [Auth](auth.md) | Registration, login, password reset, JWT tokens |
-| [Customer](customer.md) | Customer profiles, addresses, POS lookup |
+| [Logistics](logistics/logistics.md) | Charges, pickup stores, tracking, cancellations |
+
+---
 
 ## Platform APIs
 
+System configuration and utilities.
+
 | API | Description |
 |-----|-------------|
-| [Platform](platform.md) | Platform configuration, settings |
-| [Transaction](transaction.md) | Financial transactions, payments |
-| [Finance](finance.md) | Financial reporting, summaries |
-| [Media](media.md) | File uploads, image management |
+| [Platform](platform/platform.md) | Platform configuration, settings |
+| [Media](media/media.md) | File uploads, image management |
 
-## Quick Links
+---
+
+## Authentication
+
+| API | Description |
+|-----|-------------|
+| [Auth](auth/auth.md) | Registration, login, password reset, JWT tokens |
+
+---
+
+## Quick Reference
 
 ### Authentication
 All endpoints require Bearer token authentication (except public auth routes):
@@ -75,8 +143,9 @@ POST /api/v1/pos/orders
 { "idempotencyKey": "unique-key-here" }
 ```
 
+---
+
 ## Architecture Docs
 
 For system design and setup guides, see:
-- [Commerce Architecture](../COMMERCE_ARCHITECTURE_REVIEW.md)
 - [Production Setup (Bangladesh)](../PRODUCTION_SETUP_BD.md)

@@ -2,8 +2,8 @@
  * Transaction Resource Definition
  *
  * Payment & revenue system transactions.
- * Transactions are automatically created by @classytic/revenue library.
- * This provides read-only CRUD + financial reporting endpoints.
+ * Transactions are created by @classytic/revenue or by admin/superadmin manual entries.
+ * This provides CRUD + financial reporting endpoints with role restrictions.
  */
 
 import { defineResource } from '#core/factories/ResourceDefinition.js';

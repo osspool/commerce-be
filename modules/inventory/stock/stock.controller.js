@@ -285,8 +285,9 @@ class StockController extends BaseController {
             accountName: transactionData.accountName,
             proofUrl: transactionData.proofUrl,
           },
-          referenceModel: 'Manual',
+          sourceModel: 'Manual',
           branchId: branch._id,
+          branchCode: branch.code,
           source: 'api',
           metadata: {
             branchId: branch._id.toString(),

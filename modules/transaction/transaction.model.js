@@ -4,10 +4,12 @@ import {
   paymentDetailsSchema,
   paymentEntrySchema,
   commissionSchema,
+} from '@classytic/revenue/schemas';
+import {
   TRANSACTION_STATUS_VALUES,
-  TRANSACTION_TYPE_VALUES,
-} from '@classytic/revenue';
-import { PAYMENT_METHOD_VALUES } from '#shared/revenue/enums.js';
+  TRANSACTION_FLOW_VALUES,
+} from '@classytic/revenue/enums';
+import { PAYMENT_METHOD_VALUES, TRANSACTION_CATEGORY_VALUES } from '#shared/revenue/enums.js';
 
 const { Schema } = mongoose;
 
@@ -20,40 +22,58 @@ const paymentDetailsWithSplitSchema = new Schema({
 }, { _id: false });
 
 /**
+ * Tax Details Schema
+ * Unified for both revenue and payroll packages
+ */
+const taxDetailsSchema = new Schema({
+  type: {
+    type: String,
+    enum: ['sales_tax', 'vat', 'gst', 'income_tax', 'withholding_tax', 'none'],
+  },
+  rate: Number,
+  isInclusive: Boolean,
+  jurisdiction: String,
+}, { _id: false });
+
+/**
  * Transaction Schema
- * 
+ *
  * Uses @classytic/revenue library schemas and enums for consistency.
- * For ecommerce order purchases with manual payment verification.
- * 
- * Flow:
+ * Implements ITransaction interface from @classytic/shared-types.
+ *
+ * Key fields:
+ * - flow: 'inflow' | 'outflow' - direction of money
+ * - type: category string (order_purchase, refund, etc.)
+ * - amount: gross amount in smallest unit (paisa)
+ * - net: amount after fees/tax
+ * - sourceModel/sourceId: polymorphic reference
+ *
+ * Lifecycle:
  * 1. Order created → Transaction created with status: 'pending'
  * 2. Admin verifies payment → revenue.payments.verify() → status: 'verified'
  * 3. Hook fires → Order.paymentStatus updated to 'completed'
  */
 const transactionSchema = new Schema({
-  // Amount in smallest currency unit (e.g., paisa for BDT)
-  amount: {
-    type: Number,
+  // ===== CLASSIFICATION =====
+
+  // Transaction flow: direction of money (inflow/outflow)
+  flow: {
+    type: String,
+    enum: TRANSACTION_FLOW_VALUES,
     required: true,
-    min: 0,
+    default: 'inflow',
+    index: true,
   },
-  
-  // Transaction type: income (payments) or expense (refunds)
+
+  // Transaction type/category for reporting (order_purchase, refund, etc.)
   type: {
     type: String,
-    enum: TRANSACTION_TYPE_VALUES,
+    enum: [...TRANSACTION_CATEGORY_VALUES, 'refund', 'subscription', 'purchase'],
     required: true,
-    default: 'income',
+    default: 'order_purchase',
+    index: true,
   },
-  
-  // Payment method (bkash, nagad, bank, cash, etc.)
-  method: {
-    type: String,
-    enum: [...PAYMENT_METHOD_VALUES, 'manual', 'split'],
-    required: true,
-    default: 'manual',
-  },
-  
+
   // Transaction status - uses library enum
   status: {
     type: String,
@@ -62,25 +82,106 @@ const transactionSchema = new Schema({
     default: 'pending',
     index: true,
   },
-  
+
+  // ===== AMOUNTS (in smallest currency unit - paisa for BDT) =====
+
+  amount: {
+    type: Number,
+    required: true,
+    min: 0,
+  },
+
+  currency: {
+    type: String,
+    default: 'BDT',
+  },
+
+  // Processing fees (gateway fees, etc.)
+  fee: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+
+  // Tax amount
+  tax: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+
+  // Net amount after fees and tax
+  net: {
+    type: Number,
+    min: 0,
+  },
+
+  // Tax details (type, rate, jurisdiction)
+  taxDetails: taxDetailsSchema,
+
+  // ===== PARTIES =====
+
+  customerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Customer',
+  },
+
+  handledBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+  },
+
+  // ===== PAYMENT =====
+
+  // Payment method (bkash, nagad, bank, cash, etc.)
+  method: {
+    type: String,
+    enum: [...PAYMENT_METHOD_VALUES, 'manual', 'split'],
+    required: true,
+    default: 'manual',
+  },
+
+  // Payment gateway details - uses library schema
+  gateway: gatewaySchema,
+
+  // Payment details (for manual payments) - uses library schema
+  paymentDetails: paymentDetailsWithSplitSchema,
+
+  // ===== REFERENCES =====
+
   // Polymorphic reference - links to any model (Order, etc.)
-  // Customer info can be accessed via Order.customer
-  referenceModel: {
+  sourceModel: {
     type: String,
     default: 'Order',
   },
-  referenceId: {
+  sourceId: {
     type: Schema.Types.ObjectId,
-    refPath: 'referenceModel',
+    refPath: 'sourceModel',
     index: true,
   },
-  
-  // Transaction category for reporting
-  category: {
+
+  // Related transaction (for refunds linking to original)
+  relatedTransactionId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Transaction',
+  },
+
+  // ===== COMMISSION & SPLITS =====
+
+  // Commission tracking - uses library schema (for marketplace use)
+  commission: commissionSchema,
+
+  // Revenue splits
+  splits: [{
+    recipientId: Schema.Types.ObjectId,
+    recipientType: String,
     type: String,
-    default: 'order_purchase',
-    index: true,
-  },
+    amount: Number,
+    status: String,
+    paidAt: Date,
+  }],
+
+  // ===== SOURCE & BRANCH =====
 
   // Source channel: where the transaction originated
   source: {
@@ -90,85 +191,89 @@ const transactionSchema = new Schema({
     index: true,
   },
 
-  // Branch reference: for POS/multi-location tracking
+  // Branch reference (for filtering/reporting)
   branch: {
     type: Schema.Types.ObjectId,
     ref: 'Branch',
     sparse: true,
   },
 
-  currency: {
+  // Branch code (string identifier for FE display)
+  branchCode: {
     type: String,
-    default: 'BDT',
+    trim: true,
   },
-  
-  // Payment gateway details - uses library schema
-  gateway: gatewaySchema,
 
-  // Payment details (for manual payments) - uses library schema
-  paymentDetails: paymentDetailsWithSplitSchema,
+  // ===== METADATA =====
 
-  // Commission tracking - uses library schema (for future marketplace use)
-  commission: commissionSchema,
-
-  // Flexible metadata
   metadata: Schema.Types.Mixed,
-  
+  description: String,
+  notes: String,
+
   // Idempotency key for duplicate prevention
   idempotencyKey: {
     type: String,
     unique: true,
     sparse: true,
   },
-  
-  // Webhook data (for provider webhooks - not used with manual provider)
+
+  // Webhook data (for provider webhooks)
   webhook: {
     eventId: String,
     eventType: String,
     receivedAt: Date,
     processedAt: Date,
-    data: Schema.Types.Mixed,
+    payload: Schema.Types.Mixed,
   },
-  
+
+  // ===== TIMESTAMPS =====
+
+  // Actual transaction date (when it occurred, not when recorded)
+  date: {
+    type: Date,
+    default: Date.now,
+    index: true,
+  },
+
   // Verification tracking
   verifiedBy: {
     type: Schema.Types.ObjectId,
     ref: 'User',
   },
   verifiedAt: Date,
-  
+
   // Status timestamps
-  paidAt: Date,
+  initiatedAt: Date,
+  completedAt: Date,
   failedAt: Date,
-  
-  // Failure tracking
   failureReason: String,
-  
+
   // Refund tracking
   refundedAt: Date,
   refundedAmount: { type: Number, default: 0 },
-  refundReason: String,
-  
-  // Notes
-  notes: String,
 
-  // Actual transaction date (when it occurred, not when recorded)
-  transactionDate: {
-    type: Date,
-    default: Date.now,
-    index: true,
+  // ===== RECONCILIATION =====
+
+  reconciliation: {
+    isReconciled: Boolean,
+    reconciledAt: Date,
+    reconciledBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    bankStatementRef: String,
   },
 }, { timestamps: true });
 
-// Indexes for common queries
-transactionSchema.index({ transactionDate: -1, _id: -1 });
-transactionSchema.index({ createdAt: -1, _id: -1 });
-transactionSchema.index({ referenceModel: 1, referenceId: 1 });
-// Note: gateway.paymentIntentId and gateway.sessionId indexes are defined in gatewaySchema
-transactionSchema.index({ branch: 1, transactionDate: -1 }, { sparse: true }); // Branch reporting
-transactionSchema.index({ source: 1, status: 1 }); // Channel analytics
+// ===== INDEXES =====
 
-// Virtuals
+transactionSchema.index({ date: -1, _id: -1 });
+transactionSchema.index({ createdAt: -1, _id: -1 });
+transactionSchema.index({ flow: 1, status: 1 });
+transactionSchema.index({ source: 1, status: 1 });
+
+// ===== VIRTUALS =====
+
 transactionSchema.virtual('isPaid').get(function() {
   return this.status === 'completed' || this.status === 'verified';
 });
@@ -179,6 +284,15 @@ transactionSchema.virtual('amountInUnits').get(function() {
 
 transactionSchema.set('toJSON', { virtuals: true });
 transactionSchema.set('toObject', { virtuals: true });
+
+// ===== PRE-SAVE MIDDLEWARE =====
+
+transactionSchema.pre('save', function() {
+  // Auto-calculate net if not set (derived field)
+  if (this.net === undefined || this.net === null) {
+    this.net = this.amount - (this.fee || 0) - (this.tax || 0);
+  }
+});
 
 const Transaction = mongoose.models.Transaction || mongoose.model('Transaction', transactionSchema);
 export default Transaction;

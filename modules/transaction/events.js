@@ -11,14 +11,15 @@ export const events = {
     description: 'Emitted when a new payment transaction is created by revenue system',
     schema: {
       type: 'object',
-      required: ['transactionId', 'type', 'amount', 'status'],
+      required: ['transactionId', 'flow', 'amount', 'status'],
       properties: {
         transactionId: { type: 'string', description: 'Transaction ID' },
-        type: { type: 'string', enum: ['income', 'expense', 'transfer'], description: 'Transaction type' },
+        flow: { type: 'string', enum: ['inflow', 'outflow'], description: 'Money flow direction' },
+        type: { type: 'string', description: 'Transaction category (order_purchase, refund, etc.)' },
         amount: { type: 'number', description: 'Transaction amount' },
         status: { type: 'string', enum: ['pending', 'completed', 'failed', 'refunded'], description: 'Transaction status' },
-        referenceId: { type: 'string', description: 'Reference ID (e.g., order ID)' },
-        referenceModel: { type: 'string', description: 'Reference model (e.g., Order)' },
+        sourceId: { type: 'string', description: 'Source ID (e.g., order ID)' },
+        sourceModel: { type: 'string', description: 'Source model (e.g., Order)' },
         gateway: { type: 'string', description: 'Payment gateway (manual, bkash, etc.)' },
       },
     },
@@ -29,10 +30,10 @@ export const events = {
     description: 'Emitted when a pending payment is verified by admin/webhook',
     schema: {
       type: 'object',
-      required: ['transactionId', 'referenceId'],
+      required: ['transactionId', 'sourceId'],
       properties: {
         transactionId: { type: 'string', description: 'Transaction ID' },
-        referenceId: { type: 'string', description: 'Related order/reference ID' },
+        sourceId: { type: 'string', description: 'Related order/source ID' },
         amount: { type: 'number', description: 'Verified amount' },
         gateway: { type: 'string', description: 'Payment gateway' },
         verifiedBy: { type: 'string', description: 'Admin user ID who verified' },
@@ -48,7 +49,7 @@ export const events = {
       required: ['transactionId', 'reason'],
       properties: {
         transactionId: { type: 'string', description: 'Transaction ID' },
-        referenceId: { type: 'string', description: 'Related order/reference ID' },
+        sourceId: { type: 'string', description: 'Related order/source ID' },
         reason: { type: 'string', description: 'Failure reason' },
         gateway: { type: 'string', description: 'Payment gateway' },
       },
@@ -64,7 +65,7 @@ export const events = {
       properties: {
         transactionId: { type: 'string', description: 'Original transaction ID' },
         refundAmount: { type: 'number', description: 'Refund amount' },
-        referenceId: { type: 'string', description: 'Related order ID' },
+        sourceId: { type: 'string', description: 'Related order ID' },
         reason: { type: 'string', description: 'Refund reason' },
       },
     },

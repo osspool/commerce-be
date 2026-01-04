@@ -109,7 +109,7 @@ export async function getDueCommissions(organizationId, options = {}) {
 
   return Transaction.find(query)
     .sort({ 'commission.dueDate': 1 })
-    .select('amount commission category referenceModel referenceId date')
+    .select('amount commission category sourceModel sourceId date')
     .limit(options.limit || 100)
     .lean()
     .exec();

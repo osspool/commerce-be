@@ -299,9 +299,10 @@ class PurchaseService {
             accountName: transactionData.accountName,
             proofUrl: transactionData.proofUrl,
           },
-          referenceModel: 'Manual',
-          referenceId: undefined,
+          sourceModel: 'Manual',
+          sourceId: undefined,
           branchId: branch._id,
+          branchCode: branch.code,
           source: 'api',
           metadata: {
             purchaseOrderNumber,

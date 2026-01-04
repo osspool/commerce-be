@@ -608,6 +608,11 @@ class PosController {
           paymentPayments: currentPayment.payments,
           vatInvoiceNumber: order.vat?.invoiceNumber || null,
           vatSellerBin: order.vat?.sellerBin || null,
+          // VAT data for transaction tax fields (finance reporting)
+          vatApplicable: order.vat?.applicable || false,
+          vatAmount: order.vat?.amount || 0,
+          vatRate: order.vat?.rate || 0,
+          vatPricesIncludeVat: order.vat?.pricesIncludeVat ?? true,
           terminalId,
           idempotencyKey: order.idempotencyKey || `pos_${order._id}`,
         },

@@ -257,6 +257,7 @@ class PurchaseInvoiceService {
           costPrice: item.costPrice,
         })),
         branchId: purchase.branch,
+        branchCode: purchase.branch?.code,
         purchaseOrderNumber: purchase.purchaseOrderNumber,
         supplierName: supplier?.name,
         supplierInvoice: purchase.invoiceNumber,
@@ -334,6 +335,31 @@ class PurchaseInvoiceService {
         ? await supplierRepository.getById(purchase.supplier, { lean: true })
         : null;
 
+      // Calculate proportional tax for this payment
+      // For partial payments, tax is proportional to payment amount relative to grandTotal
+      const purchaseTaxTotal = normalizeNumber(purchase.taxTotal, 0);
+      let paymentTax = 0;
+      let taxDetails = undefined;
+
+      if (purchaseTaxTotal > 0 && purchase.grandTotal > 0) {
+        const paymentRatio = amount / purchase.grandTotal;
+        paymentTax = Math.round(purchaseTaxTotal * paymentRatio * 100) / 100; // Round to 2 decimal places
+
+        // Determine dominant tax rate from items (for taxDetails)
+        const dominantRate = purchase.items.reduce((max, item) => {
+          return (item.taxRate || 0) > max ? (item.taxRate || 0) : max;
+        }, 0);
+
+        if (dominantRate > 0) {
+          taxDetails = {
+            type: 'vat',
+            rate: dominantRate / 100, // Convert percentage to decimal
+            isInclusive: false, // B2B purchases typically have exclusive VAT
+            jurisdiction: 'BD',
+          };
+        }
+      }
+
       const transaction = await createVerifiedOperationalExpenseTransaction({
         amountBdt: amount,
         category: 'inventory_purchase',
@@ -346,14 +372,16 @@ class PurchaseInvoiceService {
           accountName: paymentData.accountName,
           proofUrl: paymentData.proofUrl,
         },
-        referenceModel: 'Purchase',
-        referenceId: purchase._id,
+        sourceModel: 'Purchase',
+        sourceId: purchase._id,
         branchId: purchase.branch,
         source: 'api',
         metadata: {
           invoiceNumber: purchase.invoiceNumber,
           supplierId: supplier?._id?.toString?.() || null,
           supplierName: supplier?.name || null,
+          purchaseTaxTotal: purchaseTaxTotal || null,
+          paymentTax: paymentTax || null,
         },
         notes: [
           `Purchase payment: ${purchase.invoiceNumber}`,
@@ -361,7 +389,10 @@ class PurchaseInvoiceService {
           paymentData.notes,
         ].filter(Boolean).join('. '),
         verifiedBy: actorId,
-        transactionDate: paymentData.transactionDate ? new Date(paymentData.transactionDate) : new Date(),
+        date: paymentData.transactionDate ? new Date(paymentData.transactionDate) : new Date(),
+        // Tax data for B2B purchase (supplier VAT)
+        taxBdt: paymentTax,
+        taxDetails,
         session,
       });
 

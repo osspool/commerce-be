@@ -24,9 +24,9 @@ class AnalyticsController {
     const periodDays = period === '7d' ? 7 : 30;
     const periodStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
 
-    // Revenue query helper
+    // Revenue query helper (use flow: 'inflow' for revenue)
     const revenueMatch = (dateRange) => ({
-      type: 'income',
+      flow: 'inflow',
       status: { $in: ['verified', 'completed'] },
       ...(dateRange || {}),
     });
@@ -86,7 +86,7 @@ class AnalyticsController {
       ]),
       Transaction.aggregate([
         { $match: revenueMatch({ createdAt: { $gte: periodStart } }) },
-        { $group: { _id: '$category', total: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $group: { _id: '$type', total: { $sum: '$amount' }, count: { $sum: 1 } } },
         { $sort: { total: -1 } },
       ]),
       Transaction.aggregate([

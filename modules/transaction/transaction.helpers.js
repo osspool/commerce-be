@@ -5,12 +5,26 @@
 
 /**
  * Validate transaction update
- * For ecommerce: Only allow notes updates on library-managed transactions
+ * Allow limited corrections (e.g., flow/type/tax) while keeping core audit fields protected.
  */
 export function validateTransactionUpdate(transaction, updateBody) {
-  // All ecommerce transactions are library-managed
-  // Only allow notes updates
-  const allowedFields = ['notes'];
+  const allowedFields = [
+    'notes',
+    'description',
+    'metadata',
+    'flow',
+    'type',
+    'amount',
+    'fee',
+    'tax',
+    'net',
+    'taxDetails',
+    'method',
+    'paymentDetails',
+    'branch',
+    'branchCode',
+    'source',
+  ];
   
   const attemptedFields = Object.keys(updateBody);
   const violations = [];

@@ -37,6 +37,7 @@ export async function requestShippingHandler(request, reply) {
 
         const shipment = await logisticsService.createShipment(order, {
           provider: providerData.provider,
+          pickupStoreId: providerData.pickupStoreId,
           weight: providerData.weight,
           instructions: providerData.instructions,
           userId: request.user?._id,

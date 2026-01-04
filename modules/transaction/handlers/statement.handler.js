@@ -16,18 +16,20 @@ function toIso(value) {
 export function formatStatementRows(docs) {
   return (docs || []).map(d => ({
     transactionId: String(d._id),
-    transactionDate: toIso(d.transactionDate) || toIso(d.createdAt),
+    transactionDate: toIso(d.date) || toIso(d.createdAt),
     createdAt: toIso(d.createdAt),
     status: d.status,
+    flow: d.flow,
     type: d.type,
     source: d.source,
     branchCode: d.branch?.code || null,
     branchId: d.branch?._id ? String(d.branch._id) : (d.branchId ? String(d.branchId) : null),
     method: d.method,
     amountBdt: toBdt(d.amount),
+    netBdt: toBdt(d.net),
     currency: d.currency || 'BDT',
-    referenceModel: d.referenceModel,
-    referenceId: d.referenceId ? String(d.referenceId) : null,
+    sourceModel: d.sourceModel,
+    sourceId: d.sourceId ? String(d.sourceId) : null,
     orderId: d.order?._id ? String(d.order._id) : null,
     orderCustomerName: d.order?.customerName || null,
     vatInvoiceNumber: d.order?.vat?.invoiceNumber || d.metadata?.vatInvoiceNumber || null,
@@ -63,14 +65,14 @@ export async function getStatement(request, reply) {
   if (branchId) match.branch = branchId;
 
   if (startDate || endDate) {
-    match.transactionDate = {};
-    if (startDate) match.transactionDate.$gte = new Date(startDate);
-    if (endDate) match.transactionDate.$lte = new Date(endDate);
+    match.date = {};
+    if (startDate) match.date.$gte = new Date(startDate);
+    if (endDate) match.date.$lte = new Date(endDate);
   }
 
   const pipeline = [
     { $match: match },
-    { $sort: { transactionDate: -1, _id: -1 } },
+    { $sort: { date: -1, _id: -1 } },
     { $limit: 50000 },
     {
       $lookup: {
@@ -84,7 +86,7 @@ export async function getStatement(request, reply) {
     {
       $lookup: {
         from: 'orders',
-        let: { refId: '$referenceId', refModel: '$referenceModel' },
+        let: { refId: '$sourceId', refModel: '$sourceModel' },
         pipeline: [
           { $match: { $expr: { $and: [{ $eq: ['$$refModel', 'Order'] }, { $eq: ['$_id', '$$refId'] }] } } },
           { $project: { customerName: 1, vat: 1 } },
@@ -96,14 +98,16 @@ export async function getStatement(request, reply) {
     {
       $project: {
         amount: 1,
+        net: 1,
         currency: 1,
+        flow: 1,
         type: 1,
         status: 1,
         method: 1,
         source: 1,
-        referenceModel: 1,
-        referenceId: 1,
-        transactionDate: 1,
+        sourceModel: 1,
+        sourceId: 1,
+        date: 1,
         createdAt: 1,
         metadata: 1,
         paymentDetails: 1,
@@ -125,4 +129,3 @@ export async function getStatement(request, reply) {
   reply.header('Content-Disposition', 'attachment; filename="transactions-statement.csv"');
   return reply.send(csv);
 }
-

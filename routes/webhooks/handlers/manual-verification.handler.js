@@ -36,10 +36,10 @@ export async function verifyManualPayment(request, reply) {
     });
 
     // Extract entity info from transaction for response
-    const entityInfo = result.transaction.referenceModel && result.transaction.referenceId
+    const entityInfo = result.transaction.sourceModel && result.transaction.sourceId
       ? {
-          referenceModel: result.transaction.referenceModel,
-          referenceId: result.transaction.referenceId.toString(),
+          sourceModel: result.transaction.sourceModel,
+          sourceId: result.transaction.sourceId.toString(),
         }
       : null;
 
@@ -149,8 +149,8 @@ export async function rejectManualPayment(request, reply) {
     await transaction.save();
 
     // Update linked Order if exists
-    if (transaction.referenceModel === 'Order' && transaction.referenceId) {
-      const order = await Order.findById(transaction.referenceId);
+    if (transaction.sourceModel === 'Order' && transaction.sourceId) {
+      const order = await Order.findById(transaction.sourceId);
       if (order) {
         order.currentPayment.status = PAYMENT_STATUS.FAILED;
         
@@ -175,8 +175,8 @@ export async function rejectManualPayment(request, reply) {
       transactionId,
       rejectedBy: rejectedBy.toString(),
       reason,
-      referenceModel: transaction.referenceModel,
-      referenceId: transaction.referenceId?.toString(),
+      sourceModel: transaction.sourceModel,
+      sourceId: transaction.sourceId?.toString(),
     }, 'OK: Manual payment rejected');
 
     return reply.code(200).send({

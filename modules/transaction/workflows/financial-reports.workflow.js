@@ -4,12 +4,12 @@
  *
  * Provides:
  * - Profit & Loss (P&L) statement
- * - Income/Expense breakdown
+ * - Inflow/Outflow breakdown
  * - Cash flow summary
  */
 
 import Transaction from '../transaction.model.js';
-import { TRANSACTION_TYPE } from '@classytic/revenue/enums';
+import { TRANSACTION_FLOW } from '@classytic/revenue/enums';
 
 /**
  * Get financial report for date range
@@ -47,8 +47,8 @@ export async function getFinancialReport({ startDate, endDate }) {
     {
       $group: {
         _id: {
+          flow: '$flow',
           type: '$type',
-          category: '$category',
         },
         total: { $sum: '$amount' },
         count: { $sum: 1 },
@@ -56,37 +56,37 @@ export async function getFinancialReport({ startDate, endDate }) {
     },
   ]);
 
-  // Separate income and expenses
-  const incomeByCategory = {};
-  const expenseByCategory = {};
+  // Separate inflows and outflows
+  const inflowByCategory = {};
+  const outflowByCategory = {};
 
-  let totalIncome = 0;
-  let totalExpenses = 0;
+  let totalInflow = 0;
+  let totalOutflow = 0;
 
   transactions.forEach((item) => {
-    const { type, category } = item._id;
+    const { flow, type } = item._id;
     const amount = item.total;
 
-    if (type === TRANSACTION_TYPE.INCOME) {
-      incomeByCategory[category] = {
+    if (flow === TRANSACTION_FLOW.INFLOW) {
+      inflowByCategory[type] = {
         total: amount,
         count: item.count,
-        label: getCategoryLabel(category),
+        label: getCategoryLabel(type),
       };
-      totalIncome += amount;
-    } else if (type === TRANSACTION_TYPE.EXPENSE) {
-      expenseByCategory[category] = {
+      totalInflow += amount;
+    } else if (flow === TRANSACTION_FLOW.OUTFLOW) {
+      outflowByCategory[type] = {
         total: amount,
         count: item.count,
-        label: getCategoryLabel(category),
+        label: getCategoryLabel(type),
       };
-      totalExpenses += amount;
+      totalOutflow += amount;
     }
   });
 
   // Calculate profit/loss
-  const netProfit = totalIncome - totalExpenses;
-  const profitMargin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
+  const netProfit = totalInflow - totalOutflow;
+  const profitMargin = totalInflow > 0 ? (netProfit / totalInflow) * 100 : 0;
 
   return {
     period: {
@@ -95,18 +95,18 @@ export async function getFinancialReport({ startDate, endDate }) {
       days: Math.ceil(daysDiff),
     },
     summary: {
-      totalIncome,
-      totalExpenses,
+      totalIncome: totalInflow,
+      totalExpenses: totalOutflow,
       netProfit,
       profitMargin: Math.round(profitMargin * 100) / 100,
     },
     income: {
-      total: totalIncome,
-      breakdown: incomeByCategory,
+      total: totalInflow,
+      breakdown: inflowByCategory,
     },
     expenses: {
-      total: totalExpenses,
-      breakdown: expenseByCategory,
+      total: totalOutflow,
+      breakdown: outflowByCategory,
     },
   };
 }
@@ -117,14 +117,14 @@ export async function getFinancialReport({ startDate, endDate }) {
  * @param {Object} params
  * @param {Date} params.startDate - Start date
  * @param {Date} params.endDate - End date
- * @param {String} params.type - 'income' or 'expense' (optional)
+ * @param {String} params.flow - 'inflow' or 'outflow' (optional)
  * @param {Number} params.limit - Number of categories to return (default: 10)
  * @returns {Promise<Array>} Category breakdown
  */
 export async function getCategoryBreakdown({
   startDate,
   endDate,
-  type,
+  flow,
   limit = 10,
 }) {
   const matchQuery = {
@@ -135,15 +135,15 @@ export async function getCategoryBreakdown({
     matchQuery.createdAt = { $gte: startDate, $lte: endDate };
   }
 
-  if (type) {
-    matchQuery.type = type;
+  if (flow) {
+    matchQuery.flow = flow;
   }
 
   const breakdown = await Transaction.aggregate([
     { $match: matchQuery },
     {
       $group: {
-        _id: '$category',
+        _id: '$type',
         total: { $sum: '$amount' },
         count: { $sum: 1 },
       },
@@ -188,7 +188,7 @@ export async function getCashFlowTrend({ months = 6 }) {
         _id: {
           year: { $year: '$createdAt' },
           month: { $month: '$createdAt' },
-          type: '$type',
+          flow: '$flow',
         },
         total: { $sum: '$amount' },
       },
@@ -201,7 +201,7 @@ export async function getCashFlowTrend({ months = 6 }) {
 
   trend.forEach((item) => {
     const key = `${item._id.year}-${item._id.month}`;
-    
+
     if (!monthlyData.has(key)) {
       monthlyData.set(key, {
         year: item._id.year,
@@ -213,9 +213,9 @@ export async function getCashFlowTrend({ months = 6 }) {
     }
 
     const data = monthlyData.get(key);
-    if (item._id.type === TRANSACTION_TYPE.INCOME) {
+    if (item._id.flow === TRANSACTION_FLOW.INFLOW) {
       data.income += item.total;
-    } else if (item._id.type === TRANSACTION_TYPE.EXPENSE) {
+    } else if (item._id.flow === TRANSACTION_FLOW.OUTFLOW) {
       data.expenses += item.total;
     }
   });
@@ -234,11 +234,11 @@ function getCategoryLabel(category) {
     // Revenue library categories
     subscription: 'Subscriptions',
     purchase: 'Purchases',
-    
+
     // Ecommerce categories
     order_purchase: 'Order Sales',
     order_subscription: 'Subscription Orders',
-    
+
     // Other
     refund: 'Refunds',
     other_income: 'Other Income',

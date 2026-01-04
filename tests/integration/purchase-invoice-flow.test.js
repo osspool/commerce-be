@@ -90,12 +90,13 @@ describe('Purchase Invoice Flow', () => {
     expect(paid.dueAmount).toBe(0);
 
     const transaction = await Transaction.findOne({
-      referenceModel: 'Purchase',
-      referenceId: purchase._id,
+      sourceModel: 'Purchase',
+      sourceId: purchase._id,
     }).lean();
 
     expect(transaction).toBeTruthy();
-    expect(transaction?.category).toBe('inventory_purchase');
+    expect(transaction?.type).toBe('inventory_purchase');
+    expect(transaction?.flow).toBe('outflow');
   });
 
   it('blocks receiving a purchase twice', async () => {

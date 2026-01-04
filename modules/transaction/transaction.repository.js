@@ -4,7 +4,6 @@ import Transaction from './transaction.model.js';
 import { TRANSACTION_STATUS } from '@classytic/revenue/enums';
 import { createDefaultLoader } from '#core/utils/lazy-import.js';
 import {
-  blockManualCreate,
   validateTransactionUpdateData,
   blockTransactionDelete,
 } from './validators/transaction.validators.js';
@@ -24,7 +23,6 @@ class TransactionRepository extends Repository {
   constructor() {
     super(Transaction, [
       validationChainPlugin([
-        // blockManualCreate(),
         validateTransactionUpdateData(),
         blockTransactionDelete(),
       ]),
@@ -32,14 +30,14 @@ class TransactionRepository extends Repository {
   }
 
   /**
-   * Get transaction with populated reference (Order)
+   * Get transaction with populated source (Order)
    */
-  async getTransactionWithReference(transactionId, options = {}) {
+  async getTransactionWithSource(transactionId, options = {}) {
     const transaction = await this._executeQuery(async (Model) => {
       return Model.findById(transactionId)
         .populate({
-          path: 'referenceId',
-          select: options.referenceSelect || 'status customer totalAmount currentPayment',
+          path: 'sourceId',
+          select: options.sourceSelect || 'status customer totalAmount currentPayment',
         })
         .lean(options.lean !== false)
         .session(options.session)
@@ -51,11 +49,11 @@ class TransactionRepository extends Repository {
   }
 
   /**
-   * Get all transactions for a reference (e.g., all transactions for an Order)
+   * Get all transactions for a source (e.g., all transactions for an Order)
    */
-  async getTransactionsByReference(referenceModel, referenceId, options = {}) {
+  async getTransactionsBySource(sourceModel, sourceId, options = {}) {
     return this.getAll({
-      filters: { referenceModel, referenceId },
+      filters: { sourceModel, sourceId },
       sort: { createdAt: -1 }
     }, options);
   }

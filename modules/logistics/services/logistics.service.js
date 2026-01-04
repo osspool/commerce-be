@@ -126,16 +126,23 @@ class LogisticsService {
 
     if (options.providerAreaId) {
       resolvedAreaId = options.providerAreaId;
+      console.info(`[Logistics] Using explicit providerAreaId: ${resolvedAreaId}`);
     } else if (order.deliveryAddress?.providerAreaIds?.[provider.name]) {
       resolvedAreaId = order.deliveryAddress.providerAreaIds[provider.name];
+      console.info(`[Logistics] Using order.providerAreaIds.${provider.name}: ${resolvedAreaId}`);
     } else if (deliveryAreaId) {
       const area = bdAreas.getArea(deliveryAreaId);
       if (area) {
         const providerAreaId = area.providers?.[provider.name];
         if (providerAreaId) {
           resolvedAreaId = providerAreaId;
+          console.info(`[Logistics] Resolved via bdAreas: areaId=${deliveryAreaId} → ${provider.name}=${resolvedAreaId}`);
+        } else {
+          console.warn(`[Logistics] Area ${deliveryAreaId} found but no ${provider.name} mapping. providers:`, area.providers);
         }
         areaName = areaName || area.name;
+      } else {
+        console.warn(`[Logistics] Area ${deliveryAreaId} NOT FOUND in bdAreas. Using raw areaId.`);
       }
     }
 

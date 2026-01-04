@@ -45,10 +45,10 @@ export async function handleProviderWebhook(request, reply) {
     const result = await revenue.payments.handleWebhook(provider, payload, headers);
 
     // Extract entity info if available
-    const entityInfo = result.transaction?.referenceModel && result.transaction?.referenceId
+    const entityInfo = result.transaction?.sourceModel && result.transaction?.sourceId
       ? {
-          referenceModel: result.transaction.referenceModel,
-          referenceId: result.transaction.referenceId.toString(),
+          sourceModel: result.transaction.sourceModel,
+          sourceId: result.transaction.sourceId.toString(),
         }
       : null;
 

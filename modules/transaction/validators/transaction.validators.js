@@ -10,15 +10,20 @@ import { blockIf } from '@classytic/mongokit';
 import { validateTransactionUpdate } from '../transaction.helpers.js';
 
 /**
- * Block ALL manual transaction creation
- * Transactions are only created via revenue library workflows
+ * Allow manual transaction creation only for admin/superadmin.
+ * Internal/system creates (no request) are allowed.
  */
-export const blockManualCreate = () =>
+export const restrictManualCreateToAdmins = () =>
   blockIf(
-    'block-manual-create',
+    'restrict-manual-create',
     ['create'],
-    () => true, // Block all manual creates
-    'Transactions can only be created via order workflows (revenue library)'
+    (context) => {
+      const roles = context?.request?.user?.roles;
+      if (!roles) return false; // internal/system create
+      const isAdmin = roles.includes('admin') || roles.includes('superadmin');
+      return !isAdmin;
+    },
+    'Only admin/superadmin can create transactions manually'
   );
 
 /**

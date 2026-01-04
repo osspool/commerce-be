@@ -1,4 +1,3 @@
-import fp from 'fastify-plugin';
 import { createRoutes } from '#core/factories/createRoutes.js';
 import logisticsController from './logistics.controller.js';
 import logisticsService from './services/logistics.service.js';
@@ -175,6 +174,4 @@ async function logisticsPlugin(fastify) {
   ], { tag: 'Logistics', basePath: '/logistics' });
 }
 
-export default fp(logisticsPlugin, {
-  name: 'logistics',
-});
+export default logisticsPlugin;

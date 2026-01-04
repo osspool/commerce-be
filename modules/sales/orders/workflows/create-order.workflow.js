@@ -189,7 +189,7 @@ async function calculateTotals(subtotal, deliveryPrice, couponCode) {
  * Create transaction via revenue library
  * Sets source='web' for e-commerce transactions
  */
-async function createTransaction(order, customerId, paymentData, senderPhone) {
+async function createTransaction(order, customerId, paymentData, senderPhone, branchCode) {
   const revenue = getRevenue();
 
   const transactionPaymentData = {
@@ -206,8 +206,8 @@ async function createTransaction(order, customerId, paymentData, senderPhone) {
   const result = await revenue.monetization.create({
     data: {
       customerId: customerId.toString(),
-      referenceId: order._id,
-      referenceModel: 'Order',
+      sourceId: order._id,
+      sourceModel: 'Order',
     },
     planKey: 'one_time',
     monetizationType: 'purchase',
@@ -226,11 +226,35 @@ async function createTransaction(order, customerId, paymentData, senderPhone) {
     idempotencyKey: order.idempotencyKey || `order_${order._id}`,
   });
 
-  // Update transaction with source for channel analytics
+  // Update transaction with source and VAT data for finance/accounting
   if (result.transaction?._id) {
-    await Transaction.findByIdAndUpdate(result.transaction._id, {
+    const vatAmount = order.vat?.applicable ? toSmallestUnit(order.vat.amount, 'BDT') : 0;
+    const baseUpdate = {
       source: 'web',
-    });
+      ...(order.branch ? { branch: order.branch } : {}),
+      ...(branchCode ? { branchCode } : {}),
+      // Populate tax fields from order VAT for cashflow reporting
+      tax: vatAmount,
+      ...(order.vat?.applicable && {
+        taxDetails: {
+          type: 'vat',
+          rate: (order.vat.rate || 0) / 100, // Convert percentage to decimal
+          isInclusive: order.vat.pricesIncludeVat ?? true,
+          jurisdiction: 'BD',
+        },
+      }),
+    };
+
+    const existing = await Transaction.findById(result.transaction._id)
+      .select('amount fee')
+      .lean();
+
+    const fee = existing?.fee || 0;
+    if (existing?.amount !== undefined) {
+      baseUpdate.net = existing.amount - fee - vatAmount;
+    }
+
+    await Transaction.findByIdAndUpdate(result.transaction._id, baseUpdate);
   }
 
   return result;
@@ -424,7 +448,8 @@ export async function createOrderWorkflow(orderInput, context) {
       order,
       customerId,
       normalizedPaymentData,
-      normalizedPaymentData.senderPhone
+      normalizedPaymentData.senderPhone,
+      preferredBranch?.code
     );
 
     // Link transaction to order

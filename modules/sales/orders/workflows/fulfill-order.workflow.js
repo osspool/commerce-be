@@ -218,9 +218,10 @@ export async function fulfillOrderWorkflow(orderId, options = {}) {
           amountBdt: totalCogs,
           category: 'cogs',
           method: 'manual',
-          referenceModel: 'Order',
-          referenceId: order._id,
+          sourceModel: 'Order',
+          sourceId: order._id,
           branchId: branch._id,
+          branchCode: branch.code,
           source: 'api',
           metadata: {
             orderId: order._id.toString(),

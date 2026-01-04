@@ -1,12 +1,127 @@
 import fp from 'fastify-plugin';
 import { Revenue } from '@classytic/revenue';
+import { definePlugin } from '@classytic/revenue/plugins';
 import { ManualProvider } from '@classytic/revenue-manual';
 import Transaction from '#modules/transaction/transaction.model.js';
 import Order from '#modules/sales/orders/order.model.js';
 import { updateEntityAfterPaymentVerification } from '#shared/revenue/payment-verification.utils.js';
-import { createRevenueNotificationHandlers } from '#shared/integrations/email-notifications/revenue-notifications.config.js';
 
 let revenueInstance = null;
+
+/**
+ * Create ecommerce hooks plugin for payment verification and refund enrichment
+ */
+function createEcommerceHooksPlugin(fastify) {
+  return definePlugin({
+    name: 'ecommerce-hooks',
+    version: '1.0.0',
+    hooks: {
+      // After payment verification, update the Order
+      'payment.verify.after': async (ctx, input, next) => {
+        const result = await next();
+        const { transaction } = result;
+
+        fastify.log.info('Payment verified', {
+          transactionId: transaction._id,
+          amount: transaction.amount,
+          sourceModel: transaction.sourceModel,
+          sourceId: transaction.sourceId,
+        });
+
+        // Update the Order after payment verification
+        if (transaction.sourceModel && transaction.sourceId) {
+          await updateEntityAfterPaymentVerification(
+            transaction.sourceModel,
+            transaction.sourceId,
+            transaction,
+            fastify.log
+          );
+        }
+
+        return result;
+      },
+
+      // After refund, enrich refund transaction with order context and tax data
+      'payment.refund.after': async (ctx, input, next) => {
+        const result = await next();
+        const { transaction, refundTransaction, refundAmount, isPartialRefund } = result;
+
+        fastify.log.info('Payment refunded', {
+          originalTransactionId: transaction._id,
+          refundTransactionId: refundTransaction._id,
+          refundAmount,
+          isPartialRefund,
+          sourceModel: transaction.sourceModel,
+          sourceId: transaction.sourceId,
+        });
+
+        // Enrich refund transaction for finance statements
+        try {
+          let order = null;
+          if (transaction.sourceModel === 'Order' && transaction.sourceId) {
+            order = await Order.findById(transaction.sourceId)
+              .select('branch vat')
+              .populate('branch', 'code')
+              .lean();
+          }
+
+          // Calculate proportional tax for refund
+          // For partial refunds, tax is proportional to refund amount
+          let refundTax = 0;
+          let refundTaxDetails = null;
+
+          // Prefer original transaction's tax data, fallback to order VAT
+          const originalTax = transaction.tax || 0;
+          const originalTaxDetails = transaction.taxDetails;
+
+          if (originalTax > 0) {
+            // Calculate proportional tax based on refund ratio
+            const refundRatio = refundAmount / transaction.amount;
+            refundTax = Math.round(originalTax * refundRatio);
+            refundTaxDetails = originalTaxDetails;
+          } else if (order?.vat?.applicable && order?.vat?.amount > 0) {
+            // Fallback: calculate from order VAT (convert to paisa)
+            const orderVatInPaisa = Math.round(order.vat.amount * 100);
+            const orderAmountInPaisa = transaction.amount;
+            const refundRatio = refundAmount / orderAmountInPaisa;
+            refundTax = Math.round(orderVatInPaisa * refundRatio);
+            refundTaxDetails = {
+              type: 'vat',
+              rate: (order.vat.rate || 0) / 100,
+              isInclusive: order.vat.pricesIncludeVat ?? true,
+              jurisdiction: 'BD',
+            };
+          }
+
+          await Transaction.findByIdAndUpdate(refundTransaction._id, {
+            $set: {
+              source: transaction.source || 'web',
+              ...(order?.branch?._id ? { branch: order.branch._id } : (transaction.branch ? { branch: transaction.branch } : {})),
+              // Tax data for refund (proportional to refund amount)
+              tax: refundTax,
+              ...(refundTaxDetails && { taxDetails: refundTaxDetails }),
+              metadata: {
+                ...(refundTransaction.metadata || {}),
+                orderId: transaction.sourceId?.toString?.() || null,
+                vatInvoiceNumber: order?.vat?.invoiceNumber || transaction.metadata?.vatInvoiceNumber || null,
+                vatSellerBin: order?.vat?.sellerBin || transaction.metadata?.vatSellerBin || null,
+                branchCode: order?.branch?.code || transaction.metadata?.branchCode || null,
+                refundAmount,
+                isPartialRefund,
+                originalTax: originalTax || null,
+                refundTax: refundTax || null,
+              },
+            },
+          }).catch(() => {});
+        } catch (e) {
+          fastify.log.warn('Refund transaction enrichment failed', { error: e.message });
+        }
+
+        return result;
+      },
+    },
+  });
+}
 
 async function revenuePlugin(fastify) {
   fastify.log.info('Initializing revenue system');
@@ -23,135 +138,7 @@ async function revenuePlugin(fastify) {
       .withCategoryMappings({
         Order: 'order_purchase',
       })
-      .withHooks({
-        // Hook: Purchase created (order placed, awaiting payment)
-        'purchase.created': [
-          async ({ transaction, paymentIntent }) => {
-            fastify.log.info('Purchase created', {
-              transactionId: transaction?._id,
-              paymentIntentId: paymentIntent?.id,
-              amount: transaction?.amount,
-              referenceModel: transaction?.referenceModel,
-            });
-          },
-        ],
-
-        // Hook: Manual payment verified by admin
-        // This fires when admin calls revenue.payments.verify()
-        'payment.verified': [
-          async ({ transaction, verifiedBy }) => {
-            fastify.log.info('Payment verified (manual)', {
-              transactionId: transaction._id,
-              amount: transaction.amount,
-              referenceModel: transaction.referenceModel,
-              referenceId: transaction.referenceId,
-              verifiedBy,
-            });
-
-            // Update the Order after payment verification
-            if (transaction.referenceModel && transaction.referenceId) {
-              await updateEntityAfterPaymentVerification(
-                transaction.referenceModel,
-                transaction.referenceId,
-                transaction,
-                fastify.log
-              );
-            }
-          },
-        ],
-
-        // Hook: Payment failed
-        'payment.failed': [
-          async ({ transaction, error }) => {
-            fastify.log.error('Payment failed', {
-              transactionId: transaction._id,
-              reason: error || transaction.failureReason,
-            });
-          },
-        ],
-
-        // Hook: Provider webhook payment succeeded (for future Stripe/SSLCommerz integration)
-        'payment.webhook.payment.succeeded': [
-          async ({ transaction }) => {
-            fastify.log.info('Webhook payment succeeded', {
-              transactionId: transaction._id,
-              amount: transaction.amount,
-              referenceModel: transaction.referenceModel,
-              referenceId: transaction.referenceId,
-            });
-
-            if (transaction.referenceModel && transaction.referenceId) {
-              await updateEntityAfterPaymentVerification(
-                transaction.referenceModel,
-                transaction.referenceId,
-                transaction,
-                fastify.log
-              );
-            }
-          },
-        ],
-
-        // Hook: Provider webhook payment failed
-        'payment.webhook.payment.failed': [
-          async ({ transaction }) => {
-            fastify.log.error('Webhook payment failed', {
-              transactionId: transaction._id,
-              reason: transaction.failureReason,
-            });
-          },
-        ],
-
-        // Hook: Payment refunded
-        // Fires when revenue.payments.refund() creates expense transaction
-        // NOTE: Order state is managed by refundOrderWorkflow - this hook only logs
-        // The workflow handles partial vs full refunds, status updates, timeline events,
-        // and emits repository events for inventory/stats
-        'payment.refunded': [
-          async ({ transaction, refundTransaction, refundAmount, isPartialRefund }) => {
-            fastify.log.info('Payment refunded', {
-              originalTransactionId: transaction._id,
-              refundTransactionId: refundTransaction._id,
-              refundAmount,
-              isPartialRefund,
-              referenceModel: transaction.referenceModel,
-              referenceId: transaction.referenceId,
-            });
-
-            // Enrich refund transaction for finance statements (branch/source/VAT refs).
-            // This does not affect revenue correctness; it only adds reporting context.
-            try {
-              let order = null;
-              if (transaction.referenceModel === 'Order' && transaction.referenceId) {
-                order = await Order.findById(transaction.referenceId)
-                  .select('branch vat')
-                  .populate('branch', 'code')
-                  .lean();
-              }
-
-              await Transaction.findByIdAndUpdate(refundTransaction._id, {
-                $set: {
-                  source: transaction.source || 'web',
-                  ...(order?.branch?._id ? { branch: order.branch._id } : (transaction.branch ? { branch: transaction.branch } : {})),
-                  metadata: {
-                    ...(refundTransaction.metadata || {}),
-                    orderId: transaction.referenceId?.toString?.() || null,
-                    vatInvoiceNumber: order?.vat?.invoiceNumber || transaction.metadata?.vatInvoiceNumber || null,
-                    vatSellerBin: order?.vat?.sellerBin || transaction.metadata?.vatSellerBin || null,
-                    branchCode: order?.branch?.code || transaction.metadata?.branchCode || null,
-                    refundAmount,
-                    isPartialRefund,
-                  },
-                },
-              }).catch(() => {});
-            } catch (e) {
-              fastify.log.warn('Refund transaction enrichment failed', { error: e.message });
-            }
-          },
-        ],
-
-        // Spread notification handlers (email notifications)
-        ...createRevenueNotificationHandlers(),
-      })
+      .withPlugin(createEcommerceHooksPlugin(fastify))
       .build();
 
     fastify.log.info('Revenue system initialized', {
@@ -159,7 +146,7 @@ async function revenuePlugin(fastify) {
     });
 
     // Register event listeners for better observability
-    revenueInstance.events.on('payment.initiated', (event) => {
+    revenueInstance.events.on('payment:initiated', (event) => {
       fastify.log.info('Payment initiated', {
         transactionId: event.transactionId,
         amount: event.amount,
@@ -167,22 +154,22 @@ async function revenuePlugin(fastify) {
       });
     });
 
-    revenueInstance.events.on('payment.succeeded', (event) => {
+    revenueInstance.events.on('payment:succeeded', (event) => {
       fastify.log.info('Payment succeeded', {
         transactionId: event.transactionId,
         amount: event.transaction.amount,
       });
     });
 
-    revenueInstance.events.on('payment.failed', (event) => {
+    revenueInstance.events.on('payment:failed', (event) => {
       fastify.log.error('Payment failed', {
         transactionId: event.transactionId,
-        error: event.error.message,
+        error: event.error?.message,
         provider: event.provider,
       });
     });
 
-    revenueInstance.events.on('transaction.created', (event) => {
+    revenueInstance.events.on('transaction:created', (event) => {
       fastify.log.info('Transaction created', {
         transactionId: event.transactionId,
         type: event.transaction.type,
@@ -190,7 +177,7 @@ async function revenuePlugin(fastify) {
       });
     });
 
-    revenueInstance.events.on('transaction.verified', (event) => {
+    revenueInstance.events.on('transaction:verified', (event) => {
       fastify.log.info('Transaction verified', {
         transactionId: event.transactionId,
         amount: event.transaction.amount,

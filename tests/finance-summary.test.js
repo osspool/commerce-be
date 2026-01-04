@@ -4,9 +4,9 @@ import { buildFinanceSummary } from '../modules/finance/handlers/summary.handler
 describe('Finance summary formatting', () => {
   it('aggregates by day+branch and computes method breakdown', () => {
     const data = buildFinanceSummary([
-      { dateKey: '2025-12-18', branchCode: 'DHK', method: 'cash', type: 'income', amountPaisa: 10000, count: 1 },
-      { dateKey: '2025-12-18', branchCode: 'DHK', method: 'bkash', type: 'income', amountPaisa: 25000, count: 1 },
-      { dateKey: '2025-12-18', branchCode: 'DHK', method: 'bkash', type: 'expense', amountPaisa: 5000, count: 1 },
+      { dateKey: '2025-12-18', branchCode: 'DHK', method: 'cash', flow: 'inflow', amountPaisa: 10000, count: 1 },
+      { dateKey: '2025-12-18', branchCode: 'DHK', method: 'bkash', flow: 'inflow', amountPaisa: 25000, count: 1 },
+      { dateKey: '2025-12-18', branchCode: 'DHK', method: 'bkash', flow: 'outflow', amountPaisa: 5000, count: 1 },
     ]);
 
     expect(data.totals.incomeBdt).toBe(350);

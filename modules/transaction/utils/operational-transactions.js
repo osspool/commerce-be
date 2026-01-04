@@ -21,9 +21,13 @@ function normalizeSource(source) {
  *
  * NOTE: This is intentionally small and schema-aligned. These transactions are not created via
  * `@classytic/revenue` monetization flows, but they must still follow the same model shape:
+ * - `flow: 'outflow'` for expenses
+ * - `type` is the category (inventory_purchase, cogs, etc.)
  * - `amount` is stored in smallest unit (paisa for BDT)
- * - `referenceModel/referenceId` are used (not `reference`)
+ * - `net` is amount after fees/tax
+ * - `sourceModel/sourceId` for polymorphic references
  * - `paymentDetails` is used (not `paymentData`)
+ * - `tax`/`taxDetails` for finance reporting (optional)
  */
 export async function createVerifiedOperationalExpenseTransaction(params) {
   const {
@@ -31,15 +35,19 @@ export async function createVerifiedOperationalExpenseTransaction(params) {
     category,
     method,
     paymentDetails,
-    referenceModel = 'Manual',
-    referenceId = undefined,
+    sourceModel = 'Manual',
+    sourceId = undefined,
     branchId = undefined,
+    branchCode = undefined,
     source = 'api',
     notes = undefined,
     metadata = undefined,
     verifiedBy = undefined,
-    transactionDate = new Date(),
+    date,
     session = null,
+    // Tax support for B2B purchases (supplier VAT)
+    taxBdt = 0,
+    taxDetails = undefined,
   } = params || {};
 
   const normalizedAmountBdt = Number(amountBdt);
@@ -49,23 +57,30 @@ export async function createVerifiedOperationalExpenseTransaction(params) {
   if (!category) throw new Error('category is required');
 
   const amount = toSmallestUnit(normalizedAmountBdt, 'BDT');
+  const tax = taxBdt > 0 ? toSmallestUnit(Number(taxBdt), 'BDT') : 0;
+  // Align with revenue transaction model: net = amount - fee - tax
+  const net = amount - tax;
 
   const transactionPayload = {
     amount,
-    type: 'expense',
-    category: String(category),
+    net,
+    tax,
+    flow: 'outflow',
+    type: String(category),
     method: normalizePaymentMethod(method),
     status: 'verified',
     source: normalizeSource(source),
     ...(branchId ? { branch: branchId } : {}),
+    ...(branchCode ? { branchCode } : {}),
     gateway: { type: 'manual' },
     ...(paymentDetails ? { paymentDetails } : {}),
-    ...(referenceId ? { referenceId } : {}),
-    referenceModel: String(referenceModel || 'Manual'),
+    ...(sourceId ? { sourceId } : {}),
+    sourceModel: String(sourceModel || 'Manual'),
     ...(metadata ? { metadata } : {}),
     ...(notes ? { notes } : {}),
     ...(verifiedBy ? { verifiedBy, verifiedAt: new Date() } : {}),
-    transactionDate,
+    ...(taxDetails ? { taxDetails } : {}),
+    date: date || new Date(),
   };
 
   if (session) {

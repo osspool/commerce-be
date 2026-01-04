@@ -30,7 +30,7 @@ lerna-debug.log*
 *.sublime-workspace
 /lib
 /lib/*
-/packages
+# /packages
 
 # IDE - VSCode
 .vscode/*
@@ -54,6 +54,10 @@ pids
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
+packages/
+packages/*
+
+
 
 # Credentials and secrets
 /credentials
@@ -64,6 +68,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 *-a18c08211c78.json
 syncline-*.json
 config/google-sheets-credentials.json
+
 
 # Documentation
 # /docs

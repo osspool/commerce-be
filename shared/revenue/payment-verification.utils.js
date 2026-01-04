@@ -32,38 +32,38 @@ export function resolveGateway(paymentData, defaultGateway = 'manual') {
  * For ecommerce, this updates the Order's payment status and current payment tracking.
  * 
  * Flow:
- * 1. Find the Order by referenceId
+ * 1. Find the Order by sourceId
  * 2. Update currentPayment with verification details
  * 3. Update paymentStatus to 'verified'
  * 4. Update order status to 'confirmed' (payment received)
  * 5. Add timeline event for audit trail
- * 
- * @param {string} referenceModel - Model name (should be 'Order')
- * @param {string} referenceId - Order ID
+ *
+ * @param {string} sourceModel - Model name (should be 'Order')
+ * @param {string} sourceId - Order ID
  * @param {Object} transaction - Verified transaction
  * @param {Object} logger - Logger instance
  */
 export async function updateEntityAfterPaymentVerification(
-  referenceModel,
-  referenceId,
+  sourceModel,
+  sourceId,
   transaction,
   logger
 ) {
   try {
-    const Model = MODEL_MAP[referenceModel];
+    const Model = MODEL_MAP[sourceModel];
     if (!Model) {
-      logger.warn(`Unknown reference model: ${referenceModel}`, {
-        model: referenceModel,
-        id: referenceId,
+      logger.warn(`Unknown source model: ${sourceModel}`, {
+        model: sourceModel,
+        id: sourceId,
       });
       return;
     }
 
-    const order = await Model.findById(referenceId);
+    const order = await Model.findById(sourceId);
     if (!order) {
       logger.warn(`Order not found for payment verification`, {
-        model: referenceModel,
-        id: referenceId,
+        model: sourceModel,
+        id: sourceId,
       });
       return;
     }
@@ -129,8 +129,8 @@ export async function updateEntityAfterPaymentVerification(
     });
   } catch (error) {
     logger.error('ERROR: Failed to update order after payment verification', {
-      model: referenceModel,
-      id: referenceId,
+      model: sourceModel,
+      id: sourceId,
       transactionId: transaction._id.toString(),
       error: error.message,
       stack: error.stack,

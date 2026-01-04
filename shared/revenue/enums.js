@@ -29,7 +29,11 @@ export {
   TRANSACTION_STATUS,
   TRANSACTION_STATUS_VALUES,
 
-  // Transaction type (income/expense)
+  // Transaction flow (inflow/outflow) - direction of money
+  TRANSACTION_FLOW,
+  TRANSACTION_FLOW_VALUES,
+
+  // @deprecated Use TRANSACTION_FLOW instead - kept for backward compatibility
   TRANSACTION_TYPE,
   TRANSACTION_TYPE_VALUES,
 
@@ -46,7 +50,7 @@ export {
   // Library-defined transaction categories
   LIBRARY_CATEGORIES,
   LIBRARY_CATEGORY_VALUES,
-} from '@classytic/revenue';
+} from '@classytic/revenue/enums';
 
 // ============ APP-SPECIFIC ENUMS ============
 
@@ -151,6 +155,8 @@ import {
   PAYMENT_STATUS_VALUES,
   TRANSACTION_STATUS,
   TRANSACTION_STATUS_VALUES,
+  TRANSACTION_FLOW,
+  TRANSACTION_FLOW_VALUES,
   TRANSACTION_TYPE,
   TRANSACTION_TYPE_VALUES,
   PAYMENT_GATEWAY_TYPE,
@@ -161,7 +167,7 @@ import {
   PLAN_KEY_VALUES,
   LIBRARY_CATEGORIES,
   LIBRARY_CATEGORY_VALUES,
-} from '@classytic/revenue';
+} from '@classytic/revenue/enums';
 
 export default {
   // Revenue library enums
@@ -173,6 +179,8 @@ export default {
   PAYMENT_STATUS_VALUES,
   TRANSACTION_STATUS,
   TRANSACTION_STATUS_VALUES,
+  TRANSACTION_FLOW,
+  TRANSACTION_FLOW_VALUES,
   TRANSACTION_TYPE,
   TRANSACTION_TYPE_VALUES,
   PAYMENT_GATEWAY_TYPE,
