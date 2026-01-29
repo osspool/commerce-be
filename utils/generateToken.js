@@ -3,6 +3,22 @@ import jwt from "jsonwebtoken";
 import config from "#config/index.js";
 
 export const generateTokens = (user) => {
+  const resolveExpiresInSeconds = (input) => {
+    if (!input) return undefined;
+    if (/^\d+$/.test(input)) return parseInt(input, 10);
+
+    const match = /^(\d+)\s*([smhd])$/i.exec(input);
+    if (!match) return undefined;
+
+    const value = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+    if (unit === 's') return value;
+    if (unit === 'm') return value * 60;
+    if (unit === 'h') return value * 60 * 60;
+    if (unit === 'd') return value * 60 * 60 * 24;
+    return undefined;
+  };
+
   // Get primary branch (from branches array or legacy field)
   const primaryBranch = user.getPrimaryBranch?.() || user.branch || null;
 
@@ -44,15 +60,23 @@ export const generateTokens = (user) => {
     isActive: user.isActive,
   };
 
+  const accessExpiresIn = config.app.jwtExpiresIn || "1d";
+  const refreshExpiresIn = config.app.jwtRefreshExpiresIn || "7d";
+
   const token = jwt.sign(tokenPayload, config.app.jwtSecret, {
-    expiresIn: config.app.jwtExpiresIn || "1d",
+    expiresIn: accessExpiresIn,
   });
 
   const refreshToken = jwt.sign(
     { id: user._id },
     config.app.jwtRefresh,
-    { expiresIn: config.app.jwtRefreshExpiresIn || "7d" }
+    { expiresIn: refreshExpiresIn }
   );
 
-  return { token, refreshToken };
+  return {
+    token,
+    refreshToken,
+    expiresIn: resolveExpiresInSeconds(accessExpiresIn),
+    refreshExpiresIn: resolveExpiresInSeconds(refreshExpiresIn),
+  };
 };

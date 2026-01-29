@@ -1,6 +1,7 @@
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import customerRepository from './customer.repository.js';
 import { customerSchemaOptions } from './customer.schemas.js';
+import { NotFoundError } from '#shared/utils/errors.js';
 
 /**
  * Customer Controller
@@ -11,33 +12,29 @@ import { customerSchemaOptions } from './customer.schemas.js';
  */
 export class CustomerController extends BaseController {
   constructor(service, schemaOptions) {
-    super(service, schemaOptions);
+    super(service, { schemaOptions });
     this.getMe = this.getMe.bind(this);
   }
 
   async getMe(req, reply) {
-    try {
-      const user = req.user;
-      const userId = user?._id || user?.id;
+    const user = req.user;
+    const userId = user?._id || user?.id;
 
-      let customer = null;
-      if (userId) {
-        customer = await customerRepository.getByUserId(userId);
-      }
-
-      // Fallback: create/link if not found
-      if (!customer && user) {
-        customer = await customerRepository.linkOrCreateForUser(user);
-      }
-
-      if (!customer) {
-        return reply.code(404).send({ success: false, message: 'Customer not found' });
-      }
-
-      return reply.send({ success: true, data: customer });
-    } catch (error) {
-      return reply.code(error.statusCode || 500).send({ success: false, message: error.message });
+    let customer = null;
+    if (userId) {
+      customer = await customerRepository.getByUserId(userId);
     }
+
+    // Fallback: create/link if not found
+    if (!customer && user) {
+      customer = await customerRepository.linkOrCreateForUser(user);
+    }
+
+    if (!customer) {
+      throw new NotFoundError('Customer not found');
+    }
+
+    return reply.send({ success: true, data: customer });
   }
 }
 

@@ -1,6 +1,5 @@
-import { groups } from './roles.js';
+import { requireAuth } from '@classytic/arc/permissions';
 
 export default {
-  overview: groups.authenticated,
+  overview: requireAuth(),
 };
-

@@ -1,13 +1,27 @@
+import { BaseController } from '@classytic/arc';
 import Transaction from '#modules/transaction/transaction.model.js';
 import Customer from '#modules/sales/customers/customer.model.js';
 import Order from '#modules/sales/orders/order.model.js';
 import { ORDER_STATUS, PAYMENT_STATUS } from '#modules/sales/orders/order.enums.js';
 
+// Dummy repository for analytics (no actual data storage)
+const dummyRepository = {
+  list: async () => ({ data: [], total: 0 }),
+  findById: async () => null,
+  create: async () => null,
+  update: async () => null,
+  delete: async () => false,
+};
+
 /**
  * Analytics Controller
  * Ecommerce dashboard analytics (single-tenant)
  */
-class AnalyticsController {
+class AnalyticsController extends BaseController {
+  constructor() {
+    super(dummyRepository);
+    this.getDashboard = this.getDashboard.bind(this);
+  }
   /**
    * Get dashboard analytics
    * @param {Object} request - Fastify request

@@ -138,7 +138,7 @@ export async function cancelOrderHandler(request, reply) {
     }
 
     // Check permission: owner or admin
-    const userId = request.user._id;
+    const userId = request.user._id || request.user.id;
     const roles = Array.isArray(request.user.roles) ? request.user.roles : [];
     const isAdmin = roles.includes('admin') || roles.includes('superadmin');
 

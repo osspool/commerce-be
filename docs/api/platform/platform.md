@@ -291,7 +291,7 @@ Configure point redemption in `membership.redemption`:
 | `vat.invoice.startNumber` | number | Initial invoice number seed |
 | `vat.invoice.currentNumber` | number | Current invoice counter |
 | `vat.invoice.footerText` | string | Invoice footer text |
-| `vat.categoryRates[]` | array | Legacy category-level rates `{ category, rate, description }` |
+| `vat.categoryRates[]` | array | Backward-compatible category-level rates `{ category, rate, description }` |
 | `vat.supplementaryDuty.enabled` | boolean | Enable supplementary duty |
 | `vat.supplementaryDuty.defaultRate` | number | Default SD rate (%) |
 

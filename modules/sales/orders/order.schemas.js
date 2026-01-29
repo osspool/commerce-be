@@ -116,11 +116,11 @@ export const createOrderSchema = {
           label: { type: 'string' },
           recipientName: { type: 'string', minLength: 2, description: 'Recipient name (required for delivery)' },
           recipientPhone: { type: 'string', pattern: '^01[0-9]{9}$', description: 'Recipient phone (for gift orders)' },
-          addressLine1: { type: 'string', minLength: 5 },
+          addressLine1: { type: 'string' },
           addressLine2: { type: 'string' },
           areaId: { type: 'number', description: 'Area.internalId from @classytic/bd-areas' },
           areaName: { type: 'string', minLength: 2, description: 'Area.name (e.g., "Mohammadpur")' },
-          zoneId: { type: 'number', minimum: 1, maximum: 6, description: 'Area.zoneId for pricing (1-6)' },
+          zoneId: { type: 'number', minimum: 1, description: 'Area.zoneId for delivery pricing' },
           providerAreaIds: {
             type: 'object',
             description: 'Area.providers - provider-specific area IDs',
@@ -163,6 +163,81 @@ export const createOrderSchema = {
       branchId: {
         type: 'string',
         description: 'Preferred branch ID for fulfillment (optional). Used for cost price lookup and fulfillment routing. If not specified, default branch is used during fulfillment.',
+      },
+      branchSlug: {
+        type: 'string',
+        description: 'Preferred branch slug for fulfillment (alternative to branchId)',
+      },
+      notes: {
+        type: 'string',
+        maxLength: 500,
+        description: 'Order notes',
+      },
+    },
+  },
+};
+
+/**
+ * Guest Checkout Schema
+ * Items come from request body (FE localStorage), not from a DB cart.
+ * Guest provides name + phone instead of being authenticated.
+ */
+export const guestCheckoutSchema = {
+  body: {
+    type: 'object',
+    required: ['items', 'guest', 'deliveryAddress', 'delivery'],
+    properties: {
+      items: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 50,
+        description: 'Cart items from frontend (localStorage)',
+        items: {
+          type: 'object',
+          required: ['productId', 'quantity'],
+          properties: {
+            productId: { type: 'string', description: 'Product ID' },
+            variantSku: { type: 'string', nullable: true, description: 'Variant SKU (for variant products)' },
+            quantity: { type: 'integer', minimum: 1, maximum: 100, description: 'Quantity' },
+          },
+        },
+      },
+      guest: {
+        type: 'object',
+        required: ['name', 'phone'],
+        description: 'Guest identity (used to create/find customer record)',
+        properties: {
+          name: { type: 'string', minLength: 2, description: 'Guest name' },
+          phone: { type: 'string', pattern: '^01[0-9]{9}$', description: 'Guest phone (BD format)' },
+          email: { type: 'string', format: 'email', description: 'Guest email (optional)' },
+        },
+      },
+      // Same checkout fields as authenticated order creation
+      idempotencyKey: {
+        type: 'string',
+        description: 'Idempotency key for safely retrying checkout',
+        maxLength: 200,
+      },
+      deliveryAddress: createOrderSchema.body.properties.deliveryAddress,
+      delivery: createOrderSchema.body.properties.delivery,
+      paymentMethod: {
+        type: 'string',
+        description: 'Payment method (cash, bkash, nagad, rocket, bank_transfer)',
+        default: 'cash',
+      },
+      paymentData: paymentDataSchema,
+      isGift: {
+        type: 'boolean',
+        default: false,
+        description: 'True if ordering on behalf of someone else',
+      },
+      couponCode: {
+        type: 'string',
+        description: 'Coupon code to apply',
+      },
+      branchId: {
+        type: 'string',
+        description: 'Preferred branch ID for fulfillment (optional)',
       },
       branchSlug: {
         type: 'string',

@@ -647,7 +647,7 @@ The system resolves VAT rates in this order (first non-null value wins):
    ↓
 3. Category VAT rate (from Category collection)
    ↓
-4. Platform categoryRates (legacy config)
+4. Platform categoryRates (previous config)
    ↓
 5. Platform default rate (15%)
 ```

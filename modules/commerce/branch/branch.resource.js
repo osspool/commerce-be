@@ -5,7 +5,8 @@
  * Each branch can have its own stock levels, POS transactions, and settings.
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import Branch from './branch.model.js';
 import branchRepository from './branch.repository.js';
 import branchController from './branch.controller.js';
@@ -19,9 +20,12 @@ const branchResource = defineResource({
   tag: 'Branches',
   prefix: '/branches',
 
-  model: Branch,
-  repository: branchRepository,
+  adapter: createMongooseAdapter({
+    model: Branch,
+    repository: branchRepository,
+  }),
   controller: branchController,
+  queryParser,
 
   permissions: permissions.branches,
   schemaOptions: branchSchemas,
@@ -32,8 +36,9 @@ const branchResource = defineResource({
       path: '/code/:code',
       summary: 'Get branch by code',
       handler: 'getByCode',
-      authRoles: permissions.branches.byCode,
-      schemas: {
+      permissions: permissions.branches.getByCode,
+      wrapHandler: false,
+      schema: {
         params: {
           type: 'object',
           properties: {
@@ -48,15 +53,17 @@ const branchResource = defineResource({
       path: '/default',
       summary: 'Get default branch (auto-creates if none exists)',
       handler: 'getDefault',
-      authRoles: permissions.branches.default,
+      permissions: permissions.branches.getDefault,
+      wrapHandler: false,
     },
     {
       method: 'POST',
       path: '/:id/set-default',
       summary: 'Set branch as default',
       handler: 'setDefault',
-      authRoles: permissions.branches.setDefault,
-      schemas: {
+      permissions: permissions.branches.setDefault,
+      wrapHandler: false,
+      schema: {
         params: {
           type: 'object',
           properties: {

@@ -5,7 +5,8 @@
  * Standard CRUD + custom validation endpoint.
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import Coupon from './coupon.model.js';
 import couponRepository from './coupon.repository.js';
 import couponController from './coupon.controller.js';
@@ -19,9 +20,12 @@ const couponResource = defineResource({
   tag: 'Coupons',
   prefix: '/coupons',
 
-  model: Coupon,
-  repository: couponRepository,
+  adapter: createMongooseAdapter({
+    model: Coupon,
+    repository: couponRepository,
+  }),
   controller: couponController,
+  queryParser,
 
   permissions: permissions.coupons,
   schemaOptions: couponSchemas,
@@ -32,8 +36,9 @@ const couponResource = defineResource({
       path: '/validate/:code',
       summary: 'Validate coupon',
       handler: 'validateCoupon',
-      authRoles: permissions.coupons.validate,
-      schemas: validateCouponSchema,
+      permissions: permissions.coupons.validateCoupon,
+      wrapHandler: false,
+      schema: validateCouponSchema,
     },
   ],
 

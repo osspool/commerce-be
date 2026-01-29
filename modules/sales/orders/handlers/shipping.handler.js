@@ -1,6 +1,6 @@
 import shippingService from '../shipping.service.js';
 import orderRepository from '../order.repository.js';
-import { createDefaultLoader } from '#core/utils/lazy-import.js';
+import { createDefaultLoader } from '#lib/utils/lazy-import.js';
 
 const loadLogisticsService = createDefaultLoader('#modules/logistics/services/logistics.service.js');
 

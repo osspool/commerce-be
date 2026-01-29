@@ -12,7 +12,8 @@ export const roles = Object.freeze({
 
 export const groups = Object.freeze({
   platformStaff: [roles.ADMIN, roles.SUPERADMIN],
-  authenticated: [roles.USER, roles.ADMIN, roles.SUPERADMIN],
+  // Arc v1.0: Use ['*'] for any authenticated user regardless of role
+  authenticated: ['*'],
   adminOnly: [roles.ADMIN, roles.SUPERADMIN],
   superadminOnly: [roles.SUPERADMIN],
   userOnly: [roles.USER],

@@ -12,7 +12,7 @@
  */
 
 import crypto from 'crypto';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 import IdempotencyRecord from '../models/idempotencyRecord.model.js';
 
 // Inline constants

@@ -1,4 +1,4 @@
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import jobRepository from './job.repository.js';
 import { jobSchemaOptions } from './schemas.js';
 
@@ -11,7 +11,7 @@ import { jobSchemaOptions } from './schemas.js';
  */
 export class JobController extends BaseController {
   constructor(service, schemaOptions) {
-    super(service, schemaOptions);
+    super(service, { schemaOptions });
   }
 }
 

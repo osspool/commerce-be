@@ -5,13 +5,15 @@
  * Follows @classytic/revenue patterns for payment processing.
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import Order from './order.model.js';
 import orderRepository from './order.repository.js';
 import orderController from './order.controller.js';
 import permissions from '#config/permissions.js';
 import orderSchemas, {
   createOrderSchema,
+  guestCheckoutSchema,
   cancelOrderSchema,
   cancelRequestSchema,
   updateStatusSchema,
@@ -23,6 +25,7 @@ import orderSchemas, {
 import {
   getMyOrdersHandler,
   getMyOrderHandler,
+  guestCheckoutHandler,
   refundOrderHandler,
   fulfillOrderHandler,
   cancelOrderHandler,
@@ -39,9 +42,12 @@ const orderResource = defineResource({
   tag: 'Orders',
   prefix: '/orders',
 
-  model: Order,
-  repository: orderRepository,
+  adapter: createMongooseAdapter({
+    model: Order,
+    repository: orderRepository,
+  }),
   controller: orderController,
+  queryParser,
 
   permissions: permissions.orders,
   schemaOptions: orderSchemas,
@@ -52,6 +58,20 @@ const orderResource = defineResource({
   },
 
   additionalRoutes: [
+    // ============ Guest Checkout ============
+
+    // Guest checkout - no auth required, items from request body
+    {
+      method: 'POST',
+      path: '/guest',
+      summary: 'Guest checkout (no auth required)',
+      description: 'Create order without authentication. Items are sent in request body instead of fetched from cart.',
+      handler: guestCheckoutHandler,
+      permissions: permissions.orderActions.guestCheckout,
+      wrapHandler: false,
+      schema: guestCheckoutSchema,
+    },
+
     // ============ Customer Routes ============
 
     // Get my orders - customer only
@@ -60,8 +80,9 @@ const orderResource = defineResource({
       path: '/my',
       summary: 'Get my orders',
       handler: getMyOrdersHandler,
-      authRoles: permissions.orders.my,
-      isList: true, // Uses shared paginateWrapper from responseSchemas
+      permissions: permissions.orderActions.my,
+      wrapHandler: false,
+      isList: true, 
     },
 
     // Get single order - customer only
@@ -70,7 +91,8 @@ const orderResource = defineResource({
       path: '/my/:id',
       summary: 'Get my order detail',
       handler: getMyOrderHandler,
-      authRoles: permissions.orders.my,
+      permissions: permissions.orderActions.my,
+      wrapHandler: false,
     },
 
     // Cancel order - customer/admin can cancel
@@ -79,8 +101,9 @@ const orderResource = defineResource({
       path: '/:id/cancel',
       summary: 'Cancel order',
       handler: cancelOrderHandler,
-      authRoles: permissions.orders.cancel,
-      schemas: cancelOrderSchema,
+      permissions: permissions.orderActions.cancel,
+      wrapHandler: false,
+      schema: cancelOrderSchema,
     },
 
     // Request cancellation (queue for admin)
@@ -89,8 +112,9 @@ const orderResource = defineResource({
       path: '/:id/cancel-request',
       summary: 'Request cancellation (await admin review)',
       handler: requestCancelHandler,
-      authRoles: permissions.orders.cancelRequest,
-      schemas: cancelRequestSchema,
+      permissions: permissions.orderActions.cancelRequest,
+      wrapHandler: false,
+      schema: cancelRequestSchema,
     },
 
     // ============ Admin Routes ============
@@ -101,8 +125,9 @@ const orderResource = defineResource({
       path: '/:id/status',
       summary: 'Update order status',
       handler: updateStatusHandler,
-      authRoles: permissions.orders.updateStatus,
-      schemas: updateStatusSchema,
+      permissions: permissions.orderActions.updateStatus,
+      wrapHandler: false,
+      schema: updateStatusSchema,
     },
 
     // Fulfill order (ship) - admin only
@@ -111,8 +136,9 @@ const orderResource = defineResource({
       path: '/:id/fulfill',
       summary: 'Fulfill order (mark as shipped)',
       handler: fulfillOrderHandler,
-      authRoles: permissions.orders.fulfill,
-      schemas: fulfillOrderSchema,
+      permissions: permissions.orderActions.fulfill,
+      wrapHandler: false,
+      schema: fulfillOrderSchema,
     },
 
     // Refund order - admin only
@@ -121,8 +147,9 @@ const orderResource = defineResource({
       path: '/:id/refund',
       summary: 'Refund order payment',
       handler: refundOrderHandler,
-      authRoles: permissions.orders.refund,
-      schemas: refundOrderSchema,
+      permissions: permissions.orderActions.refund,
+      wrapHandler: false,
+      schema: refundOrderSchema,
     },
 
     // ============ Shipping Routes ============
@@ -132,7 +159,8 @@ const orderResource = defineResource({
       path: '/:id/shipping',
       summary: 'Request shipping pickup',
       handler: requestShippingHandler,
-      authRoles: permissions.orders.shippingAdmin,
+      permissions: permissions.orderActions.shippingAdmin,
+      wrapHandler: false,
     },
 
     {
@@ -140,7 +168,8 @@ const orderResource = defineResource({
       path: '/:id/shipping',
       summary: 'Update shipping status',
       handler: updateShippingStatusHandler,
-      authRoles: permissions.orders.shippingAdmin,
+      permissions: permissions.orderActions.shippingAdmin,
+      wrapHandler: false,
     },
 
     {
@@ -148,7 +177,8 @@ const orderResource = defineResource({
       path: '/:id/shipping',
       summary: 'Get shipping info',
       handler: getShippingInfoHandler,
-      authRoles: permissions.orders.shippingGet,
+      permissions: permissions.orderActions.shippingGet,
+      wrapHandler: false,
     },
   ],
 });

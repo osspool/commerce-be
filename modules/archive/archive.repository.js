@@ -3,7 +3,7 @@ import path from 'node:path';
 import { Repository, methodRegistryPlugin, mongoOperationsPlugin, batchOperationsPlugin } from '@classytic/mongokit';
 import Archive from './archive.model.js';
 import Transaction from '#modules/transaction/transaction.model.js';
-import { createDefaultLoader } from '#core/utils/lazy-import.js';
+import { createDefaultLoader } from '#lib/utils/lazy-import.js';
 
 const ARCHIVE_DIR = path.resolve(process.cwd(), 'storage', 'archives');
 const loadStockMovementModel = createDefaultLoader('#modules/inventory/stockMovement.model.js');

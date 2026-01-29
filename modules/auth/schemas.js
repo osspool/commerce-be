@@ -123,7 +123,7 @@ const resolvedCrudSchemas = crudSchemas || {
   update: { body: updateBody, params },
   get: { params },
   list: { query: listQuery },
-  remove: { params },
+  delete: { params },
 };
 
 // Export schema options for controller

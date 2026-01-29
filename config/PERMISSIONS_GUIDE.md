@@ -21,12 +21,12 @@ Each module has permissions defined as:
 
 ```javascript
 moduleName: {
-  // Standard CRUD operations (used by createCrudRouter)
+  // Standard CRUD operations (used by defineResource)
   list: authenticated,
   get: authenticated,
   create: authenticated,
   update: authenticated,
-  remove: platformStaff,
+  delete: platformStaff,
 
   // Custom operations (e.g., monetization workflows)
   renew: authenticated,
@@ -38,56 +38,65 @@ moduleName: {
 
 ## Usage Patterns
 
-### 1. CRUD Routes with `createCrudRouter`
+### 1. CRUD Routes with `defineResource`
 
 ```javascript
 import permissions from '#config/permissions.js';
+import { defineResource } from '@classytic/arc';
 
-createCrudRouter(instance, controller, {
+const orderResource = defineResource({
+  name: 'order',
   tag: 'Order',
-  auth: permissions.orders,  // ✅ Pass entire object
-  // ...
+  permissions: permissions.orders, // ✅ Pass entire object
 });
+
+export default orderResource.toPlugin();
 ```
 
 **How it works:**
-- `auth.list` → Applied to GET /
-- `auth.get` → Applied to GET /:id
-- `auth.create` → Applied to POST /
-- `auth.update` → Applied to PATCH /:id
-- `auth.remove` → Applied to DELETE /:id
+- `permissions.list` → Applied to GET /
+- `permissions.get` → Applied to GET /:id
+- `permissions.create` → Applied to POST /
+- `permissions.update` → Applied to PATCH /:id
+- `permissions.delete` → Applied to DELETE /:id
 
-### 2. Additional Routes in `createCrudRouter`
+### 2. Additional Routes in `defineResource`
 
 ```javascript
-createCrudRouter(instance, controller, {
+const orderResource = defineResource({
+  name: 'order',
   tag: 'Order',
-  auth: permissions.orders,
+  permissions: permissions.orders,
   additionalRoutes: [
     {
-      method: 'post',
+      method: 'POST',
       path: '/:orderId/renew',
       handler: renewHandler,
-      authRoles: permissions.orders.renew,  // ✅ Pass array directly
-    }
-  ]
+      authRoles: permissions.orders.renew, // ✅ Pass array directly
+    },
+  ],
 });
 ```
 
-### 3. Route Composers (Monetization Framework)
+### 3. Custom Routes (No Route Composers)
 
 ```javascript
-// Note: Route composition helpers have been removed.
-// Register routes manually in plugin files.
-// See modules/subscription/subscription.plugin.js for example
+// Prefer defineResource + additionalRoutes for custom endpoints.
+// Keep handlers close to the resource for consistent docs + hooks.
 
-instance.post('/:orderId/renew', {
-  schema: {
-    tags: ['Orders'],
-    summary: 'Renew order',
-  },
-  onRequest: instance.authenticate(permissions.orders.renew),
-}, renewOrderHandler);
+const orderResource = defineResource({
+  name: 'order',
+  tag: 'Order',
+  additionalRoutes: [
+    {
+      method: 'POST',
+      path: '/:orderId/renew',
+      handler: renewOrderHandler,
+      authRoles: permissions.orders.renew,
+      summary: 'Renew order',
+    },
+  ],
+});
 ```
 
 ### 4. Direct Fastify Routes
@@ -97,7 +106,6 @@ instance.post('/:orderId/renew', {
 const baseAuth = [
   fastify.authenticate,
   fastify.authorize(...permissions.analytics.overview),  // ✅ Spread operator
-  fastify.organizationScoped(),
 ];
 
 fastify.get('/overview', { preHandler: baseAuth }, handler);
@@ -118,18 +126,22 @@ export default {
     get: authenticated,
     create: authenticated,
     update: authenticated,
-    remove: platformStaff,
+    delete: platformStaff,
   },
 };
 ```
 
-2. Use in plugin:
+2. Use in resource:
 
 ```javascript
-createCrudRouter(instance, controller, {
-  auth: permissions.newModule,
-  // ...
+import { defineResource } from '@classytic/arc';
+
+const newModuleResource = defineResource({
+  name: 'newModule',
+  permissions: permissions.newModule,
 });
+
+export default newModuleResource.toPlugin();
 ```
 
 ### For New Operations (e.g., workflow actions)
@@ -150,12 +162,12 @@ orders: {
 2. Use in route:
 
 ```javascript
-{
-  method: 'post',
-  path: '/:orderId/approve',
-  handler: approveHandler,
-  authRoles: permissions.orders.approve,  // ✅ References new permission
-}
+  {
+    method: 'POST',
+    path: '/:orderId/approve',
+    handler: approveHandler,
+    authRoles: permissions.orders.approve, // ✅ References new permission
+  }
 ```
 
 ## Security Best Practices
@@ -165,9 +177,6 @@ orders: {
 ```javascript
 // Use centralized permissions
 authRoles: permissions.orders.renew
-
-// Apply organization scoping
-middlewares: [instance.organizationScoped()]
 
 // Use spread operator for direct authorize
 fastify.authorize(...permissions.orders.renew)
@@ -183,7 +192,6 @@ authRoles: ['user', 'admin', 'superadmin']
 authRoles: someCondition ? permissions.orders.renew : ['user']
 
 // Forget ownership middlewares
-// Missing: middlewares: [instance.organizationScoped()]
 ```
 
 ## Current Modules with Custom Operations
@@ -243,7 +251,7 @@ enrollments: {
 ### Admin Only
 ```javascript
 users: {
-  remove: ['superadmin'],  // Only superadmin
+  delete: ['superadmin'],  // Only superadmin
 }
 ```
 
@@ -269,6 +277,5 @@ landingPages: {
 
 See:
 - `config/permissions.js` - All permission definitions
-- `core/factories/createCrudRouter.js` - How CRUD auth works
-- `lib/monetization/helpers/route-composer.js` - How custom routes work
+- `packages/arc/docs/core.md` - How CRUD + additionalRoutes work
 - This guide - Architecture patterns

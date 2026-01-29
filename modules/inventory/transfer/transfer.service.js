@@ -1,11 +1,11 @@
 import mongoose from 'mongoose';
+import { createStateMachine } from '@classytic/arc/utils';
 import Transfer, { TransferStatus, TransferType } from './models/transfer.model.js';
 import transferRepository from './transfer.repository.js';
 import { StockEntry, StockMovement } from '../stock/models/index.js';
 import branchRepository from '#modules/commerce/branch/branch.repository.js';
 import { stockTransactionService, stockAvailabilityService } from '../services/index.js';
-import logger from '#core/utils/logger.js';
-import { createStateMachine } from '#core/utils/state-machine.js';
+import logger from '#lib/utils/logger.js';
 
 function createStatusError(message, statusCode = 400) {
   const error = new Error(message);

@@ -5,7 +5,7 @@ import { StockEntry } from '../stock/models/index.js';
 import branchRepository from '#modules/commerce/branch/branch.repository.js';
 import transferService from '../transfer/transfer.service.js';
 import stockRequestRepository from './stock-request.repository.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 /**
  * Stock Request Service

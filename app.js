@@ -1,154 +1,320 @@
 /**
- * Application Plugin
- * Sets up all plugins, routes, and error handling
+ * Factory-Based Application Entry Point
  *
- * Philosophy: Everything is a plugin in Fastify
- *
- * Worker Mode:
- * - WORKER_MODE=inline (default): Job queue and cron run in-process with API
- * - WORKER_MODE=standalone: Job queue and cron run in separate worker process
+ * Uses ArcFactory for production-ready setup with:
+ * - Automatic security plugin registration
+ * - Environment-based presets
+ * - Serverless support
+ * - Smart memory management
+ * - Graceful shutdown
  */
-import fp from 'fastify-plugin';
-import setupFastifySwagger from './config/fastify-swagger.js';
-// New ERP-organized routes
-import erpRoutes from './routes/erp.index.js';
-import paymentWebhookPlugin from './routes/webhooks/payment-webhook.plugin.js';
-// Old routes (keeping for backwards compatibility)
-// import fastifyRoutes from './routes/fastify.index.js';
-import registerCorePlugins from '#core/plugins/register-core-plugins.js';
-import revenuePlugin from '#shared/revenue/revenue.plugin.js';
-import { errorHandler } from '#core/utils/errors.js';
-import { eventRegistry } from '#core/events/EventRegistry.js';
+import './config/env-loader.js';
+import { createApp } from '@classytic/arc';
+import closeWithGrace from 'close-with-grace';
 import config from './config/index.js';
-import compress from '@fastify/compress';
+import logger from '#lib/utils/logger.js';
+import { eventPlugin } from '@classytic/arc/events';
+import { eventTransport } from '#lib/events/EventBus.js';
+import { setEventApi } from '#lib/events/arcEvents.js';
+import registerCorePlugins from '#core/plugins/register-core-plugins.js';
+import setupFastifyDocs from './config/fastify-docs.js';
+
+// Routes and plugins
+import erpRoutes from './routes/erp.index.js';
+import paymentWebhookResource from './routes/webhooks/payment-webhook.resource.js';
+import revenuePlugin from '#shared/revenue/revenue.plugin.js';
 import { jobQueue } from '#modules/job/JobQueue.js';
 import { registerAllJobHandlers } from '#modules/job/job.registry.js';
-import logisticsController from '#modules/logistics/logistics.controller.js';
+import { eventRegistry } from '#lib/events/EventRegistry.js';
 import { registerInventoryEventHandlers } from '#modules/inventory/inventory.handlers.js';
+import logisticsController from '#modules/logistics/logistics.controller.js';
 import cronManager from './cron/index.js';
+import mongoosePlugin from '#config/db.plugin.js';
 
-async function app(fastify) {
-  // Determine worker mode - inline runs jobs in API process, standalone runs them separately
+/**
+ * Determine environment preset
+ */
+function getPreset() {
+  if (config.isProduction) return 'production';
+  if (config.isTest) return 'testing';
+  return 'development';
+}
+
+/**
+ * Create application with ArcFactory
+ */
+async function createApplication() {
   const isInlineWorkerMode = (config.worker?.mode || 'inline') === 'inline';
 
   // ============================================
-  // 1. SWAGGER (before routes for documentation)
+  // CREATE APP WITH FACTORY
   // ============================================
-  await setupFastifySwagger(fastify);
+  const app = await createApp({
+    // Environment preset (production/development/testing)
+    preset: getPreset(),
 
-  // ============================================
-  // 2. CORE PLUGINS (security, db, auth, etc.)
-  // ============================================
-  await fastify.register(registerCorePlugins);
+    // Authentication
+    auth: {
+      jwt: {
+        secret: config.app.jwtSecret,
+        expiresIn: config.app.jwtExpiresIn,
+        refreshSecret: config.app.jwtRefresh,
+        refreshExpiresIn: config.app.jwtRefreshExpiresIn,
+      },
+    },
 
-  // ============================================
-  // 3. COMPRESSION (gzip/deflate for responses)
-  // ============================================
-  await fastify.register(compress, {
-    global: true,
-    threshold: 864, // Only compress responses > 1KB
-    encodings: ['gzip', 'deflate']
+    // Security (override preset defaults)
+    cors: config.cors,
+    rateLimit: {
+      max: config.rateLimit.max,
+      timeWindow: `${config.rateLimit.windowMs}ms`,
+    },
+
+    // Disable Arc's built-in compression - we'll register it manually in correct order
+    compression: false,
+
+    plugins: async (fastify) => {
+      // ============================================
+      // DATABASE (our custom plugin with better connection handling)
+      // ============================================
+      await fastify.register(mongoosePlugin);
+
+      // ============================================
+      // ARC EVENTS (shared in-memory transport)
+      // ============================================
+      await fastify.register(eventPlugin, { transport: eventTransport });
+      setEventApi(fastify.events);
+
+      // ============================================
+      // CORE PLUGINS (custom utilities and schemas)
+      // ============================================
+      await fastify.register(registerCorePlugins);
+
+      // ============================================
+      // COMPRESSION - Disabled (let reverse proxy handle it)
+      // ============================================
+      // @fastify/compress v8.x has known issues with Fastify 5.x
+      // causing "premature close" errors. In production, nginx/cloudflare
+      // handles compression more efficiently anyway.
+      //
+      // To re-enable (if needed):
+      // const compress = (await import('@fastify/compress')).default;
+      // await fastify.register(compress, { global: true, threshold: 1024 });
+      
+      fastify.log.info('ℹ️  Compression disabled (use reverse proxy in production)');
+
+      // ============================================
+      // DOCS (OpenAPI + Scalar UI)
+      // ============================================
+      await fastify.register(setupFastifyDocs);
+
+      // ============================================
+      // REVENUE SYSTEM (Stripe payments)
+      // ============================================
+      await fastify.register(revenuePlugin);
+
+      // ============================================
+      // HEALTH CHECK
+      // ============================================
+      fastify.get('/health', async () => ({ success: true, message: 'OK' }));
+
+      fastify.log.info(
+        { trackProductViews: config.app.trackProductViews === true },
+        'Feature flags'
+      );
+
+      // ============================================
+      // WEBHOOKS (outside API versioning)
+      // ============================================
+      await fastify.register(paymentWebhookResource.toPlugin());
+      fastify.post('/api/v1/webhooks/logistics/:provider', logisticsController.handleWebhook);
+
+      // ============================================
+      // API ROUTES (ERP Structure)
+      // ============================================
+      await fastify.register(erpRoutes, { prefix: '/api/v1' });
+
+      // ============================================
+      // BACKGROUND JOB QUEUE (inline mode only)
+      // ============================================
+      if (isInlineWorkerMode) {
+        try {
+          await registerAllJobHandlers();
+          jobQueue.startPolling();
+          fastify.addHook('onClose', async () => {
+            await jobQueue.shutdown();
+          });
+          fastify.log.info({ mode: 'inline' }, 'Job queue started');
+        } catch (error) {
+          fastify.log.warn('Job queue failed to start', { error: error.message });
+        }
+      } else {
+        fastify.log.info({ mode: 'standalone' }, 'Job queue disabled (running in standalone worker)');
+      }
+
+      // ============================================
+      // DOMAIN EVENT HANDLERS (inline mode only)
+      // ============================================
+      if (isInlineWorkerMode) {
+        try {
+          const stats = await eventRegistry.autoDiscoverEvents();
+          registerInventoryEventHandlers();
+          fastify.log.info('Event handlers registered', {
+            events: stats.eventsRegistered,
+            handlers: stats.handlersRegistered,
+          });
+        } catch (error) {
+          fastify.log.warn('Event handler registration failed', { error: error.message });
+        }
+      } else {
+        fastify.log.info({ mode: 'standalone' }, 'Event handlers disabled (running in standalone worker)');
+      }
+
+      // ============================================
+      // CRON JOBS (inline mode only, after everything loaded)
+      // ============================================
+      if (isInlineWorkerMode && config.app.disableCronJobs !== true) {
+        try {
+          await cronManager?.initialize?.();
+          fastify.log.info({ mode: 'inline' }, 'Cron jobs initialized');
+        } catch (error) {
+          fastify.log.warn('Cron jobs failed to initialize', { error: error.message });
+        }
+      } else if (!isInlineWorkerMode) {
+        fastify.log.info({ mode: 'standalone' }, 'Cron jobs disabled (running in standalone worker)');
+      }
+    },
   });
 
-  // ============================================
-  // 4. REVENUE SYSTEM (Stripe payments)
-  // ============================================
-  await fastify.register(revenuePlugin);
+  return app;
+}
 
-  // ============================================
-  // 5. HEALTH CHECK
-  // ============================================
-  fastify.get('/health', async () => ({ success: true, message: 'OK' }));
+/**
+ * Start server (traditional mode)
+ */
+async function startServer() {
+  try {
+    const app = await createApplication();
 
-  fastify.log.info(
-    { trackProductViews: config.app.trackProductViews === true },
-    'Feature flags'
-  );
-
-  // ============================================
-  // 6. WEBHOOKS (outside API versioning)
-  // ============================================
-  await fastify.register(paymentWebhookPlugin, { prefix: '/webhooks/payments' });
-  // Logistics webhook - path configured in provider dashboard (e.g., RedX)
-  fastify.post('/api/v1/webhooks/logistics/:provider', logisticsController.handleWebhook);
-
-  // ============================================
-  // 7. API ROUTES (New ERP Structure)
-  // ============================================
-  await fastify.register(erpRoutes, { prefix: '/api/v1' });
-
-  // ============================================
-  // 7.5 BACKGROUND JOB QUEUE (inline mode only)
-  // ============================================
-  if (isInlineWorkerMode) {
-    try {
-      await registerAllJobHandlers(); // Registers all module job handlers
-      jobQueue.startPolling();
-      fastify.addHook('onClose', async () => {
-        await jobQueue.shutdown();
-      });
-      fastify.log.info({ mode: 'inline' }, 'Job queue started');
-    } catch (error) {
-      fastify.log.warn('Job queue failed to start', { error: error.message });
-    }
-  } else {
-    fastify.log.info({ mode: 'standalone' }, 'Job queue disabled (running in standalone worker)');
-  }
-
-  // ============================================
-  // 7.6 DOMAIN EVENT HANDLERS (inline mode only)
-  // ============================================
-  // In standalone mode, event handlers run exclusively in the worker process
-  // to prevent duplicate processing (emails, inventory moves, etc.)
-  if (isInlineWorkerMode) {
-    try {
-      const stats = await eventRegistry.autoDiscoverEvents();
-      registerInventoryEventHandlers();
-      fastify.log.info('Event handlers registered', {
-        events: stats.eventsRegistered,
-        handlers: stats.handlersRegistered,
-      });
-    } catch (error) {
-      fastify.log.warn('Event handler registration failed', { error: error.message });
-    }
-  } else {
-    fastify.log.info({ mode: 'standalone' }, 'Event handlers disabled (running in standalone worker)');
-  }
-
-  // ============================================
-  // 8. ERROR HANDLING
-  // ============================================
-  fastify.addHook('onError', (request, reply, err, done) => {
-    fastify.log.error(err);
-    console.error(err);
-    done();
-  });
-
-  fastify.setErrorHandler(errorHandler);
-
-  fastify.setNotFoundHandler((request, reply) => {
-    reply.code(404).send({
-      success: false,
-      message: `Cannot find ${request.url} on this server`,
-      status: 'fail',
+    // Graceful shutdown
+    closeWithGrace({ delay: 10000 }, async ({ signal, err }) => {
+      if (err) app.log.error('Shutdown triggered by error', { error: err.message });
+      else app.log.info(`Received ${signal}, shutting down`);
+      await app.close();
     });
-  });
 
-  // ============================================
-  // 9. CRON JOBS (inline mode only, after everything loaded)
-  // ============================================
-  // In standalone mode, cron jobs run exclusively in the worker process
-  // to prevent duplicate execution when scaling API horizontally
-  if (isInlineWorkerMode && config.app.disableCronJobs !== true) {
-    try {
-      await cronManager?.initialize?.();
-      fastify.log.info({ mode: 'inline' }, 'Cron jobs initialized');
-    } catch (error) {
-      fastify.log.warn('Cron jobs failed to initialize', { error: error.message });
-    }
-  } else if (!isInlineWorkerMode) {
-    fastify.log.info({ mode: 'standalone' }, 'Cron jobs disabled (running in standalone worker)');
+    // Start listening
+    const host = process.env.HOST || '0.0.0.0';
+    const port = config.app.port || 8040;
+
+    await app.listen({ port, host });
+
+    app.log.info('🚀 Application started', {
+      url: `http://${host}:${port}`,
+      health: `http://${host}:${port}/health`,
+      docs: `http://${host}:${port}/docs`,
+      openapi: `http://${host}:${port}/_docs/openapi.json`,
+      api: `http://${host}:${port}/api/v1`,
+      preset: getPreset(),
+      workerMode: config.worker?.mode || 'inline',
+    });
+  } catch (error) {
+    console.error('❌ STARTUP ERROR:', error);
+    logger.error('Failed to start', { error: error.message, stack: error.stack });
+    process.exit(1);
   }
 }
 
-export default fp(app, { name: 'app' });
+// ============================================
+// EXPORT FOR DIFFERENT DEPLOYMENT MODES
+// ============================================
+
+/**
+ * Export app factory for serverless (AWS Lambda, Google Cloud Run, etc.)
+ *
+ * @example
+ * // AWS Lambda
+ * import { handler } from './index.factory.js';
+ * export { handler };
+ *
+ * @example
+ * // Vercel
+ * export default async (req, res) => {
+ *   const app = await createApplication();
+ *   await app.ready();
+ *   app.server.emit('request', req, res);
+ * };
+ */
+export { createApplication };
+
+/**
+ * Export for AWS Lambda via @fastify/aws-lambda
+ *
+ * Usage:
+ * ```bash
+ * npm install @fastify/aws-lambda
+ * ```
+ *
+ * Then in Lambda:
+ * ```javascript
+ * import { handler } from './index.factory.js';
+ * export { handler };
+ * ```
+ */
+export async function createLambdaHandler() {
+  const app = await createApplication();
+  const awsLambdaFastify = await import('@fastify/aws-lambda');
+  return awsLambdaFastify.default(app);
+}
+
+/**
+ * Export for Google Cloud Functions / Cloud Run
+ *
+ * Usage:
+ * ```javascript
+ * import { cloudRunHandler } from './index.factory.js';
+ * export { cloudRunHandler as default };
+ * ```
+ */
+export async function cloudRunHandler(req, res) {
+  if (!cloudRunHandler._app) {
+    cloudRunHandler._app = await createApplication();
+    await cloudRunHandler._app.ready();
+  }
+  cloudRunHandler._app.server.emit('request', req, res);
+}
+
+/**
+ * Export for Vercel serverless functions
+ *
+ * Usage:
+ * ```javascript
+ * import { vercelHandler } from './index.factory.js';
+ * export default vercelHandler;
+ * ```
+ */
+export async function vercelHandler(req, res) {
+  if (!vercelHandler._app) {
+    vercelHandler._app = await createApplication();
+    await vercelHandler._app.ready();
+  }
+  vercelHandler._app.server.emit('request', req, res);
+}
+
+// ============================================
+// START SERVER (if not imported as module)
+// ============================================
+if (import.meta.url === `file://${process.argv[1]}`) {
+  // Global error handlers
+  process.on('uncaughtException', (error) => {
+    console.error('Uncaught exception:', error);
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled rejection:', reason);
+    process.exit(1);
+  });
+
+  startServer();
+}

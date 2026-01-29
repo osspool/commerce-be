@@ -1,6 +1,6 @@
 import { StockEntry } from '../stock/models/index.js';
 import branchRepository from '#modules/commerce/branch/branch.repository.js';
-import { createDefaultLoader } from '#core/utils/lazy-import.js';
+import { createDefaultLoader } from '#lib/utils/lazy-import.js';
 
 const loadProductRepository = createDefaultLoader('#modules/catalog/products/product.repository.js');
 

@@ -6,7 +6,7 @@
  * Other custom operations (refund, cancel, fulfill) use dedicated handlers.
  */
 
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import orderRepository from './order.repository.js';
 import { orderSchemaOptions } from './order.schemas.js';
 import { createOrderWorkflow } from './workflows/index.js';
@@ -16,21 +16,21 @@ import { filterOrderCostPriceByUser } from './order.costPrice.utils.js';
 
 class OrderController extends BaseController {
   constructor() {
-    super(orderRepository, orderSchemaOptions);
+    super(orderRepository, { schemaOptions: orderSchemaOptions });
     // Bind methods to preserve 'this' context
     this.create = this.create.bind(this);
   }
 
   /**
    * Create order (checkout from cart)
-   * 
+   *
    * Frontend sends:
    * - deliveryAddress { addressLine1, city, phone, ... } (direct object)
    * - delivery { method, price } (shipping info)
    * - couponCode (optional)
    * - paymentData { type, reference?, senderPhone?, paymentDetails? }
    * - notes (optional)
-   * 
+   *
    * Backend:
    * - Fetches cart items (only source for products)
    * - Validates coupon and calculates discount
@@ -38,19 +38,20 @@ class OrderController extends BaseController {
    * - Creates order + transaction
    * - Clears cart on success
    */
-  async create(request, reply) {
-    const idempotencyKey = request.body?.idempotencyKey;
+  async create(context) {
+    const idempotencyKey = context.body?.idempotencyKey;
     try {
-      const userId = request.user._id;
-      const orderPayload = request.body;
+      const userId = context.user._id;
+      const orderPayload = context.body;
 
       // 1. Fetch cart items
       const cart = await cartRepository.getOrCreateCart(userId);
       if (!cart.items || cart.items.length === 0) {
-        return reply.code(400).send({
+        return {
           success: false,
-          message: 'Cart is empty. Add items to cart before checkout.',
-        });
+          error: 'Cart is empty. Add items to cart before checkout.',
+          status: 400,
+        };
       }
 
       // 1.5 Web checkout idempotency (client-provided key strongly recommended)
@@ -75,12 +76,15 @@ class OrderController extends BaseController {
 
         const { isNew, existingResult } = await idempotencyService.check(idempotencyKey, payloadForHash);
         if (!isNew && existingResult) {
-          return reply.code(200).send({
+          return {
             success: true,
             data: existingResult,
-            message: 'Order already exists (idempotent)',
-            cached: true,
-          });
+            status: 200,
+            meta: {
+              message: 'Order already exists (idempotent)',
+              cached: true,
+            },
+          };
         }
       }
 
@@ -90,15 +94,19 @@ class OrderController extends BaseController {
         cartItems: cart.items, // Pass populated cart items to workflow
       };
 
-      const context = {
-        request, // Workflow will use request.user to get/create customer
+      // Reconstruct request-like object for workflow (temporary until workflow is refactored)
+      const requestContext = {
+        request: {
+          user: context.user,
+          log: context.context?.log || console,
+        },
       };
 
       // 3. Create order via workflow (handles everything)
-      const result = await createOrderWorkflow(orderInput, context);
+      const result = await createOrderWorkflow(orderInput, requestContext);
 
       // Mark idempotency as complete (cache the created order for retries)
-      const safeOrder = filterOrderCostPriceByUser(result.order, request.user);
+      const safeOrder = filterOrderCostPriceByUser(result.order, context.user);
       idempotencyService.complete(idempotencyKey, safeOrder);
 
       // 4. Clear customer cart after successful order
@@ -106,36 +114,47 @@ class OrderController extends BaseController {
         await cartRepository.clearCart(userId);
       } catch (cartError) {
         // Log but don't fail the order
-        request.log.warn('Failed to clear cart after order:', cartError.message);
+        if (context.context?.log) {
+          context.context.log.warn('Failed to clear cart after order:', cartError.message);
+        }
       }
 
-      return reply.code(201).send({
+      return {
         success: true,
         data: safeOrder,
-        transaction: result.transaction?._id,
-        paymentIntent: result.paymentIntent,
-        message: 'Order created successfully',
-      });
+        status: 201,
+        meta: {
+          message: 'Order created successfully',
+          transaction: result.transaction?._id,
+          paymentIntent: result.paymentIntent,
+        },
+      };
     } catch (error) {
       idempotencyService.fail(idempotencyKey, error);
-      request.log.error(error);
 
-      const response = {
-        success: false,
-        message: error.message || 'Failed to create order',
-      };
+      // Log error if logger is available
+      if (context.context?.log) {
+        context.context.log.error(error);
+      }
+
+      const meta = {};
 
       // Include error code if available (from revenue library errors)
       if (error.code) {
-        response.code = error.code;
+        meta.code = error.code;
       }
 
       // Include original error for debugging (only in development)
       if (error.originalError && process.env.NODE_ENV !== 'production') {
-        response.details = error.originalError;
+        meta.details = error.originalError;
       }
 
-      return reply.code(error.statusCode || 400).send(response);
+      return {
+        success: false,
+        error: error.message || 'Failed to create order',
+        status: error.statusCode || 400,
+        meta: Object.keys(meta).length > 0 ? meta : undefined,
+      };
     }
   }
 
@@ -170,7 +189,7 @@ class OrderController extends BaseController {
       ...(queryParams.select && { select: queryParams.select }),
     };
 
-    const result = await this.service.getAll(paginationParams, repoOptions);
+    const result = await this.repository.getAll(paginationParams, repoOptions);
     if (result.docs) {
       result.docs = filterOrderCostPriceByUser(result.docs, req.user);
     }
@@ -179,7 +198,7 @@ class OrderController extends BaseController {
 
   async getById(req, reply) {
     const options = this._buildContext(req);
-    const document = await this.service.getById(req.params.id, options);
+    const document = await this.repository.getById(req.params.id, options);
     const filtered = filterOrderCostPriceByUser(document, req.user);
     return reply.code(200).send({ success: true, data: filtered });
   }

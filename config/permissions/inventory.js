@@ -1,3 +1,4 @@
+import { requireRoles } from '@classytic/arc/permissions';
 import { roles, groups } from './roles.js';
 
 /**
@@ -23,187 +24,120 @@ export const inventory = {
   // PURCHASES (Head Office Only)
   // ============================================
 
-  /**
-   * Record stock purchases from suppliers
-   * Only head office can add new stock to the system
-   */
-  purchase: groups.warehouseStaff,
+  /** Record stock purchases from suppliers */
+  purchase: requireRoles(groups.warehouseStaff),
 
-  /**
-   * View purchase history
-   */
-  purchaseView: [...groups.inventoryStaff, ...groups.financeStaff],
+  /** View purchase history */
+  purchaseView: requireRoles([...groups.inventoryStaff, ...groups.financeStaff]),
 
-  /**
-   * Approve purchase invoices
-   */
-  purchaseApprove: groups.warehouseStaff,
+  /** Approve purchase invoices */
+  purchaseApprove: requireRoles(groups.warehouseStaff),
 
-  /**
-   * Receive stock for purchases
-   */
-  purchaseReceive: groups.warehouseStaff,
+  /** Receive stock for purchases */
+  purchaseReceive: requireRoles(groups.warehouseStaff),
 
-  /**
-   * Record supplier payments
-   */
-  purchasePay: groups.financeStaff,
+  /** Record supplier payments */
+  purchasePay: requireRoles(groups.financeStaff),
 
-  /**
-   * Cancel draft/approved purchases
-   */
-  purchaseCancel: groups.warehouseStaff,
+  /** Cancel draft/approved purchases */
+  purchaseCancel: requireRoles(groups.warehouseStaff),
 
   // ============================================
   // SUPPLIERS
   // ============================================
 
-  /**
-   * Create/update suppliers
-   */
-  supplierManage: groups.warehouseStaff,
+  /** Create/update suppliers */
+  supplierManage: requireRoles(groups.warehouseStaff),
 
-  /**
-   * View suppliers
-   */
-  supplierView: groups.inventoryStaff,
+  /** View suppliers */
+  supplierView: requireRoles(groups.inventoryStaff),
 
   // ============================================
   // TRANSFERS (Challan Operations)
   // ============================================
 
-  /**
-   * Create new stock transfer (head office only)
-   */
-  transferCreate: groups.warehouseStaff,
+  /** Create new stock transfer (head office only) */
+  transferCreate: requireRoles(groups.warehouseStaff),
 
-  /**
-   * Approve transfer for dispatch
-   */
-  transferApprove: groups.warehouseStaff,
+  /** Approve transfer for dispatch */
+  transferApprove: requireRoles(groups.warehouseStaff),
 
-  /**
-   * Dispatch transfer (decrements head office stock)
-   */
-  transferDispatch: groups.warehouseStaff,
+  /** Dispatch transfer (decrements head office stock) */
+  transferDispatch: requireRoles(groups.warehouseStaff),
 
-  /**
-   * Receive transfer at sub-branch (increments stock)
-   * Store managers can receive at their branch
-   */
-  transferReceive: [roles.ADMIN, roles.SUPERADMIN, roles.STORE_MANAGER],
+  /** Receive transfer at sub-branch (increments stock) */
+  transferReceive: requireRoles([roles.ADMIN, roles.SUPERADMIN, roles.STORE_MANAGER]),
 
-  /**
-   * View transfer/challan details
-   */
-  transferView: groups.inventoryStaff,
+  /** View transfer/challan details */
+  transferView: requireRoles(groups.inventoryStaff),
 
-  /**
-   * Cancel a pending transfer
-   */
-  transferCancel: groups.warehouseStaff,
+  /** Cancel a pending transfer */
+  transferCancel: requireRoles(groups.warehouseStaff),
 
   // ============================================
   // ADJUSTMENTS (Any Branch)
   // ============================================
 
-  /**
-   * Adjust stock quantity (damaged, lost, recount)
-   * Store managers can adjust at their branch
-   */
-  adjust: groups.storeStaff,
+  /** Adjust stock quantity (damaged, lost, recount) */
+  adjust: requireRoles(groups.storeStaff),
 
-  /**
-   * Bulk import/adjustment
-   */
-  bulkAdjust: [roles.ADMIN, roles.SUPERADMIN],
+  /** Bulk import/adjustment */
+  bulkAdjust: requireRoles([roles.ADMIN, roles.SUPERADMIN]),
 
   // ============================================
   // VIEW OPERATIONS
   // ============================================
 
-  /**
-   * View stock levels
-   */
-  view: groups.storeStaff,
+  /** View stock levels */
+  view: requireRoles(groups.storeStaff),
 
-  /**
-   * View stock across all branches
-   */
-  viewAll: groups.adminOnly,
+  /** View stock across all branches */
+  viewAll: requireRoles(groups.adminOnly),
 
-  /**
-   * View low stock alerts
-   */
-  alerts: groups.storeStaff,
+  /** View low stock alerts */
+  alerts: requireRoles(groups.storeStaff),
 
-  /**
-   * View stock movement audit trail
-   */
-  movements: groups.storeStaff,
+  /** View stock movement audit trail */
+  movements: requireRoles(groups.storeStaff),
 
-  /**
-   * View all movements across branches
-   */
-  movementsAll: groups.adminOnly,
+  /** View all movements across branches */
+  movementsAll: requireRoles(groups.adminOnly),
 
   // ============================================
   // BRANCH MANAGEMENT
   // ============================================
 
-  /**
-   * Set head office branch
-   */
-  setHeadOffice: [roles.SUPERADMIN],
+  /** Set head office branch */
+  setHeadOffice: requireRoles([roles.SUPERADMIN]),
 
   // ============================================
   // STOCK REQUESTS (Sub-branch → Head Office)
   // ============================================
 
-  /**
-   * Create stock request from sub-branch
-   * Store managers can request stock for their branch
-   */
-  stockRequestCreate: groups.inventoryStaff,
+  /** Create stock request from sub-branch */
+  stockRequestCreate: requireRoles(groups.inventoryStaff),
 
-  /**
-   * View stock requests
-   * - Store managers: their branch requests only
-   * - Admin/Warehouse: all requests
-   */
-  stockRequestView: groups.inventoryStaff,
+  /** View stock requests */
+  stockRequestView: requireRoles(groups.inventoryStaff),
 
-  /**
-   * Approve/reject stock requests (head office only)
-   */
-  stockRequestApprove: groups.warehouseStaff,
+  /** Approve/reject stock requests (head office only) */
+  stockRequestApprove: requireRoles(groups.warehouseStaff),
 
-  /**
-   * Fulfill stock requests (creates transfer)
-   */
-  stockRequestFulfill: groups.warehouseStaff,
+  /** Fulfill stock requests (creates transfer) */
+  stockRequestFulfill: requireRoles(groups.warehouseStaff),
 
-  /**
-   * Cancel stock requests
-   * - Requester can cancel their own pending requests
-   * - Admin can cancel any request
-   */
-  stockRequestCancel: groups.inventoryStaff,
+  /** Cancel stock requests */
+  stockRequestCancel: requireRoles(groups.inventoryStaff),
 
   // ============================================
   // SUB-BRANCH TRANSFERS
   // ============================================
 
-  /**
-   * Create sub-branch to sub-branch transfers
-   * Requires explicit permission (not typical flow)
-   */
-  subBranchTransfer: [roles.ADMIN, roles.SUPERADMIN],
+  /** Create sub-branch to sub-branch transfers */
+  subBranchTransfer: requireRoles([roles.ADMIN, roles.SUPERADMIN]),
 
-  /**
-   * Return stock from sub-branch to head office
-   */
-  returnToHead: [roles.ADMIN, roles.SUPERADMIN],
+  /** Return stock from sub-branch to head office */
+  returnToHead: requireRoles([roles.ADMIN, roles.SUPERADMIN]),
 };
 
 export default inventory;

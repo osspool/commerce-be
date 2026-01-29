@@ -1,43 +1,71 @@
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import supplierRepository from './supplier.repository.js';
 import { supplierSchemaOptions } from './supplier.schemas.js';
 
 class SupplierController extends BaseController {
   constructor() {
-    super(supplierRepository, supplierSchemaOptions);
+    super(supplierRepository, { schemaOptions: supplierSchemaOptions });
   }
 
-  async create(req, reply) {
+  async create(context) {
+    const userId = context.user?.id ?? context.user?._id;
     const payload = {
-      ...req.body,
-      createdBy: req.user?._id,
-      updatedBy: req.user?._id,
+      ...context.body,
+      createdBy: userId,
+      updatedBy: userId,
     };
 
-    const document = await this.service.create(payload, this._buildContext(req));
-    return reply.code(201).send({ success: true, data: document });
-  }
+    const arcContext = context.context;
+    const document = await this.repository.create(payload, { context: arcContext, user: context.user });
 
-  async update(req, reply) {
-    const payload = {
-      ...req.body,
-      updatedBy: req.user?._id,
-    };
-
-    const document = await this.service.update(req.params.id, payload, this._buildContext(req));
-    return reply.code(200).send({ success: true, data: document });
-  }
-
-  async delete(req, reply) {
-    await this.service.update(req.params.id, {
-      isActive: false,
-      updatedBy: req.user?._id,
-    }, this._buildContext(req));
-
-    return reply.code(200).send({
+    return {
       success: true,
-      message: 'Supplier deactivated',
-    });
+      data: document,
+      status: 201,
+      meta: { message: 'Supplier created successfully' },
+    };
+  }
+
+  async update(context) {
+    const userId = context.user?.id ?? context.user?._id;
+    const payload = {
+      ...context.body,
+      updatedBy: userId,
+    };
+
+    const arcContext = context.context;
+    const document = await this.repository.update(
+      context.params.id,
+      payload,
+      { context: arcContext, user: context.user }
+    );
+
+    return {
+      success: true,
+      data: document,
+      status: 200,
+      meta: { message: 'Supplier updated successfully' },
+    };
+  }
+
+  async delete(context) {
+    const userId = context.user?.id ?? context.user?._id;
+    const arcContext = context.context;
+
+    await this.repository.update(
+      context.params.id,
+      {
+        isActive: false,
+        updatedBy: userId,
+      },
+      { context: arcContext, user: context.user }
+    );
+
+    return {
+      success: true,
+      data: { message: 'Supplier deactivated' },
+      status: 200,
+    };
   }
 }
 

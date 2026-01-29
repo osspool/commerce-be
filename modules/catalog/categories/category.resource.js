@@ -2,11 +2,13 @@
  * Category Resource Definition
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import Category from './category.model.js';
 import categoryRepository from './category.repository.js';
 import categoryController from './category.controller.js';
 import permissions from '#config/permissions.js';
+import { events as categoryEvents } from './events.js';
 
 const categoryResource = defineResource({
   name: 'category',
@@ -14,9 +16,15 @@ const categoryResource = defineResource({
   tag: 'Categories',
   prefix: '/categories',
 
-  model: Category,
-  repository: categoryRepository,
+  adapter: createMongooseAdapter({
+    model: Category,
+    repository: categoryRepository,
+  }),
   controller: categoryController,
+  queryParser,
+
+  // Presets add: /slug/:slug, /tree, /:parent/children routes
+  presets: ['slugLookup', 'tree'],
 
   permissions: permissions.categories,
 
@@ -27,39 +35,22 @@ const categoryResource = defineResource({
     }
   },
 
+  // Only truly custom routes - tree is handled by preset
   additionalRoutes: [
     {
-      method: 'GET',
-      path: '/tree',
-      summary: 'Get category tree (nested)',
-      handler: 'getTree',
-      authRoles: []
-    },
-    {
-      method: 'GET',
-      path: '/slug/:slug',
-      summary: 'Get category by slug',
-      handler: 'getBySlug',
-      authRoles: [],
-      schemas: {
-        params: {
-          type: 'object',
-          properties: { slug: { type: 'string' } },
-          required: ['slug']
-        }
-      }
+      method: 'POST',
+      path: '/sync-counts',
+      summary: 'Recalculate product counts',
+      handler: 'syncProductCounts',
+      permissions: permissions.categories.syncProductCounts,
+      wrapHandler: false,
     }
   ],
 
   events: {
-    created: {
-      schema: { type: 'object', properties: { categoryId: { type: 'string' } } },
-      description: 'Category created'
-    },
-    deleted: {
-      schema: { type: 'object', properties: { categorySlug: { type: 'string' } } },
-      description: 'Category deleted - products should handle cleanup'
-    }
+    created: categoryEvents['category:created'],
+    updated: categoryEvents['category:updated'],
+    deleted: categoryEvents['category:deleted'],
   }
 });
 

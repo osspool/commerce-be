@@ -44,7 +44,12 @@ function createEcommerceHooksPlugin(fastify) {
       // After refund, enrich refund transaction with order context and tax data
       'payment.refund.after': async (ctx, input, next) => {
         const result = await next();
-        const { transaction, refundTransaction, refundAmount, isPartialRefund } = result;
+        const { transaction, refundTransaction } = result;
+
+        // Calculate refundAmount and isPartialRefund from refundTransaction
+        // (revenue library doesn't include these in the result)
+        const refundAmount = refundTransaction.amount;
+        const isPartialRefund = refundAmount < transaction.amount;
 
         fastify.log.info('Payment refunded', {
           originalTransactionId: transaction._id,
@@ -117,7 +122,13 @@ function createEcommerceHooksPlugin(fastify) {
           fastify.log.warn('Refund transaction enrichment failed', { error: e.message });
         }
 
-        return result;
+        // Add missing fields to result for backward compatibility with tests
+        // (revenue library v1.1.1 doesn't include these)
+        return {
+          ...result,
+          refundAmount,
+          isPartialRefund,
+        };
       },
     },
   });

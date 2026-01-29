@@ -285,6 +285,17 @@ transactionSchema.virtual('amountInUnits').get(function() {
 transactionSchema.set('toJSON', { virtuals: true });
 transactionSchema.set('toObject', { virtuals: true });
 
+// ===== PRE-VALIDATION MIDDLEWARE =====
+
+transactionSchema.pre('validate', function() {
+  // Ensure gateway.type is set if gateway exists (required by gatewaySchema)
+  // This handles cases where external libraries create transactions with partial gateway objects
+  // Must run before validation to prevent gatewaySchema validation errors
+  if (this.gateway && !this.gateway.type) {
+    this.gateway.type = this.gateway.provider || 'manual';
+  }
+});
+
 // ===== PRE-SAVE MIDDLEWARE =====
 
 transactionSchema.pre('save', function() {

@@ -5,7 +5,9 @@
  * Plus profile operations for authenticated users
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { requireAuth } from '@classytic/arc/permissions';
+import { queryParser } from '#shared/query-parser.js';
 import User from './user.model.js';
 import userRepository from './user.repository.js';
 import userController from './user.controller.js';
@@ -19,9 +21,12 @@ const userResource = defineResource({
   tag: 'Users',
   prefix: '/users',
 
-  model: User,
-  repository: userRepository,
+  adapter: createMongooseAdapter({
+    model: User,
+    repository: userRepository,
+  }),
   controller: userController,
+  queryParser,
 
   permissions: permissions.users,
   schemaOptions: userSchemaOptions,
@@ -34,8 +39,9 @@ const userResource = defineResource({
       summary: 'Get current user profile',
       description: 'Returns the authenticated user\'s profile information',
       handler: 'getProfile',
-      authRoles: [], // Just authenticate, no role check
-      schemas: {},
+      permissions: requireAuth(),
+      wrapHandler: false,
+      schema: {},
     },
     {
       method: 'PATCH',
@@ -43,8 +49,9 @@ const userResource = defineResource({
       summary: 'Update current user profile',
       description: 'Update the authenticated user\'s profile information',
       handler: 'updateProfile',
-      authRoles: [], // Just authenticate, no role check
-      schemas: {
+      permissions: requireAuth(),
+      wrapHandler: false,
+      schema: {
         body: updateUserBody,
       },
     },
@@ -54,8 +61,9 @@ const userResource = defineResource({
       summary: 'Change password',
       description: 'Change current user password (requires current password)',
       handler: 'changePassword',
-      authRoles: [], // Just authenticate, no role check
-      schemas: {
+      permissions: requireAuth(),
+      wrapHandler: false,
+      schema: {
         body: changePasswordBody,
       },
     },

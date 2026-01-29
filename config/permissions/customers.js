@@ -1,10 +1,11 @@
+import { allowPublic, requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { groups } from './roles.js';
 
 export default {
-  list: groups.authenticated,
-  get: groups.authenticated,
-  create: [],
-  update: groups.authenticated,
-  remove: groups.platformStaff,
-  me: groups.userOrAdmin,
+  list: requireAuth(),
+  get: requireAuth(),
+  create: allowPublic(),
+  update: requireAuth(),
+  delete: requireRoles(groups.platformStaff),
+  getMe: requireRoles(groups.userOrAdmin),
 };

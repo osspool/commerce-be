@@ -4,7 +4,7 @@
  * Event definitions and handlers for the customer domain
  */
 
-import { eventBus } from '#core/events/EventBus.js';
+import { publish } from '#lib/events/arcEvents.js';
 
 /**
  * Event Definitions
@@ -97,21 +97,21 @@ export const handlers = {
  * (Used by repository/controllers)
  */
 export function emitCustomerCreated(payload) {
-  eventBus.emit('customer:created', payload);
+  void publish('customer:created', payload);
 }
 
 export function emitCustomerUpdated(payload) {
-  eventBus.emit('customer:updated', payload);
+  void publish('customer:updated', payload);
 }
 
 export function emitMembershipEnrolled(payload) {
-  eventBus.emit('customer:membership.enrolled', payload);
+  void publish('customer:membership.enrolled', payload);
 }
 
 export function emitMembershipDeactivated(payload) {
-  eventBus.emit('customer:membership.deactivated', payload);
+  void publish('customer:membership.deactivated', payload);
 }
 
 export function emitMembershipReactivated(payload) {
-  eventBus.emit('customer:membership.reactivated', payload);
+  void publish('customer:membership.reactivated', payload);
 }

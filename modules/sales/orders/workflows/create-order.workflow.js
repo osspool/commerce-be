@@ -272,10 +272,6 @@ async function createTransaction(order, customerId, paymentData, senderPhone, br
 export async function createOrderWorkflow(orderInput, context) {
   const { request } = context;
 
-  if (!request?.user) {
-    throw new Error('User authentication required');
-  }
-
   // Validate required fields
   if (!orderInput.deliveryAddress) {
     throw new Error('Delivery address is required');
@@ -285,13 +281,25 @@ export async function createOrderWorkflow(orderInput, context) {
   }
 
   // 1. Get or create customer
-  const customer = await customerRepository.linkOrCreateForUser(request.user);
+  // Guest checkout: customer pre-resolved by handler via _resolvedCustomer
+  // Authenticated checkout: resolved from request.user
+  let customer, userId;
+  if (orderInput._resolvedCustomer) {
+    customer = orderInput._resolvedCustomer;
+    userId = orderInput._resolvedUserId || null;
+  } else {
+    if (!request?.user) {
+      throw new Error('User authentication required');
+    }
+    customer = await customerRepository.linkOrCreateForUser(request.user);
+    userId = request.user._id || request.user.id;
+  }
+
   if (!customer) {
     throw new Error('Failed to get or create customer');
   }
 
   const customerId = customer._id;
-  const userId = request.user._id || request.user.id;
 
   // 1.5. Resolve preferred branch for cost price lookup and fulfillment routing
   // If not specified, fulfillment will use default branch
@@ -330,7 +338,7 @@ export async function createOrderWorkflow(orderInput, context) {
   const reservationId =
     orderInput.stockReservationId ||
     orderInput.idempotencyKey ||
-    `web_${userId.toString()}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    `web_${userId ? userId.toString() : 'guest'}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   const reservation = await stockService.reserve(reservationId, stockItems, preferredBranch?._id || null);
 
   // 3. Calculate totals
@@ -385,7 +393,7 @@ export async function createOrderWorkflow(orderInput, context) {
   let order;
   try {
     order = await orderRepository.create({
-    source: 'web',
+    source: orderInput.source || 'web',
     // Branch preference for fulfillment (if specified at checkout)
     // Fulfillment will use this branch, or fall back to default branch if not set
     ...(preferredBranch && { branch: preferredBranch._id }),

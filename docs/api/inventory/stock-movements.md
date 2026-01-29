@@ -108,10 +108,10 @@ Movements are linked to source documents:
 | `reference.model` | Description |
 |-------------------|-------------|
 | `Order` | POS or web order |
-| `Transfer` | Transfer document (legacy) |
+| `Transfer` | Transfer document (previous schema) |
 | `Challan` | Transfer/challan document (current) |
 | `Purchase` | Purchase invoice |
-| `PurchaseOrder` | Legacy purchase record |
+| `PurchaseOrder` | Purchase record (previous schema) |
 | `Manual` | Manual adjustment |
 
 ## Data Retention

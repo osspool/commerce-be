@@ -2,7 +2,7 @@ import createError from 'http-errors';
 import { Repository, validationChainPlugin } from '@classytic/mongokit';
 import Transaction from './transaction.model.js';
 import { TRANSACTION_STATUS } from '@classytic/revenue/enums';
-import { createDefaultLoader } from '#core/utils/lazy-import.js';
+import { createDefaultLoader } from '#lib/utils/lazy-import.js';
 import {
   validateTransactionUpdateData,
   blockTransactionDelete,

@@ -5,8 +5,6 @@
  */
 
 import { vi } from 'vitest';
-import Fastify from 'fastify';
-import app from '../../app.js';
 
 /**
  * Create a Fastify test server instance
@@ -14,24 +12,19 @@ import app from '../../app.js';
  */
 export async function createTestServer() {
   // Ensure required env vars are set for testing
-  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-secret-key-123456789';
+  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-secret-key-1234567890-abcdefgh';
   if (!process.env.COOKIE_SECRET) process.env.COOKIE_SECRET = 'test-cookie-secret-key-1234567890123456';
   if (!process.env.REDX_API_KEY) process.env.REDX_API_KEY = 'test-redx-key';
+  if (!process.env.NODE_ENV) process.env.NODE_ENV = 'test';
   
   // Set MONGO_URI if available (e.g. from global setup)
   if (globalThis.__MONGO_URI__) {
     process.env.MONGO_URI = globalThis.__MONGO_URI__;
   }
 
-  const server = Fastify({
-    logger: false, // Disable logger for cleaner test output
-    trustProxy: true,
-    ajv: { customOptions: { coerceTypes: true, useDefaults: true, removeAdditional: false } },
-  });
-
-  await server.register(app);
+  const { createApplication } = await import('../../app.js');
+  const server = await createApplication();
   await server.ready();
-
   return server;
 }
 

@@ -2,7 +2,7 @@
  * Auth Module Events
  */
 
-import { eventBus } from '#core/events/EventBus.js';
+import { publish } from '#lib/events/arcEvents.js';
 
 export const events = {
   'user:created': {
@@ -78,21 +78,21 @@ export const handlers = {};
 
 // Helper functions
 export function emitUserCreated(payload) {
-  eventBus.emit('user:created', payload);
+  void publish('user:created', payload);
 }
 
 export function emitUserLogin(payload) {
-  eventBus.emit('user:login', payload);
+  void publish('user:login', payload);
 }
 
 export function emitUserUpdated(payload) {
-  eventBus.emit('user:updated', payload);
+  void publish('user:updated', payload);
 }
 
 export function emitUserDeleted(payload) {
-  eventBus.emit('user:deleted', payload);
+  void publish('user:deleted', payload);
 }
 
 export function emitPasswordReset(payload) {
-  eventBus.emit('user:password.reset', payload);
+  void publish('user:password.reset', payload);
 }

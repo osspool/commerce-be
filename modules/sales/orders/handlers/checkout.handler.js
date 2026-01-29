@@ -14,7 +14,7 @@ import { filterOrderCostPriceByUser } from '../order.costPrice.utils.js';
  */
 export async function getMyOrdersHandler(request, reply) {
   try {
-    const userId = request.user._id;
+    const userId = request.user._id || request.user.id;
     const { limit, page, status, sort } = request.query;
 
     // Use repository getAll with customer filter
@@ -51,7 +51,7 @@ export async function getMyOrdersHandler(request, reply) {
  */
 export async function getMyOrderHandler(request, reply) {
   try {
-    const userId = request.user._id;
+    const userId = request.user._id || request.user.id;
     const { id } = request.params;
 
     // Use repository getById then verify ownership

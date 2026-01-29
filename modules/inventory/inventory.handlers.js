@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
-import { eventBus } from '#core/events/EventBus.js';
+import { subscribe } from '#lib/events/arcEvents.js';
 import branchRepository from '#modules/commerce/branch/branch.repository.js';
 import { stockSyncService } from './services/index.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 let handlersRegistered = false;
 
@@ -28,7 +28,8 @@ export function registerInventoryEventHandlers(options = {}) {
   handlersRegistered = true;
 
   // When product created → initialize stock entries for default branch
-  eventBus.on('product:created', async ({ productId, productType, variants, sku }) => {
+  void subscribe('product:created', async (event) => {
+    const { productId, productType, variants, sku } = event.payload || {};
     try {
       const defaultBranch = await branchRepository.getDefaultBranch();
       const StockEntry = mongoose.model('StockEntry');
@@ -84,7 +85,8 @@ export function registerInventoryEventHandlers(options = {}) {
   });
 
   // When variants changed → update stock entry statuses
-  eventBus.on('product:variants.changed', async ({ productId, disabledSkus, enabledSkus }) => {
+  void subscribe('product:variants.changed', async (event) => {
+    const { productId, disabledSkus, enabledSkus } = event.payload || {};
     try {
       if (disabledSkus?.length > 0) {
         await stockSyncService.setVariantsActive(productId, disabledSkus, false);
@@ -98,7 +100,8 @@ export function registerInventoryEventHandlers(options = {}) {
   });
 
   // When product deleted → deactivate all stock
-  eventBus.on('product:deleted', async ({ productId, sku }) => {
+  void subscribe('product:deleted', async (event) => {
+    const { productId, sku } = event.payload || {};
     try {
       await stockSyncService.setProductStockActive(productId, false);
       logger.info({ sku: sku || productId }, 'Deactivated stock for deleted product');
@@ -108,7 +111,8 @@ export function registerInventoryEventHandlers(options = {}) {
   });
 
   // When product restored → reactivate all stock (derived from Product + Variant state)
-  eventBus.on('product:restored', async ({ productId, sku }) => {
+  void subscribe('product:restored', async (event) => {
+    const { productId, sku } = event.payload || {};
     try {
       await stockSyncService.syncProductStockIsActive(productId);
       logger.info({ sku: sku || productId }, 'Reactivated stock for restored product');
@@ -118,7 +122,8 @@ export function registerInventoryEventHandlers(options = {}) {
   });
 
   // When product about to be purged → snapshot product data
-  eventBus.on('product:before.purge', async ({ product }) => {
+  void subscribe('product:before.purge', async (event) => {
+    const { product } = event.payload || {};
     try {
       await stockSyncService.snapshotProductBeforeDelete(product);
       logger.info({ sku: product?.sku || product?._id }, 'Snapshotted product before purge');

@@ -297,7 +297,7 @@ Authorization: Bearer <token>
 
 ## Manual Payment Verification (Admin)
 
-Mounted outside `/api/v1` (registered at `/webhooks/payments` in `app.js`).
+Mounted outside `/api/v1` (registered at `/webhooks/payments` in `index.factory.js`).
 
 ### Verify Manual Payment
 ```http

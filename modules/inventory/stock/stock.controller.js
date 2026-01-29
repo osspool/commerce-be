@@ -1,11 +1,11 @@
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import stockRepository from './stock.repository.js';
 import { stockSchemaOptions } from './stock.schemas.js';
 import { branchRepository } from '#modules/commerce/branch/index.js';
 import { filterCostPriceByRole } from '#modules/catalog/products/product.utils.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 import { createVerifiedOperationalExpenseTransaction } from '#modules/transaction/utils/operational-transactions.js';
-import { createModuleLoader } from '#core/utils/lazy-import.js';
+import { createModuleLoader } from '#lib/utils/lazy-import.js';
 
 // Import specialized services directly
 import { stockLookupService, stockSyncService, stockMovementService } from '../services/index.js';
@@ -23,7 +23,7 @@ const loadPosUtils = createModuleLoader('#modules/sales/pos/pos.utils.js');
  */
 class StockController extends BaseController {
   constructor() {
-    super(stockRepository, stockSchemaOptions);
+    super(stockRepository, { schemaOptions: stockSchemaOptions });
 
     this.lookup = this.lookup.bind(this);
     this.getPosProducts = this.getPosProducts.bind(this);

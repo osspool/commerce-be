@@ -19,7 +19,7 @@ import { getRevenue } from '#shared/revenue/revenue.plugin.js';
 import { toSmallestUnit } from '@classytic/revenue';
 import Transaction from '#modules/transaction/transaction.model.js';
 import orderRepository from '#modules/sales/orders/order.repository.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 // ============================================
 // JOB TYPE CONSTANTS
@@ -58,6 +58,7 @@ export async function handleCreateTransaction(job) {
     orderId,
     customerId,
     totalAmount,
+    branchId,
     branchCode,
     cashierId,
     paymentMethod,

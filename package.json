@@ -19,12 +19,15 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
+    "start:gc": "node --expose-gc index.js",
     "worker": "node worker.js",
     "worker:dev": "node --watch worker.js",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
+    "validate:env": "node -e \"import('./config/validator.js').then(m => m.validateEnvironmentOrThrow())\"",
+    "memory:check": "node -e \"import('./lib/utils/memory.js').then(m => console.log(m.formatMemoryUsage()))\"",
     "seed:categories": "node modules/catalog/categories/seed-categories.js"
   },
   "engines": {
@@ -35,6 +38,7 @@
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",
+    "@classytic/arc": "^1.0.8",
     "@classytic/bd-areas": "^1.0.0",
     "@classytic/bd-logistics": "^1.0.3",
     "@classytic/media-kit": "^2.0.0",
@@ -52,8 +56,6 @@
     "@fastify/multipart": "^9.3.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/sensible": "^6.0.3",
-    "@fastify/swagger": "^9.5.1",
-    "@fastify/swagger-ui": "^5.2.3",
     "@fastify/under-pressure": "^9.0.3",
     "bcryptjs": "^3.0.2",
     "close-with-grace": "^2.3.0",

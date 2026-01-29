@@ -1,6 +1,7 @@
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import reviewRepository from './review.repository.js';
 import { reviewSchemaOptions } from './review.schemas.js';
+import { BadRequestError } from '#shared/utils/errors.js';
 
 /**
  * Review Controller
@@ -8,7 +9,7 @@ import { reviewSchemaOptions } from './review.schemas.js';
  */
 class ReviewController extends BaseController {
   constructor() {
-    super(reviewRepository, reviewSchemaOptions);
+    super(reviewRepository, { schemaOptions: reviewSchemaOptions });
     this.getMyReview = this.getMyReview.bind(this);
   }
 
@@ -16,37 +17,35 @@ class ReviewController extends BaseController {
    * Override create to add verified purchase check
    * POST /reviews
    */
-  async create(req, reply) {
-    const { product, title, rating, comment } = req.body;
-    const userId = req.user._id;
+  async create(context) {
+    const { product, title, rating, comment } = context.body;
+    const userId = context.user?._id || context.user?.id;
 
-    try {
-      // Check for existing review
-      const existingReview = await reviewRepository.getUserReview(userId, product);
-      if (existingReview) {
-        return reply.code(400).send({
-          success: false,
-          message: 'You have already reviewed this product',
-        });
-      }
-
-      // Check for verified purchase
-      const { isVerified, orderId } = await reviewRepository.checkVerifiedPurchase(userId, product);
-
-      const review = await reviewRepository.create({
-        user: userId,
-        product,
-        title,
-        rating,
-        comment,
-        isVerifiedPurchase: isVerified,
-        order: orderId,
-      });
-
-      return reply.code(201).send({ success: true, data: review });
-    } catch (error) {
-      return reply.code(500).send({ success: false, message: error.message });
+    // Check for existing review
+    const existingReview = await reviewRepository.getUserReview(userId, product);
+    if (existingReview) {
+      throw new BadRequestError('You have already reviewed this product');
     }
+
+    // Check for verified purchase
+    const { isVerified, orderId } = await reviewRepository.checkVerifiedPurchase(userId, product);
+
+    const review = await reviewRepository.create({
+      user: userId,
+      product,
+      title,
+      rating,
+      comment,
+      isVerifiedPurchase: isVerified,
+      order: orderId,
+    });
+
+    return {
+      success: true,
+      data: review,
+      status: 201,
+      meta: { message: 'Review created successfully' },
+    };
   }
 
   /**
@@ -55,15 +54,11 @@ class ReviewController extends BaseController {
    */
   async getMyReview(req, reply) {
     const { productId } = req.params;
-    const userId = req.user._id;
+    const userId = req.user._id || req.user.id;
 
-    try {
-      const review = await reviewRepository.getUserReview(userId, productId);
-      return reply.code(200).send({ success: true, data: review });
-    } catch (error) {
-      return reply.code(500).send({ success: false, message: error.message });
-    }
+    const review = await reviewRepository.getUserReview(userId, productId);
+    return reply.send({ success: true, data: review });
   }
 }
 
-export default new ReviewController(reviewRepository, reviewSchemaOptions);
+export default new ReviewController();

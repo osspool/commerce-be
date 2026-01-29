@@ -78,8 +78,7 @@ class PosController {
     const {
       items,
       customer,
-      payment,
-      payments, // Split payments array
+      payments, // Payment array (single or split)
       discount = 0,
       notes,
       branchId,
@@ -93,7 +92,13 @@ class PosController {
       membershipCardId, // Optional: lookup customer by membership card
       pointsToRedeem = 0, // Optional: redeem loyalty points
     } = req.body;
-    const cashier = req.user;
+
+    // Normalize user object - JWT may use 'id' or '_id'
+    const cashier = {
+      ...req.user,
+      _id: req.user._id || req.user.id,
+      id: req.user.id || req.user._id,
+    };
 
     // Generate idempotency key if not provided
     const effectiveIdempotencyKey = idempotencyKey ||
@@ -452,7 +457,6 @@ class PosController {
     let currentPayment;
 
     if (payments && payments.length > 0) {
-      // Split payments mode
       const paymentsInPaisa = payments.map(p => ({
         method: p.method,
         amount: toSmallestUnit(p.amount, 'BDT'),
@@ -462,16 +466,16 @@ class PosController {
 
       const paymentsTotal = paymentsInPaisa.reduce((sum, p) => sum + p.amount, 0);
 
-      // Validate split payments total matches order total
+      // Validate payments total matches order total
       if (paymentsTotal !== totalAmountInPaisa) {
         return reply.code(400).send({
           success: false,
-          message: `Split payments total (${fromSmallestUnit(paymentsTotal, 'BDT')}) does not match order total (${totalAmount})`,
+          message: `Payments total (${fromSmallestUnit(paymentsTotal, 'BDT')}) does not match order total (${totalAmount})`,
         });
       }
 
       if (paymentsInPaisa.length === 1) {
-        // Single payment in array - use standard format
+        // Single payment
         currentPayment = {
           amount: totalAmountInPaisa,
           method: paymentsInPaisa[0].method,
@@ -481,7 +485,7 @@ class PosController {
           verifiedBy: cashier._id,
         };
       } else {
-        // Multiple payments - use split format
+        // Multiple split payments
         currentPayment = {
           amount: totalAmountInPaisa,
           method: 'split',
@@ -491,17 +495,6 @@ class PosController {
           verifiedBy: cashier._id,
         };
       }
-    } else if (payment) {
-      // Single payment (legacy format)
-      const paymentAmountInPaisa = toSmallestUnit(payment.amount ?? totalAmount, 'BDT');
-      currentPayment = {
-        amount: paymentAmountInPaisa,
-        method: payment.method || 'cash',
-        reference: payment.reference,
-        status: 'verified',
-        verifiedAt: new Date(),
-        verifiedBy: cashier._id,
-      };
     } else {
       // Default: cash payment
       currentPayment = {

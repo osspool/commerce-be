@@ -16,7 +16,7 @@ class TransferController {
       const userRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
       const hasRole = (allowed = []) => allowed.some(role => userRoles.includes(role));
 
-      const transfer = await transferService.createTransfer(req.body, req.user._id, {
+      const transfer = await transferService.createTransfer(req.body, req.user._id || req.user.id, {
         canSubBranchTransfer: hasRole(permissions.inventory.subBranchTransfer),
         canReturnToHead: hasRole(permissions.inventory.returnToHead),
       });
@@ -109,7 +109,7 @@ class TransferController {
    */
   async update(req, reply) {
     try {
-      const transfer = await transferService.updateTransfer(req.params.id, req.body, req.user._id);
+      const transfer = await transferService.updateTransfer(req.params.id, req.body, req.user._id || req.user.id);
       return reply.send({
         success: true,
         data: transfer,
@@ -128,7 +128,7 @@ class TransferController {
    */
   async approve(req, reply) {
     try {
-      const transfer = await transferService.approveTransfer(req.params.id, req.user._id);
+      const transfer = await transferService.approveTransfer(req.params.id, req.user._id || req.user.id);
       return reply.send({
         success: true,
         data: transfer,
@@ -151,7 +151,7 @@ class TransferController {
       const transfer = await transferService.dispatchTransfer(
         req.params.id,
         req.body?.transport,
-        req.user._id
+        req.user._id || req.user.id
       );
       return reply.send({
         success: true,
@@ -172,7 +172,7 @@ class TransferController {
    */
   async markInTransit(req, reply) {
     try {
-      const transfer = await transferService.markInTransit(req.params.id, req.user._id);
+      const transfer = await transferService.markInTransit(req.params.id, req.user._id || req.user.id);
       return reply.send({
         success: true,
         data: transfer,
@@ -194,7 +194,7 @@ class TransferController {
       const transfer = await transferService.receiveTransfer(
         req.params.id,
         req.body?.items,
-        req.user._id
+        req.user._id || req.user.id
       );
       return reply.send({
         success: true,
@@ -218,7 +218,7 @@ class TransferController {
       const transfer = await transferService.cancelTransfer(
         req.params.id,
         req.body?.reason,
-        req.user._id
+        req.user._id || req.user.id
       );
       return reply.send({
         success: true,

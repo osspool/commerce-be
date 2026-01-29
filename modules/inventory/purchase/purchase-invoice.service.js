@@ -1,14 +1,14 @@
 import mongoose from 'mongoose';
+import { createStateMachine } from '@classytic/arc/utils';
 import Purchase, { PurchaseStatus, PurchasePaymentStatus, PurchasePaymentTerms } from './models/purchase.model.js';
 import purchaseRepository from './purchase.repository.js';
 import supplierRepository from '../supplier/supplier.repository.js';
 import branchRepository from '#modules/commerce/branch/branch.repository.js';
 import purchaseEntryService from './purchase.service.js';
 import inventoryRepository from '../inventory.repository.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 import { createVerifiedOperationalExpenseTransaction } from '#modules/transaction/utils/operational-transactions.js';
 import { computePurchaseTotals, computePaymentStatus, normalizeNumber, buildStatusEntry } from './purchase.utils.js';
-import { createStateMachine } from '#core/utils/state-machine.js';
 
 function createStatusError(message, statusCode = 400) {
   const error = new Error(message);

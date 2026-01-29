@@ -2,7 +2,7 @@
  * Product Module Events
  */
 
-import { eventBus } from '#core/events/EventBus.js';
+import { publish } from '#lib/events/arcEvents.js';
 
 export const events = {
   'product:created': {
@@ -119,5 +119,5 @@ export const handlers = {};
 
 // Helper functions (optional convenience for other modules)
 export function emitProductCreated(payload) {
-  eventBus.emit('product:created', payload);
+  void publish('product:created', payload);
 }

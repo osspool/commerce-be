@@ -7,3 +7,5 @@ export { updateStatusHandler } from './status.handler.js';
 export { requestShippingHandler, updateShippingStatusHandler, getShippingInfoHandler } from './shipping.handler.js';
 
 export { requestCancelHandler } from './cancel-request.handler.js';
+
+export { guestCheckoutHandler } from './guest-checkout.handler.js';

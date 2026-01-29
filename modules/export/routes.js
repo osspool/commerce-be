@@ -1,4 +1,3 @@
-import { createRoutes } from '#core/factories/createRoutes.js';
 import permissions from '#config/permissions.js';
 import { stringify as csvStringify } from 'csv-stringify/sync';
 import ExcelJS from 'exceljs';
@@ -48,13 +47,36 @@ function filterSensitiveFields(docs, collection, user) {
 }
 
 async function exportPlugin(fastify, opts) {
-  // Custom auth middleware for export permissions
-  const auth = async (request, reply) => {
-    if (!request.user) return reply.code(401).send({ success: false, message: 'Unauthorized' });
-    const roles = Array.isArray(request.user.roles) ? request.user.roles : (request.user.roles ? [request.user.roles] : []);
-    const allowed = permissions.export.any || [];
-    if (allowed.length && !roles.some((r)=>allowed.includes(r)) && !roles.includes('superadmin')) return reply.code(403).send({ success: false, message: 'Forbidden' });
-  };
+  // Build preHandler chain: authenticate (JWT) + permission check (Arc standard)
+  const exportPermission = permissions.export.any;
+  const preHandler = [];
+
+  if (fastify.authenticate) {
+    preHandler.push(fastify.authenticate);
+  }
+
+  preHandler.push(async (request, reply) => {
+    const context = {
+      user: request.user ?? null,
+      request,
+      resource: 'export',
+      action: 'export',
+    };
+    const result = await exportPermission(context);
+    if (typeof result === 'boolean') {
+      if (!result) {
+        return reply.code(context.user ? 403 : 401).send({
+          success: false,
+          message: context.user ? 'Forbidden' : 'Unauthorized',
+        });
+      }
+    } else if (!result.granted) {
+      return reply.code(context.user ? 403 : 401).send({
+        success: false,
+        message: result.reason || 'Forbidden',
+      });
+    }
+  });
 
   /**
    * Fetch data using MongoKit repository with proper field filtering
@@ -178,53 +200,47 @@ async function exportPlugin(fastify, opts) {
     }
   };
 
-  // Define export routes
-  const routes = [
-    {
-      method: 'GET',
-      url: '/export/csv',
+  // Register export routes directly with Fastify
+  fastify.route({
+    method: 'GET',
+    url: '/export/csv',
+    schema: {
+      tags: ['Export'],
       summary: 'Export data as CSV',
       description: 'Export collection data to CSV format with optional filtering',
-      schema: {
-        querystring: {
-          type: 'object',
-          required: ['collection'],
-          properties: {
-            collection: { type: 'string', description: 'Collection name to export' },
-            select: { type: 'string', description: 'Comma-separated field names' },
-            filter: { type: 'string', description: 'JSON filter criteria' },
-          },
+      querystring: {
+        type: 'object',
+        required: ['collection'],
+        properties: {
+          collection: { type: 'string', description: 'Collection name to export' },
+          select: { type: 'string', description: 'Comma-separated field names' },
+          filter: { type: 'string', description: 'JSON filter criteria' },
         },
       },
-      middlewares: [auth], // Custom auth middleware
-      handler: exportCSV,
     },
-    {
-      method: 'GET',
-      url: '/export/xlsx',
+    preHandler,
+    handler: exportCSV,
+  });
+
+  fastify.route({
+    method: 'GET',
+    url: '/export/xlsx',
+    schema: {
+      tags: ['Export'],
       summary: 'Export data as Excel',
       description: 'Export collection data to Excel format with optional filtering',
-      schema: {
-        querystring: {
-          type: 'object',
-          required: ['collection'],
-          properties: {
-            collection: { type: 'string', description: 'Collection name to export' },
-            select: { type: 'string', description: 'Comma-separated field names' },
-            filter: { type: 'string', description: 'JSON filter criteria' },
-          },
+      querystring: {
+        type: 'object',
+        required: ['collection'],
+        properties: {
+          collection: { type: 'string', description: 'Collection name to export' },
+          select: { type: 'string', description: 'Comma-separated field names' },
+          filter: { type: 'string', description: 'JSON filter criteria' },
         },
       },
-      middlewares: [auth], // Custom auth middleware
-      handler: exportXLSX,
     },
-  ];
-
-  // Register routes using factory
-  createRoutes(fastify, routes, {
-    tag: 'Export',
-    basePath: '/api/v1',
-    organizationScoped: false, // Export has custom auth
+    preHandler,
+    handler: exportXLSX,
   });
 }
 

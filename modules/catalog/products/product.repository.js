@@ -7,7 +7,7 @@ import {
 } from '@classytic/mongokit';
 import Product from './product.model.js';
 import config from '#config/index.js';
-import { eventBus } from '#core/events/EventBus.js';
+import { publish } from '#lib/events/arcEvents.js';
 import {
   generateVariants,
   syncVariants,
@@ -196,7 +196,7 @@ class ProductRepository extends Repository {
       if (!disabledSkus.length && !enabledSkus.length) return;
 
       // Emit event for inventory sync (decoupled)
-      eventBus.emitProductEvent('variants.changed', {
+      void publish('product:variants.changed', {
         productId: changes.productId,
         disabledSkus,
         enabledSkus,
@@ -212,7 +212,7 @@ class ProductRepository extends Repository {
 
     // Emit product created event for inventory sync (decoupled)
     this.on('after:create', async ({ result }) => {
-      eventBus.emitProductEvent('created', {
+      void publish('product:created', {
         productId: result._id,
         productType: result.productType,
         variants: result.variants,
@@ -237,7 +237,7 @@ class ProductRepository extends Repository {
       const newCat = result?.category;
 
       if (prevCat !== undefined && newCat !== undefined && prevCat !== newCat) {
-        eventBus.emitProductEvent('category.changed', {
+        void publish('product:category.changed', {
           productId: result?._id || context?.id,
           previousCategory: prevCat || null,
           newCategory: newCat || null,
@@ -245,16 +245,24 @@ class ProductRepository extends Repository {
       }
     });
 
+    // Fetch product before deletion for event emission
+    this.on('before:delete', async (context) => {
+      const product = await this.Model.findById(context.id).select('category sku').lean();
+      if (product) {
+        // Store in context for after:delete hook
+        context._productBeforeDelete = product;
+      }
+    });
+
     // Decrement category count on delete (soft delete via plugin)
     this.on('after:delete', async ({ context }) => {
-      // Get the deleted product's category
-      const product = await this.Model.findById(context.id).lean();
-      if (product?.category) {
-        // Emit event for inventory
-        eventBus.emitProductEvent('deleted', {
+      const product = context._productBeforeDelete;
+      if (product) {
+        // Emit event for inventory (always emit, even if no category)
+        void publish('product:deleted', {
           productId: product._id,
           sku: product.sku,
-          category: product.category,
+          category: product.category || null,
         });
       }
     });
@@ -267,7 +275,7 @@ class ProductRepository extends Repository {
       }
 
       // Emit event for inventory
-      eventBus.emitProductEvent('restored', {
+      void publish('product:restored', {
         productId: id,
         sku: result?.sku,
         category: result?.category,
@@ -624,14 +632,14 @@ class ProductRepository extends Repository {
     }
 
     // Emit event before purge
-    eventBus.emitProductEvent('before.purge', { product });
+    void publish('product:before.purge', { product });
 
     // Use Model.deleteOne to bypass softDeletePlugin
     // Note: StockEntry and StockMovement records are NOT deleted (preserved for audit trail)
     await this.Model.deleteOne({ _id: productId });
 
     // Emit post-purge event for cross-module cleanup (category counts, etc.)
-    eventBus.emitProductEvent('purged', {
+    void publish('product:purged', {
       productId,
       sku: product.sku,
       category: product.category || null,
@@ -655,5 +663,4 @@ class ProductRepository extends Repository {
 }
 
 export default new ProductRepository();
-
 

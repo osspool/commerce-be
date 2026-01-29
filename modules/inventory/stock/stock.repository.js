@@ -5,7 +5,7 @@ import branchRepository from '#modules/commerce/branch/branch.repository.js';
 import { createMemoryCacheAdapter } from '#shared/adapters/memoryCache.adapter.js';
 import { syncProduct } from '../stockSync.util.js';
 import LRUCache from '#utils/LRUCache.js';
-import { createDefaultLoader } from '#core/utils/lazy-import.js';
+import { createDefaultLoader } from '#lib/utils/lazy-import.js';
 
 const inventoryCacheAdapter = createMemoryCacheAdapter({ maxSize: 1000 });
 const BARCODE_CACHE_MAX = 5000;

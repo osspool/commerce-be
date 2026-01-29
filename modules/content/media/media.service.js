@@ -24,6 +24,10 @@ class MediaService {
     return doc;
   }
 
+  async create(data, options = {}) {
+    return this.media.upload(data, options.context);
+  }
+
   async update(id, data, options = {}) {
     const doc = await this.repo.updateMedia(id, data, options.context);
     if (!doc) {

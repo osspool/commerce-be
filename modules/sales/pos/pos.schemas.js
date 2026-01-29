@@ -89,16 +89,8 @@ export const createOrderSchema = {
           phone: { type: 'string' },
         },
       },
-      // Single payment (backward compatible)
-      payment: {
-        type: 'object',
-        properties: {
-          method: { type: 'string', enum: ['cash', 'bkash', 'nagad', 'rocket', 'bank_transfer', 'card'] },
-          amount: { type: 'number' },
-          reference: { type: 'string' },
-        },
-      },
       // Split/multi-payment: e.g., 100 cash + 200 bkash + 200 bank
+      // For single payment, pass array with one item
       payments: {
         type: 'array',
         description: 'Multiple payment methods for split payments',

@@ -63,7 +63,7 @@ export async function registerUser({ name, email, password, phone }) {
  * @param {Object} credentials - Login credentials
  * @param {string} credentials.email - User email
  * @param {string} credentials.password - User password
- * @returns {Promise<Object>} { token, refreshToken, user }
+ * @returns {Promise<Object>} { token, refreshToken, expiresIn, refreshExpiresIn, user }
  */
 export async function loginUser({ email, password }) {
   // Find user by email (include password for verification)
@@ -89,7 +89,7 @@ export async function loginUser({ email, password }) {
   await user.save();
 
   // Generate tokens
-  const { token, refreshToken } = generateTokens(user);
+  const { token, refreshToken, expiresIn, refreshExpiresIn } = generateTokens(user);
 
   // Get primary branch
   const primaryBranch = user.getPrimaryBranch?.();
@@ -126,13 +126,13 @@ export async function loginUser({ email, password }) {
     isWarehouseStaff: user.isWarehouseStaff?.() || false,
   };
 
-  return { token, refreshToken, user: userData };
+  return { token, refreshToken, expiresIn, refreshExpiresIn, user: userData };
 }
 
 /**
  * Refresh access token
  * @param {string} userId - User ID from decoded refresh token
- * @returns {Promise<Object>} { token, refreshToken }
+ * @returns {Promise<Object>} { token, refreshToken, expiresIn, refreshExpiresIn }
  */
 export async function refreshAccessToken(userId) {
   const user = await userRepository.getById(userId);
@@ -145,9 +145,9 @@ export async function refreshAccessToken(userId) {
     throw new UnauthorizedError('Account is disabled');
   }
 
-  const { token, refreshToken } = generateTokens(user);
+  const { token, refreshToken, expiresIn, refreshExpiresIn } = generateTokens(user);
 
-  return { token, refreshToken };
+  return { token, refreshToken, expiresIn, refreshExpiresIn };
 }
 
 /**

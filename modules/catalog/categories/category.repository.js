@@ -94,7 +94,7 @@ class CategoryRepository extends Repository {
      * Optimized: single query + in-memory tree building
      * @returns {Promise<Array>}
      */
-    async getCategoryTree() {
+    async getTree() {
         const all = await this.Model.find({ isActive: true })
             .sort({ displayOrder: 1, name: 1 })
             .lean();
@@ -127,7 +127,7 @@ class CategoryRepository extends Repository {
      * @returns {Promise<Array>}
      */
     async getFlatList() {
-        const tree = await this.getCategoryTree();
+        const tree = await this.getTree();
         const result = [];
 
         const flatten = (nodes, depth = 0) => {

@@ -1,10 +1,10 @@
+import { requireRoles } from '@classytic/arc/permissions';
 import { groups } from './roles.js';
 
 export default {
-  list: groups.platformStaff,
-  get: groups.platformStaff,
-  create: groups.superadminOnly,
-  update: groups.superadminOnly,
-  remove: groups.superadminOnly,
+  list: requireRoles(groups.platformStaff),
+  get: requireRoles(groups.platformStaff),
+  create: requireRoles(groups.superadminOnly),
+  update: requireRoles(groups.superadminOnly),
+  delete: requireRoles(groups.superadminOnly),
 };
-

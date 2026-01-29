@@ -6,7 +6,9 @@
  * Jobs are typically created by system processes, not via API.
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { requireRoles } from '@classytic/arc/permissions';
+import { queryParser } from '#shared/query-parser.js';
 import Job from './job.model.js';
 import jobRepository from './job.repository.js';
 import jobController from './job.controller.js';
@@ -20,16 +22,19 @@ const jobResource = defineResource({
   tag: 'Job',
   prefix: '/jobs',
 
-  model: Job,
-  repository: jobRepository,
+  adapter: createMongooseAdapter({
+    model: Job,
+    repository: jobRepository,
+  }),
   controller: jobController,
+  queryParser,
 
-  permissions: permissions.jobs || {
-    list: ['admin'],
-    get: ['admin'],
-    create: [],
-    update: [],
-    remove: [],
+  // Arc v1.0: Use disabledRoutes instead of empty permission arrays
+  // Jobs are created by system processes, not via API
+  disabledRoutes: ['create', 'update', 'delete'],
+  permissions: {
+    list: requireRoles(['admin']),
+    get: requireRoles(['admin']),
   },
   schemaOptions: jobSchemas,
 

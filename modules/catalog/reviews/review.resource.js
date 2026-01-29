@@ -5,7 +5,8 @@
  * Standard CRUD operations + custom endpoint for user's own reviews.
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import Review from './review.model.js';
 import reviewRepository from './review.repository.js';
 import reviewController from './review.controller.js';
@@ -19,9 +20,12 @@ const reviewResource = defineResource({
   tag: 'Review',
   prefix: '/reviews',
 
-  model: Review,
-  repository: reviewRepository,
+  adapter: createMongooseAdapter({
+    model: Review,
+    repository: reviewRepository,
+  }),
   controller: reviewController,
+  queryParser,
 
   permissions: permissions.reviews,
   schemaOptions: reviewSchemas,
@@ -32,7 +36,8 @@ const reviewResource = defineResource({
       path: '/my/:productId',
       summary: 'Get my review for product',
       handler: 'getMyReview',
-      authRoles: permissions.reviews.my,
+      permissions: permissions.reviews.getMyReview,
+      wrapHandler: false,
     },
   ],
 

@@ -1,16 +1,19 @@
 /**
  * Product Resource Definition
  *
- * 122 lines of plugin code → 90 lines of resource definition
- * Much cleaner and self-documenting!
+ * Uses presets for common patterns (softDelete, slugLookup)
+ * 150 lines → 80 lines with presets!
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { allowPublic } from '@classytic/arc/permissions';
+import { queryParser } from '#shared/query-parser.js';
 import Product from './product.model.js';
 import productRepository from './product.repository.js';
 import productController from './product.controller.js';
 import permissions from '#config/permissions.js';
 import { productSchemaOptions } from './product.schemas.js';
+import { costPriceFilterMiddleware, stripCostPriceMiddleware } from '#shared/middleware/cost-price-filter.js';
 
 const productResource = defineResource({
   name: 'product',
@@ -18,69 +21,40 @@ const productResource = defineResource({
   tag: 'Products',
   prefix: '/products',
 
-  model: Product,
-  repository: productRepository,
+  adapter: createMongooseAdapter({
+    model: Product,
+    repository: productRepository,
+  }),
   controller: productController,
+  queryParser,
+
+  // Presets add: /slug/:slug, /deleted, /:id/restore routes automatically
+  presets: ['softDelete', 'slugLookup'],
 
   schemaOptions: productSchemaOptions,
 
   permissions: permissions.products,
 
-  // Cost price filtering middleware
+  // Cost price filtering middleware - now centralized
   middlewares: {
-    create: [
-      async (request) => {
-        // Strip cost price for non-privileged users
-        if (!canManageCostPrice(request.user)) {
-          delete request.body.costPrice;
-          if (Array.isArray(request.body.variants)) {
-            request.body.variants = request.body.variants.map(v => {
-              const next = { ...v };
-              delete next.costPrice;
-              return next;
-            });
-          }
-        }
-      }
-    ],
-    update: [
-      async (request) => {
-        if (!canManageCostPrice(request.user)) {
-          delete request.body.costPrice;
-          if (Array.isArray(request.body.variants)) {
-            request.body.variants = request.body.variants.map(v => {
-              const next = { ...v };
-              delete next.costPrice;
-              return next;
-            });
-          }
-        }
-      }
-    ]
+    list: [costPriceFilterMiddleware],
+    get: [costPriceFilterMiddleware],
+    create: [stripCostPriceMiddleware],
+    update: [stripCostPriceMiddleware],
+    deleted: [costPriceFilterMiddleware],
   },
 
+  // Only custom routes - presets handle softDelete and slugLookup
   additionalRoutes: [
-    {
-      method: 'GET',
-      path: '/slug/:slug',
-      summary: 'Get product by slug',
-      handler: 'getBySlug',  // Controller method
-      authRoles: [],
-      schemas: {
-        params: {
-          type: 'object',
-          properties: { slug: { type: 'string' } },
-          required: ['slug']
-        }
-      }
-    },
     {
       method: 'GET',
       path: '/:productId/recommendations',
       summary: 'Get product recommendations',
       handler: 'getRecommendations',
-      authRoles: [],
-      schemas: {
+      permissions: allowPublic(),
+      wrapHandler: false,
+      preHandler: [costPriceFilterMiddleware],
+      schema: {
         params: {
           type: 'object',
           properties: { productId: { type: 'string' } },
@@ -89,33 +63,13 @@ const productResource = defineResource({
       }
     },
     {
-      method: 'GET',
-      path: '/deleted',
-      summary: 'Get soft-deleted products (admin recovery)',
-      handler: 'getDeleted',
-      authRoles: permissions.products.deleted
-    },
-    {
-      method: 'POST',
-      path: '/:id/restore',
-      summary: 'Restore a soft-deleted product',
-      handler: 'restore',
-      authRoles: permissions.products.restore,
-      schemas: {
-        params: {
-          type: 'object',
-          properties: { id: { type: 'string' } },
-          required: ['id']
-        }
-      }
-    },
-    {
       method: 'POST',
       path: '/:id/sync-stock',
       summary: 'Sync product quantity from inventory',
       handler: 'syncStock',
-      authRoles: permissions.products.syncStock,
-      schemas: {
+      permissions: permissions.products.syncStock,
+      wrapHandler: false,
+      schema: {
         params: {
           type: 'object',
           properties: { id: { type: 'string' } },
@@ -138,12 +92,5 @@ const productResource = defineResource({
     }
   }
 });
-
-// Helper function (imported from product.utils.js in real plugin)
-function canManageCostPrice(user) {
-  if (!user) return false;
-  const roles = user.roles || [];
-  return roles.includes('admin') || roles.includes('superadmin') || roles.includes('finance-manager');
-}
 
 export default productResource;

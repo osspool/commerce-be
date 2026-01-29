@@ -280,7 +280,7 @@ const orderSchema = new Schema({
   // Order source: determines checkout flow and behavior
   source: {
     type: String,
-    enum: ['web', 'pos', 'api'],
+    enum: ['web', 'pos', 'api', 'guest'],
     default: 'web',
     index: true,
   },

@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { StockEntry, StockMovement } from '../stock/models/index.js';
 import branchRepository from '#modules/commerce/branch/branch.repository.js';
 import inventoryRepository from '../inventory.repository.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 /**
  * Stock Transaction Service

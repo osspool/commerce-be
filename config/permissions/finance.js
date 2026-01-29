@@ -1,12 +1,7 @@
-import { roles } from "./roles.js";
+import { requireRoles } from '@classytic/arc/permissions';
+import { roles } from './roles.js';
 
 export default {
   // Finance backoffice access (statements/reports)
-  any: [
-    roles.ADMIN,
-    roles.SUPERADMIN,
-    roles.FINANCE_ADMIN,
-    roles.FINANCE_MANAGER,
-    roles.STORE_ADMIN,
-  ],
+  any: requireRoles([roles.ADMIN, roles.SUPERADMIN, roles.FINANCE_ADMIN, roles.FINANCE_MANAGER, roles.STORE_MANAGER]),
 };

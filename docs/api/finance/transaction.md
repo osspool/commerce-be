@@ -172,7 +172,7 @@ Two supported approaches:
 
 ### Schemas (FE contract)
 
-Transaction object (response shape; selected fields). Single-tenant app: `organizationId` is omitted.
+Transaction object (response shape; selected fields).
 ```json
 {
   "_id": "ObjectId",

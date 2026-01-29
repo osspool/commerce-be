@@ -1,7 +1,9 @@
+import { BaseController } from '@classytic/arc';
 import cartRepository from './cart.repository.js';
 
-class CartController {
+class CartController extends BaseController {
   constructor() {
+    super(cartRepository);
     this.getCart = this.getCart.bind(this);
     this.addItem = this.addItem.bind(this);
     this.updateItem = this.updateItem.bind(this);
@@ -13,9 +15,16 @@ class CartController {
     this.getUserCart = this.getUserCart.bind(this);
   }
 
+  /**
+   * Get user ID from request - handles both JWT 'id' and '_id' formats
+   */
+  getUserId(req) {
+    return req.user._id || req.user.id;
+  }
+
   async getCart(req, reply) {
     try {
-      const cart = await cartRepository.getOrCreateCart(req.user._id);
+      const cart = await cartRepository.getOrCreateCart(this.getUserId(req));
       return reply.code(200).send({ success: true, data: cart });
     } catch (error) {
       return reply.code(500).send({ success: false, message: error.message });
@@ -27,7 +36,7 @@ class CartController {
 
     try {
       const cart = await cartRepository.addItem(
-        req.user._id,
+        this.getUserId(req),
         productId,
         variantSku,
         quantity
@@ -43,7 +52,7 @@ class CartController {
     const { quantity } = req.body;
 
     try {
-      const cart = await cartRepository.updateItem(req.user._id, itemId, quantity);
+      const cart = await cartRepository.updateItem(this.getUserId(req), itemId, quantity);
       return reply.code(200).send({ success: true, data: cart });
     } catch (error) {
       return reply.code(400).send({ success: false, message: error.message });
@@ -54,7 +63,7 @@ class CartController {
     const { itemId } = req.params;
 
     try {
-      const cart = await cartRepository.removeItem(req.user._id, itemId);
+      const cart = await cartRepository.removeItem(this.getUserId(req), itemId);
       return reply.code(200).send({ success: true, data: cart });
     } catch (error) {
       return reply.code(400).send({ success: false, message: error.message });
@@ -63,7 +72,7 @@ class CartController {
 
   async clearCart(req, reply) {
     try {
-      const cart = await cartRepository.clearCart(req.user._id);
+      const cart = await cartRepository.clearCart(this.getUserId(req));
       return reply.code(200).send({ success: true, data: cart });
     } catch (error) {
       return reply.code(400).send({ success: false, message: error.message });

@@ -12,8 +12,6 @@ function normalizeRoles(userOrRoles) {
   const roles = userOrRoles.roles;
   if (Array.isArray(roles)) return roles.filter(Boolean);
   if (typeof roles === 'string') return [roles];
-  // Back-compat: some callers may pass { role: 'admin' }
-  if (typeof userOrRoles.role === 'string') return [userOrRoles.role];
   return [];
 }
 

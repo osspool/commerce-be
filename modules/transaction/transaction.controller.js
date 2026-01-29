@@ -1,4 +1,4 @@
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import transactionRepository from './transaction.repository.js';
 import { transactionSchemaOptions } from './schemas.js';
 
@@ -16,7 +16,7 @@ import { transactionSchemaOptions } from './schemas.js';
  */
 class TransactionController extends BaseController {
   constructor() {
-    super(transactionRepository, transactionSchemaOptions);
+    super(transactionRepository, { schemaOptions: transactionSchemaOptions });
   }
 
   // All CRUD operations now use base controller

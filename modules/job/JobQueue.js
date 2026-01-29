@@ -14,7 +14,7 @@
 
 import EventEmitter from 'events';
 import Job from './job.model.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 import { JOB_TYPES } from '#shared/constants/enums.js';
 
 // Default configuration

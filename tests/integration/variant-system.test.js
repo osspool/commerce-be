@@ -32,6 +32,10 @@ describe('Variant System Integration', () => {
     // Import repository for variant generation (happens via repository events)
     productRepository = (await import('../../modules/catalog/products/product.repository.js')).default;
 
+    // Register inventory event handlers for soft delete cascades
+    const { registerInventoryEventHandlers } = await import('../../modules/inventory/inventory.handlers.js');
+    registerInventoryEventHandlers();
+
     // Create test branch
     await Branch.deleteMany({ code: 'VAR-TEST' });
     branch = await Branch.create(createTestBranch({
@@ -444,8 +448,8 @@ describe('Variant System Integration', () => {
       const deleted = await Product.findById(deleteProduct._id).lean();
       expect(deleted.deletedAt).toBeDefined();
 
-      // Wait for cascade
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Wait for cascade (event handlers are async)
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const stock = await StockEntry.findOne({ product: deleteProduct._id });
       expect(stock.isActive).toBe(false);

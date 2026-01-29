@@ -2,7 +2,7 @@
  * Media Plugin
  * 
  * Initializes @classytic/media-kit - handles processing, variants, storage, validation.
- * Routes use createCrudRouter for auto swagger generation.
+ * Routes use createCrudRouter for Arc OpenAPI generation.
  */
 
 import fp from 'fastify-plugin';
@@ -11,7 +11,8 @@ import { createMedia } from '@classytic/media-kit';
 import { cachePlugin, createMemoryCache } from '@classytic/mongokit';
 import { S3Provider } from '@classytic/media-kit/providers/s3';
 import config from '#config/index.js';
-import createCrudRouter from '#core/factories/createCrudRouter.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import permissions from '#config/permissions.js';
 import MediaController from './media.controller.js';
 import MediaService from './media.service.js';
 import { mediaSchemas } from './media.schemas.js';
@@ -88,96 +89,113 @@ async function mediaPlugin(fastify) {
   const mediaService = new MediaService(mediaInstance);
   const controller = new MediaController(mediaService);
   
-  await fastify.register(async (instance) => {
-    createCrudRouter(instance, controller, {
-      tag: 'Media',
-      basePath: '/',
-      schemas: mediaSchemas,
-      auth: {
-        list: ['admin'],
-        get: ['admin'],
-        update: ['admin'],
-        remove: ['admin'],
+  const mediaResource = defineResource({
+    name: 'media',
+    displayName: 'Media',
+    tag: 'Media',
+    prefix: '/media',
+    
+    adapter: createMongooseAdapter({
+      model: Media,
+      repository: mediaService,
+    }),
+    controller,
+    customSchemas: mediaSchemas,
+    permissions: {
+      list: permissions.media.list,
+      get: permissions.media.get,
+      update: permissions.media.update,
+      delete: permissions.media.delete,
+    },
+    additionalRoutes: [
+      // Folders
+      {
+        method: 'GET',
+        path: '/folders',
+        handler: controller.getFolders.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Get allowed base folders',
       },
-      additionalRoutes: [
-        // Folders
-        { 
-          method: 'GET', 
-          path: '/folders', 
-          handler: controller.getFolders, 
-          authRoles: ['admin'],
-          summary: 'Get allowed base folders',
-        },
-        { 
-          method: 'GET', 
-          path: '/folders/tree', 
-          handler: controller.getFolderTree, 
-          authRoles: ['admin'],
-          summary: 'Get folder tree for explorer UI',
-        },
-        {
-          method: 'GET',
-          path: '/folders/:folder/stats',
-          handler: controller.getFolderStats,
-          authRoles: ['admin'],
-          summary: 'Get folder statistics',
-          schemas: mediaSchemas.folderParam,
-        },
-        {
-          method: 'GET',
-          path: '/folders/:folder/breadcrumb',
-          handler: controller.getBreadcrumb,
-          authRoles: ['admin'],
-          summary: 'Get folder breadcrumb',
-          schemas: mediaSchemas.folderParam,
-        },
-        {
-          method: 'DELETE',
-          path: '/folders/:folder',
-          handler: controller.deleteFolder,
-          authRoles: ['admin'],
-          summary: 'Delete all files in folder',
-          schemas: mediaSchemas.folderParam,
-        },
-        
-        // Upload (multipart)
-        { 
-          method: 'POST', 
-          path: '/upload', 
-          handler: controller.upload, 
-          authRoles: ['admin'],
-          summary: 'Upload single file',
-          description: 'Multipart: file (required), folder, alt, title, contentType, skipProcessing',
-        },
-        { 
-          method: 'POST', 
-          path: '/upload-multiple', 
-          handler: controller.uploadMultiple, 
-          authRoles: ['admin'],
-          summary: 'Upload multiple files (max 20)',
-          description: 'Multipart: files[] (required), folder, contentType, skipProcessing',
-        },
-        
-        // Bulk operations
-        { 
-          method: 'POST', 
-          path: '/bulk-delete', 
-          handler: controller.bulkDelete, 
-          authRoles: ['admin'],
-          summary: 'Delete multiple files',
-          schemas: mediaSchemas.bulkDelete,
-        },
-        { 
-          method: 'POST', 
-          path: '/move', 
-          handler: controller.moveToFolder, 
-          authRoles: ['admin'],
-          summary: 'Move files to folder',
-          schemas: mediaSchemas.move,
-        },
-      ],
-    });
-  }, { prefix: '/media' });
+      {
+        method: 'GET',
+        path: '/folders/tree',
+        handler: controller.getFolderTree.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Get folder tree for explorer UI',
+      },
+      {
+        method: 'GET',
+        path: '/folders/:folder/stats',
+        handler: controller.getFolderStats.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Get folder statistics',
+        schema: mediaSchemas.folderParam,
+      },
+      {
+        method: 'GET',
+        path: '/folders/:folder/breadcrumb',
+        handler: controller.getBreadcrumb.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Get folder breadcrumb',
+        schema: mediaSchemas.folderParam,
+      },
+      {
+        method: 'DELETE',
+        path: '/folders/:folder',
+        handler: controller.deleteFolder.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Delete all files in folder',
+        schema: mediaSchemas.folderParam,
+      },
+
+      // Upload (multipart)
+      {
+        method: 'POST',
+        path: '/upload',
+        handler: controller.upload.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Upload single file',
+        description: 'Multipart: file (required), folder, alt, title, contentType, skipProcessing',
+      },
+      {
+        method: 'POST',
+        path: '/upload-multiple',
+        handler: controller.uploadMultiple.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Upload multiple files (max 20)',
+        description: 'Multipart: files[] (required), folder, contentType, skipProcessing',
+      },
+
+      // Bulk operations
+      {
+        method: 'POST',
+        path: '/bulk-delete',
+        handler: controller.bulkDelete.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Delete multiple files',
+        schema: mediaSchemas.bulkDelete,
+      },
+      {
+        method: 'POST',
+        path: '/move',
+        handler: controller.moveToFolder.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Move files to folder',
+        schema: mediaSchemas.move,
+      },
+    ],
+  });
+
+  await fastify.register(mediaResource.toPlugin());
 }
 
 export function getMedia() {

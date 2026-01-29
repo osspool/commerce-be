@@ -20,6 +20,3 @@ export { default as stockCrudSchemas } from './stock.schemas.js';
 
 // Events
 export { events as stockEvents, handlers as stockEventHandlers } from './events.js';
-
-// Routes plugin
-export { default as stockRoutes } from './routes.js';

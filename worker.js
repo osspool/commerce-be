@@ -34,9 +34,9 @@
 // Load environment variables FIRST (before any imports that use config)
 import './config/env-loader.js';
 
-import { WorkerBootstrap, WorkerHealthServer, setupSignalHandlers } from '#core/worker/index.js';
+import { WorkerBootstrap, WorkerHealthServer, setupSignalHandlers } from '#lib/worker/index.js';
 import config from '#config/index.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 // Validate worker mode
 const workerMode = config.worker?.mode || process.env.WORKER_MODE || 'inline';

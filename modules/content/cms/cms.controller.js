@@ -1,10 +1,10 @@
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import CMSRepository from './cms.repository.js';
 import { cmsSchemaOptions } from './cms.schemas.js';
 
 class CMSController extends BaseController {
   constructor() {
-    super(CMSRepository, cmsSchemaOptions);
+    super(CMSRepository, { schemaOptions: cmsSchemaOptions });
     this.getBySlug = this.getBySlug.bind(this);
     this.getOrCreateBySlug = this.getOrCreateBySlug.bind(this);
     this.updateBySlug = this.updateBySlug.bind(this);

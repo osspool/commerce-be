@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { eventBus } from '#core/events/EventBus.js';
+import { subscribe } from '#lib/events/arcEvents.js';
 import { handlers as categoryEventHandlers } from '#modules/catalog/categories/events.js';
 
 // Set required environment variables
@@ -35,8 +35,10 @@ describe('Category-Product Synchronization', () => {
         // These tests don't boot Fastify, so EventRegistry auto-discovery won't run.
         for (const [eventName, handler] of Object.entries(categoryEventHandlers)) {
             if (typeof handler !== 'function') continue;
-            eventBus.on(eventName, handler);
-            _registeredEventHandlers.push([eventName, handler]);
+            const unsubscribe = await subscribe(eventName, async (event) => {
+                await handler(event.payload, event);
+            });
+            _registeredEventHandlers.push(unsubscribe);
         }
 
         // Start MongoDB Memory Server
@@ -57,9 +59,8 @@ describe('Category-Product Synchronization', () => {
 
     afterAll(async () => {
         // Cleanup registered handlers to avoid leaking listeners into other tests
-        for (const [eventName, handler] of _registeredEventHandlers) {
-            if (typeof eventBus.off === 'function') eventBus.off(eventName, handler);
-            else if (typeof eventBus.removeListener === 'function') eventBus.removeListener(eventName, handler);
+        for (const unsubscribe of _registeredEventHandlers) {
+            if (typeof unsubscribe === 'function') unsubscribe();
         }
 
         if (mongoose.connection.readyState !== 0) {
@@ -138,7 +139,7 @@ describe('Category-Product Synchronization', () => {
             await Category.create({ name: 'Pants', parent: 'clothing', displayOrder: 2 });
             await Category.create({ name: 'Accessories', displayOrder: 2 });
 
-            const tree = await categoryRepository.getCategoryTree();
+            const tree = await categoryRepository.getTree();
 
             expect(tree).toHaveLength(2); // Clothing, Accessories
 

@@ -94,9 +94,6 @@ const categorySchema = new Schema({
 // Unique slug index
 categorySchema.index({ slug: 1 }, { unique: true });
 
-// Parent lookup for hierarchy
-categorySchema.index({ parent: 1 });
-
 // Display order for sorting
 categorySchema.index({ displayOrder: 1, name: 1 });
 

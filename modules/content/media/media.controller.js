@@ -4,16 +4,16 @@
  * Leverages BaseController for CRUD + media-kit for uploads/folders.
  */
 
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import { BASE_FOLDERS } from './media.config.js';
 import { CONTENT_TYPES, mediaSchemaOptions } from './media.schemas.js';
 
 class MediaController extends BaseController {
   /**
-   * @param {import('./media.service.js').default} service - MediaService instance
+   * @param {import('./media.service.js').default} mediaService - MediaService instance
    */
-  constructor(service) {
-    super(service, mediaSchemaOptions);
+  constructor(mediaService) {
+    super(mediaService, { schemaOptions: mediaSchemaOptions });
 
     // Bind media-specific handlers
     this.create = this.create.bind(this); // override to block generic create
@@ -29,8 +29,12 @@ class MediaController extends BaseController {
   }
 
   // Block generic create (use /upload instead)
-  async create(_req, reply) {
-    return reply.code(405).send({ success: false, message: 'Use /api/media/upload for creation' });
+  async create(context) {
+    return {
+      success: false,
+      error: 'Use /api/media/upload for creation',
+      status: 405,
+    };
   }
 
   // ============================================
@@ -45,7 +49,7 @@ class MediaController extends BaseController {
     const buffer = await file.toBuffer();
     const { folder = 'general', alt, title, contentType, skipProcessing } = req.body || {};
 
-    const uploaded = await this.service.upload({
+    const uploaded = await this.repository.upload({
       buffer,
       filename: file.filename,
       mimeType: file.mimetype,
@@ -97,7 +101,7 @@ class MediaController extends BaseController {
       skipProcessing: skipProcessing === 'true',
     }));
 
-    const uploaded = await this.service.uploadMany(inputs, context);
+    const uploaded = await this.repository.uploadMany(inputs, context);
     return reply.code(201).send({ success: true, data: uploaded });
   }
 
@@ -106,7 +110,7 @@ class MediaController extends BaseController {
   // ============================================
   async bulkDelete(req, reply) {
     const { ids } = req.body;
-    const results = await this.service.deleteMany(ids, this._buildContext(req).context);
+    const results = await this.repository.deleteMany(ids, this._buildContext(req).context);
 
     const statusCode = results.failed.length ? 207 : 200;
     return reply.code(statusCode).send({
@@ -118,7 +122,7 @@ class MediaController extends BaseController {
 
   async moveToFolder(req, reply) {
     const { ids, targetFolder } = req.body;
-    const result = await this.service.move(ids, targetFolder, this._buildContext(req).context);
+    const result = await this.repository.move(ids, targetFolder, this._buildContext(req).context);
 
     return reply.send({
       success: true,
@@ -135,22 +139,22 @@ class MediaController extends BaseController {
   }
 
   async getFolderTree(req, reply) {
-    const tree = await this.service.getFolderTree(this._buildContext(req).context);
+    const tree = await this.repository.getFolderTree(this._buildContext(req).context);
     return reply.send({ success: true, data: tree });
   }
 
   async getFolderStats(req, reply) {
-    const stats = await this.service.getFolderStats(req.params.folder, this._buildContext(req).context);
+    const stats = await this.repository.getFolderStats(req.params.folder, this._buildContext(req).context);
     return reply.send({ success: true, data: stats });
   }
 
   async getBreadcrumb(req, reply) {
-    const breadcrumb = this.service.getBreadcrumb(req.params.folder);
+    const breadcrumb = this.repository.getBreadcrumb(req.params.folder);
     return reply.send({ success: true, data: breadcrumb });
   }
 
   async deleteFolder(req, reply) {
-    const results = await this.service.deleteFolder(req.params.folder, this._buildContext(req).context);
+    const results = await this.repository.deleteFolder(req.params.folder, this._buildContext(req).context);
 
     if (results.success.length === 0 && results.failed.length === 0) {
       return reply.code(404).send({ success: false, message: 'No files in folder' });

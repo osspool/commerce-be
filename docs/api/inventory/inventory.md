@@ -469,7 +469,7 @@ draft → approved → dispatched → in_transit → received
 | `admin`, `superadmin` | Full access |
 
 **Branch access model:**
-- Users carry branch assignments in their user profile (`branches[]` / legacy `branch`).
+- Users carry branch assignments in their user profile (`branches[]` / previous `branch`).
 - If `branchId` is omitted, the API defaults to the user’s branch for branch-scoped reads.
 - Admin/superadmin can operate across branches.
 

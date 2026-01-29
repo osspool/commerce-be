@@ -16,7 +16,7 @@
  */
 
 import { registerModule } from '#modules/job/job.registry.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 import { checkInventoryConsistency } from './stockSync.util.js';
 
 // ============================================

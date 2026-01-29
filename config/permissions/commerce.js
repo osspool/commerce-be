@@ -1,89 +1,92 @@
+import { allowPublic, requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { groups } from './roles.js';
 
 export const products = {
-  list: [],
-  get: [],
-  create: groups.storeAdmin,
-  update: groups.storeAdmin,
-  remove: groups.storeAdmin,
-  deleted: groups.storeAdmin,
-  restore: groups.storeAdmin,
-  syncStock: groups.inventoryStaff,
+  list: allowPublic(),
+  get: allowPublic(),
+  create: requireRoles(groups.storeAdmin),
+  update: requireRoles(groups.storeAdmin),
+  delete: requireRoles(groups.storeAdmin),
+  deleted: requireRoles(groups.storeAdmin),
+  restore: requireRoles(groups.storeAdmin),
+  syncStock: requireRoles(groups.inventoryStaff),
 };
 
 export const categories = {
-  list: [],
-  get: [],
-  create: groups.storeAdmin,
-  update: groups.storeAdmin,
-  // createCrudRouter expects `remove` for DELETE /:id
-  remove: groups.storeAdmin,
-  admin: groups.storeAdmin,
-  syncCounts: groups.inventoryStaff,
+  list: allowPublic(),
+  get: allowPublic(),
+  create: requireRoles(groups.storeAdmin),
+  update: requireRoles(groups.storeAdmin),
+  delete: requireRoles(groups.storeAdmin),
+  syncProductCounts: requireRoles(groups.inventoryStaff),
 };
 
 export const sizeGuides = {
-  list: [],
-  get: [],
-  create: groups.storeAdmin,
-  update: groups.storeAdmin,
-  remove: groups.storeAdmin,
+  list: allowPublic(),
+  get: allowPublic(),
+  create: requireRoles(groups.storeAdmin),
+  update: requireRoles(groups.storeAdmin),
+  delete: requireRoles(groups.storeAdmin),
 };
 
 export const coupons = {
-  list: groups.storeAdmin,
-  get: groups.storeAdmin,
-  create: groups.storeAdmin,
-  update: groups.storeAdmin,
-  remove: groups.storeAdmin,
-  validate: groups.userOrAdmin,
+  list: requireRoles(groups.storeAdmin),
+  get: requireRoles(groups.storeAdmin),
+  create: requireRoles(groups.storeAdmin),
+  update: requireRoles(groups.storeAdmin),
+  delete: requireRoles(groups.storeAdmin),
+  validateCoupon: requireRoles(groups.userOrAdmin),
 };
 
 export const orders = {
-  list: groups.storeAdmin,
-  get: groups.authenticated,
-  create: groups.userOnly,
-  update: groups.storeAdmin,
-  remove: groups.storeAdmin,
-  my: groups.userOnly,
-  cancel: groups.userOrAdmin,
-  cancelRequest: groups.userOrAdmin,
-  updateStatus: groups.storeAdmin,
-  fulfill: groups.storeAdmin,
-  refund: groups.storeAdmin,
-  shippingAdmin: groups.storeAdmin,
-  shippingGet: groups.userOrAdmin,
+  list: requireRoles(groups.storeAdmin),
+  get: requireAuth(),
+  create: requireRoles(groups.userOnly),
+  update: requireRoles(groups.storeAdmin),
+  delete: requireRoles(groups.storeAdmin),
 };
 
 export const cart = {
-  access: groups.userOrAdmin,
-  listAll: groups.storeAdmin, // Admin: list all carts
-  abandoned: groups.storeAdmin, // Admin: get abandoned carts for marketing
-  getUserCart: groups.storeAdmin, // Admin: view specific user's cart
+  access: requireRoles(groups.userOrAdmin),
+  listAll: requireRoles(groups.storeAdmin),
+  abandoned: requireRoles(groups.storeAdmin),
+  getUserCart: requireRoles(groups.storeAdmin),
 };
 
 export const reviews = {
-  list: [],
-  get: [],
-  create: groups.userOrAdmin,
-  update: groups.userOrAdmin,
-  remove: groups.adminOnly,
-  my: groups.userOrAdmin,
+  list: allowPublic(),
+  get: allowPublic(),
+  create: requireRoles(groups.userOrAdmin),
+  update: requireRoles(groups.userOrAdmin),
+  delete: requireRoles(groups.adminOnly),
+  getMyReview: requireRoles(groups.userOrAdmin),
 };
 
 export const branches = {
-  list: groups.storeStaff,
-  get: groups.storeStaff,
-  create: groups.storeAdmin,
-  update: groups.storeAdmin,
-  remove: groups.storeAdmin,
-  byCode: groups.storeStaff,
-  default: groups.storeStaff,
-  setDefault: groups.storeAdmin,
+  list: requireRoles(groups.storeStaff),
+  get: requireRoles(groups.storeStaff),
+  create: requireRoles(groups.storeAdmin),
+  update: requireRoles(groups.storeAdmin),
+  delete: requireRoles(groups.storeAdmin),
+  getByCode: requireRoles(groups.storeStaff),
+  getDefault: requireRoles(groups.storeStaff),
+  setDefault: requireRoles(groups.storeAdmin),
 };
 
 export const pos = {
-  access: groups.storeStaff,
+  access: requireRoles(groups.storeStaff),
 };
 
-export default { products, categories, sizeGuides, coupons, orders, cart, reviews, branches, pos };
+export const orderActions = {
+  my: requireRoles(groups.userOnly),
+  cancel: requireRoles(groups.userOrAdmin),
+  cancelRequest: requireRoles(groups.userOrAdmin),
+  updateStatus: requireRoles(groups.storeAdmin),
+  fulfill: requireRoles(groups.storeAdmin),
+  refund: requireRoles(groups.storeAdmin),
+  shippingAdmin: requireRoles(groups.storeAdmin),
+  shippingGet: requireRoles(groups.userOrAdmin),
+  guestCheckout: allowPublic(),
+};
+
+export default { products, categories, sizeGuides, coupons, orders, cart, reviews, branches, pos, orderActions };

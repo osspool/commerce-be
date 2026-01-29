@@ -1,5 +1,5 @@
 import User from '#modules/auth/user.model.js';
-import { eventBus } from '#core/events/EventBus.js';
+import { publish, subscribe } from '#lib/events/arcEvents.js';
 
 /**
  * Branch Event Handlers
@@ -84,8 +84,12 @@ async function handleBranchDeleted({ branchId }) {
  * Call this once during application startup to register handlers.
  */
 export function registerBranchHandlers() {
-  eventBus.on('branch:updated', handleBranchUpdated);
-  eventBus.on('branch:deleted', handleBranchDeleted);
+  void subscribe('branch:updated', async (event) => {
+    await handleBranchUpdated(event.payload);
+  });
+  void subscribe('branch:deleted', async (event) => {
+    await handleBranchDeleted(event.payload);
+  });
 
   console.log('[EventBus] Branch sync handlers registered');
 }
@@ -99,7 +103,7 @@ export function registerBranchHandlers() {
  * @param {Object} updates - Updated fields (code, name, role)
  */
 export function emitBranchUpdated(branchId, updates) {
-  eventBus.emitBranchEvent('updated', { branchId, updates });
+  void publish('branch:updated', { branchId, updates });
 }
 
 /**
@@ -108,7 +112,7 @@ export function emitBranchUpdated(branchId, updates) {
  * @param {string} branchId - Branch ID
  */
 export function emitBranchDeleted(branchId) {
-  eventBus.emitBranchEvent('deleted', { branchId });
+  void publish('branch:deleted', { branchId });
 }
 
 export default {

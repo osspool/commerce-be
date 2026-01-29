@@ -23,7 +23,7 @@ const crudSchemas = schemaParts.crudSchemas || {
   update: { body: schemaParts.updateBody },
   get: { params: schemaParts.params },
   list: { querystring: schemaParts.listQuery },
-  remove: { params: schemaParts.params },
+  delete: { params: schemaParts.params },
 };
 
 export const supplierSchemaOptions = {

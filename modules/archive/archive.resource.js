@@ -5,7 +5,8 @@
  * Standard CRUD operations + custom archival workflows.
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import Archive from './archive.model.js';
 import archiveRepository from './archive.repository.js';
 import archiveController from './archive.controller.js';
@@ -19,9 +20,12 @@ const archiveResource = defineResource({
   tag: 'Archive',
   prefix: '/archives',
 
-  model: Archive,
-  repository: archiveRepository,
+  adapter: createMongooseAdapter({
+    model: Archive,
+    repository: archiveRepository,
+  }),
   controller: archiveController,
+  queryParser,
 
   permissions: permissions.transactions, // Archive uses transaction permissions
   schemaOptions: archiveSchemas,
@@ -32,8 +36,9 @@ const archiveResource = defineResource({
       path: '/run',
       summary: 'Run archive for orders or transactions and delete originals',
       handler: 'runArchive',
-      authRoles: permissions.transactions.remove,
-      schemas: {
+      permissions: permissions.transactions.delete,
+      wrapHandler: false,
+      schema: {
         body: archiveRunQuery,
       },
     },
@@ -42,8 +47,9 @@ const archiveResource = defineResource({
       path: '/download/:id',
       summary: 'Download archive file',
       handler: 'downloadArchive',
-      authRoles: permissions.transactions.get,
-      schemas: {
+      permissions: permissions.transactions.get,
+      wrapHandler: false,
+      schema: {
         params: archiveSchemas.get?.params,
       },
     },
@@ -52,7 +58,8 @@ const archiveResource = defineResource({
       path: '/purge/:id',
       summary: 'Superadmin purge archive and file',
       handler: 'purgeArchive',
-      authRoles: ['superadmin'],
+      permissions: permissions.archive.purge,
+      wrapHandler: false,
     },
   ],
 

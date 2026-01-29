@@ -2,7 +2,7 @@
  * Category Module Events
  */
 
-import { eventBus } from '#core/events/EventBus.js';
+import { publish } from '#lib/events/arcEvents.js';
 import categoryRepository from './category.repository.js';
 
 export const events = {
@@ -108,13 +108,13 @@ export const handlers = {
 };
 
 export function emitCategoryCreated(payload) {
-  eventBus.emit('category:created', payload);
+  void publish('category:created', payload);
 }
 
 export function emitCategoryUpdated(payload) {
-  eventBus.emit('category:updated', payload);
+  void publish('category:updated', payload);
 }
 
 export function emitCategoryDeleted(payload) {
-  eventBus.emit('category:deleted', payload);
+  void publish('category:deleted', payload);
 }

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { StockEntry } from './stock/models/index.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 /**
  * Stock Sync Utility

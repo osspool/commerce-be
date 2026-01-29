@@ -23,7 +23,7 @@ export const BRANCH_ROLE_KEYS = Object.values(BRANCH_ROLES);
  * Embedded document for branch-specific access and roles
  *
  * Denormalized for performance - branch details cached here
- * Sync via eventBus when branch is updated
+ * Sync via Arc events when branch is updated
  */
 const userBranchSchema = new Schema({
   branchId: {

@@ -7,7 +7,8 @@
  * This is the NEW WAY - world-class architecture!
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import Customer from './customer.model.js';
 import customerRepository from './customer.repository.js';
 import customerController from './customer.controller.js';
@@ -36,9 +37,12 @@ const customerResource = defineResource({
   prefix: '/customers',
 
   // Data Layer
-  model: Customer,
-  repository: customerRepository,
+  adapter: createMongooseAdapter({
+    model: Customer,
+    repository: customerRepository,
+  }),
   controller: customerController,
+  queryParser,
 
   // Schema Generation Options
   schemaOptions: {
@@ -77,22 +81,25 @@ const customerResource = defineResource({
       method: 'GET',
       path: '/me',
       summary: 'Get my customer profile',
-      handler: 'getMe',  // String reference to controller.getMe
-      authRoles: permissions.customers.me,
+      handler: 'getMe',
+      permissions: permissions.customers.getMe,
+      wrapHandler: false,
     },
     {
       method: 'POST',
       path: '/me/membership',
       summary: 'Self-service membership actions (enroll)',
-      handler: handleMyMembershipAction,
-      authRoles: permissions.customers.me,
+      handler: handleMyMembershipAction,  // Function handler - no wrapHandler needed
+      permissions: permissions.customers.getMe,
+      wrapHandler: false,
     },
     {
       method: 'POST',
       path: '/:id/membership',
       summary: 'Membership actions: enroll, deactivate, reactivate, adjust',
-      handler: handleMembershipAction,
-      authRoles: permissions.customers.update,
+      handler: handleMembershipAction,  // Function handler - no wrapHandler needed
+      permissions: permissions.customers.update,
+      wrapHandler: false,
     },
   ],
 

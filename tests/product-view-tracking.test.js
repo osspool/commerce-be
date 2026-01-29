@@ -18,6 +18,10 @@ function createReplyStub() {
     },
     send(payload) {
       this.payload = payload;
+      // Set default statusCode if not already set (Fastify behavior)
+      if (this.statusCode === null) {
+        this.statusCode = 200;
+      }
       return this;
     },
   };

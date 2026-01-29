@@ -5,7 +5,8 @@
  * Standard CRUD operations + custom slug-based lookup for public display.
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import SizeGuide from './size-guide.model.js';
 import sizeGuideRepository from './size-guide.repository.js';
 import sizeGuideController from './size-guide.controller.js';
@@ -19,29 +20,18 @@ const sizeGuideResource = defineResource({
   tag: 'Size Guides',
   prefix: '/size-guides',
 
-  model: SizeGuide,
-  repository: sizeGuideRepository,
+  adapter: createMongooseAdapter({
+    model: SizeGuide,
+    repository: sizeGuideRepository,
+  }),
   controller: sizeGuideController,
+  queryParser,
+
+  // Preset adds: /slug/:slug route (public access)
+  presets: ['slugLookup'],
 
   permissions: permissions.sizeGuides,
   schemaOptions: sizeGuideSchemas,
-
-  additionalRoutes: [
-    {
-      method: 'GET',
-      path: '/slug/:slug',
-      summary: 'Get size guide by slug',
-      handler: 'getBySlug',
-      authRoles: null, // Public access
-      schemas: {
-        params: {
-          type: 'object',
-          properties: { slug: { type: 'string' } },
-          required: ['slug'],
-        },
-      },
-    },
-  ],
 
   events: events,
 });

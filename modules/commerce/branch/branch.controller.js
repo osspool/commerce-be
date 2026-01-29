@@ -1,4 +1,4 @@
-import BaseController from '#core/base/BaseController.js';
+import { BaseController } from '@classytic/arc';
 import branchRepository from './branch.repository.js';
 import { branchSchemaOptions } from './branch.schemas.js';
 
@@ -10,7 +10,7 @@ import { branchSchemaOptions } from './branch.schemas.js';
  */
 class BranchController extends BaseController {
   constructor() {
-    super(branchRepository, branchSchemaOptions);
+    super(branchRepository, { schemaOptions: branchSchemaOptions });
 
     // Bind additional methods
     this.getByCode = this.getByCode.bind(this);
@@ -25,7 +25,7 @@ class BranchController extends BaseController {
 
   async getByCode(req, reply) {
     const { code } = req.params;
-    const result = await this.service.getByCode(code);
+    const result = await this.repository.getByCode(code);
 
     if (!result) {
       return reply.code(404).send({ success: false, message: 'Branch not found' });
@@ -35,13 +35,13 @@ class BranchController extends BaseController {
   }
 
   async getDefault(req, reply) {
-    const result = await this.service.getDefaultBranch();
+    const result = await this.repository.getDefaultBranch();
     return reply.send({ success: true, data: result });
   }
 
   async setDefault(req, reply) {
     const { id } = req.params;
-    const result = await this.service.setDefault(id);
+    const result = await this.repository.setDefault(id);
 
     if (!result) {
       return reply.code(404).send({ success: false, message: 'Branch not found' });
@@ -51,7 +51,7 @@ class BranchController extends BaseController {
   }
 
   async getActive(req, reply) {
-    const result = await this.service.getActiveBranches();
+    const result = await this.repository.getActiveBranches();
     return reply.send({ success: true, data: result });
   }
 }

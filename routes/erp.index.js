@@ -100,13 +100,13 @@ async function erpRoutes(fastify) {
   // ============================================
   // CONTENT MANAGEMENT
   // ============================================
-  await fastify.register(cmsPlugin, { prefix: '/cms' });
+  await fastify.register(cmsPlugin);
   await fastify.register(mediaPlugin);
 
   // ============================================
   // LOGISTICS (Shipping & Delivery)
   // ============================================
-  await fastify.register(logisticsPlugin, { prefix: '/logistics' });
+  await fastify.register(logisticsPlugin);
 
   // ============================================
   // ADDITIONAL MODULES

@@ -10,7 +10,9 @@
       "Bash(node:*)",
       "Bash(npm install:*)",
       "Bash(cat:*)",
-      "Bash(timeout 10 npm start:*)"
+      "Bash(timeout 10 npm start:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm audit:*)"
     ],
     "deny": [],
     "ask": []

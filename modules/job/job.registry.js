@@ -7,18 +7,18 @@
  * Pattern:
  * - Job definitions live in their module (e.g., pos.jobs.js)
  * - Handler functions live in appropriate service/util files for testability
- * - This registry aggregates all registrations for clean app.js integration
+ * - This registry aggregates all registrations for clean app integration
  *
  * @example
  * ```js
- * // In app.js
+ * // In index.factory.js
  * import { registerAllJobHandlers } from '#modules/job/job.registry.js';
  * registerAllJobHandlers();
  * ```
  */
 
 import { jobQueue } from './JobQueue.js';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 /**
  * Registry of module job registration functions

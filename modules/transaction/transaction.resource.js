@@ -6,7 +6,8 @@
  * This provides CRUD + financial reporting endpoints with role restrictions.
  */
 
-import { defineResource } from '#core/factories/ResourceDefinition.js';
+import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { queryParser } from '#shared/query-parser.js';
 import Transaction from './transaction.model.js';
 import transactionRepository from './transaction.repository.js';
 import transactionController from './transaction.controller.js';
@@ -28,9 +29,12 @@ const transactionResource = defineResource({
   tag: 'Transaction',
   prefix: '/transactions',
 
-  model: Transaction,
-  repository: transactionRepository,
+  adapter: createMongooseAdapter({
+    model: Transaction,
+    repository: transactionRepository,
+  }),
   controller: transactionController,
+  queryParser,
 
   permissions: permissions.transactions,
   schemaOptions: transactionSchemas,
@@ -43,8 +47,9 @@ const transactionResource = defineResource({
       handler: getStatement,
       summary: 'Export transaction statement (CSV/JSON)',
       description: 'Accountant-friendly export with branch + VAT invoice references (defaults to CSV).',
-      authRoles: permissions.transactions.reports,
-      schemas: {
+      permissions: permissions.transactions.list,
+      wrapHandler: false,
+      schema: {
         querystring: {
           type: 'object',
           properties: {
@@ -65,8 +70,9 @@ const transactionResource = defineResource({
       handler: getProfitLossReport,
       summary: 'Get Profit & Loss report',
       description: 'Returns income, expenses, and net profit for a date range (default: last 30 days, max: 1 year)',
-      authRoles: permissions.transactions.list,
-      schemas: {
+      permissions: permissions.transactions.list,
+      wrapHandler: false,
+      schema: {
         querystring: {
           type: 'object',
           properties: {
@@ -82,8 +88,9 @@ const transactionResource = defineResource({
       handler: getCategoriesReport,
       summary: 'Get category breakdown',
       description: 'Returns top spending/income categories for a date range',
-      authRoles: permissions.transactions.list,
-      schemas: {
+      permissions: permissions.transactions.list,
+      wrapHandler: false,
+      schema: {
         querystring: {
           type: 'object',
           properties: {
@@ -101,8 +108,9 @@ const transactionResource = defineResource({
       handler: getCashFlowReport,
       summary: 'Get cash flow trend',
       description: 'Returns monthly income, expenses, and net profit trend',
-      authRoles: permissions.transactions.list,
-      schemas: {
+      permissions: permissions.transactions.list,
+      wrapHandler: false,
+      schema: {
         querystring: {
           type: 'object',
           properties: {

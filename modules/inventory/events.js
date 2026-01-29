@@ -33,9 +33,12 @@ export const handlers = {
 /**
  * Register inventory event handlers with the event bus
  */
-export async function registerInventoryEventHandlers(eventBus) {
+export async function registerInventoryEventHandlers() {
+  const { subscribe } = await import('#lib/events/arcEvents.js');
   for (const [eventName, handler] of Object.entries(handlers)) {
-    eventBus.on(eventName, handler);
+    void subscribe(eventName, async (event) => {
+      await handler(event.payload, event);
+    });
   }
 }
 

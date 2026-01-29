@@ -17,9 +17,8 @@ import mongoose from 'mongoose';
  * This validates the SDK design works with the actual API
  */
 class TestCommerceClient {
-  constructor({ apiKey, organizationId }) {
+  constructor({ apiKey }) {
     this.apiKey = apiKey;
-    this.organizationId = organizationId;
     this.server = null;
   }
 
@@ -42,14 +41,11 @@ class TestCommerceClient {
       }
     }
 
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = {};
+    if (body) headers['Content-Type'] = 'application/json';
     if (this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
-    if (this.organizationId) {
-      headers['x-org-id'] = this.organizationId;
-    }
-
     const response = await this.server.inject({
       method,
       url,
@@ -151,7 +147,6 @@ describe('SDK Client Integration', () => {
     // Initialize SDK client
     client = new TestCommerceClient({
       apiKey: adminToken,
-      organizationId: null, // Using default org for tests
     });
     client.setServer(app);
   });
@@ -295,7 +290,6 @@ describe('SDK Client Integration', () => {
     it('should throw error for unauthenticated request to protected route', async () => {
       const noAuthClient = new TestCommerceClient({
         apiKey: null,
-        organizationId: null,
       });
       noAuthClient.setServer(app);
 
