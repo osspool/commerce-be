@@ -1,5 +1,5 @@
 // Set env vars BEFORE imports
-process.env.JWT_SECRET = 'test-secret-key-123456789';
+process.env.JWT_SECRET = 'test-secret-key-1234567890-must-be-32-chars';
 process.env.COOKIE_SECRET = 'test-cookie-secret-key-1234567890123456';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

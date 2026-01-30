@@ -204,8 +204,9 @@ class ProductRepository extends Repository {
     });
 
     // Auto-filter inactive products (deleted filter handled by softDeletePlugin)
+    // Respect explicit isActive filter from query params (e.g., ?isActive=false)
     this.on('before:getAll', (context) => {
-      if (!context.includeInactive) {
+      if (!context.includeInactive && context.filters?.isActive === undefined) {
         context.filters = { ...context.filters, isActive: true };
       }
     });

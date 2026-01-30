@@ -51,7 +51,8 @@ class OrderRepository extends Repository {
   _setupEventHandlers() {
     // Block order deletion for non-super-admin - orders are immutable for accounting/legal compliance
     // Super-admin can delete if needed for data management (testing, GDPR, etc.)
-    this.on('before:delete', ({ context }) => {
+    // Note: before:* hooks receive context directly, after:* hooks receive { context, result }
+    this.on('before:delete', (context) => {
       const userRoles = context?.user?.roles || context?.userRoles || [];
       const isSuperAdmin = Array.isArray(userRoles)
         ? userRoles.includes('superadmin')

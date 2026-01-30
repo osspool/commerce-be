@@ -1,5 +1,5 @@
 // Set env vars BEFORE imports
-process.env.JWT_SECRET = 'test-secret-key-123456789';
+process.env.JWT_SECRET = 'test-secret-key-1234567890-must-be-32-chars';
 process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -17,7 +17,7 @@ describe('Smart Persistent Job Queue', () => {
             process.env.MONGO_URI = globalThis.__MONGO_URI__;
         }
         
-        process.env.JWT_SECRET = 'test-secret-key-123456789';
+        process.env.JWT_SECRET = 'test-secret-key-1234567890-must-be-32-chars';
         process.env.COOKIE_SECRET = 'test-cookie-secret-key-1234567890123456';
         process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 

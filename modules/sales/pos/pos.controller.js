@@ -78,7 +78,8 @@ class PosController {
     const {
       items,
       customer,
-      payments, // Payment array (single or split)
+      payment, // Single payment object (backwards compat)
+      payments: paymentsArray, // Payment array (for split payments)
       discount = 0,
       notes,
       branchId,
@@ -92,6 +93,9 @@ class PosController {
       membershipCardId, // Optional: lookup customer by membership card
       pointsToRedeem = 0, // Optional: redeem loyalty points
     } = req.body;
+
+    // Normalize payment input: accept both 'payment' (single) and 'payments' (array)
+    const payments = paymentsArray || (payment ? [payment] : undefined);
 
     // Normalize user object - JWT may use 'id' or '_id'
     const cashier = {
@@ -116,7 +120,6 @@ class PosController {
         {
           items,
           customer,
-          payment,
           payments,
           discount,
           branchId,
