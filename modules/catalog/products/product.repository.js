@@ -69,6 +69,57 @@ class ProductRepository extends Repository {
     this._setupEvents();
   }
 
+  /**
+   * Override getAll to support partial word search via regex
+   *
+   * MongoKit's default $text search only matches whole words.
+   * This override transforms `search` param into regex-based $or filter
+   * for partial matching across name, description, sku, and tags.
+   *
+   * @param {Object} params - Query params (search, filters, limit, sort, etc.)
+   * @param {Object} options - Additional options (select, populate, lean, etc.)
+   * @returns {Promise} - Paginated results
+   */
+  async getAll(params = {}, options = {}) {
+    // Transform search into regex filters (partial word matching)
+    if (params.search) {
+      const searchTerm = params.search.trim();
+      if (searchTerm) {
+        // Escape special regex characters to prevent injection
+        const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = { $regex: escaped, $options: 'i' };
+
+        // Search across multiple fields
+        const searchFilter = {
+          $or: [
+            { name: searchRegex },
+            { description: searchRegex },
+            { tags: searchRegex },
+            { sku: searchRegex },
+            { 'variants.sku': searchRegex },
+          ],
+        };
+
+        // Merge with existing filters
+        const existingFilters = params.filters || {};
+        const hasExistingFilters = Object.keys(existingFilters).length > 0;
+
+        params = {
+          ...params,
+          search: undefined, // Clear search to prevent MongoKit's $text
+          filters: hasExistingFilters
+            ? { $and: [existingFilters, searchFilter] }
+            : searchFilter,
+        };
+      } else {
+        // Empty/whitespace search - remove it
+        params = { ...params, search: undefined };
+      }
+    }
+
+    return super.getAll(params, options);
+  }
+
   _setupEvents() {
     // Auto-generate SKU and variants on create
     this.on('before:create', (context) => {
