@@ -55,7 +55,7 @@ export async function markCommissionDue(transactionId, session = null) {
         'commission.status': 'due',
       }
     },
-    { new: true, session }
+    { returnDocument: 'after', session }
   ).exec();
 }
 
@@ -73,7 +73,7 @@ export async function markCommissionPaid(transactionId, paidBy, notes = '', sess
         'commission.notes': notes,
       }
     },
-    { new: true, session }
+    { returnDocument: 'after', session }
   ).exec();
 }
 
@@ -89,7 +89,7 @@ export async function waiveCommission(transactionId, reason = '', session = null
         'commission.notes': reason,
       }
     },
-    { new: true, session }
+    { returnDocument: 'after', session }
   ).exec();
 }
 

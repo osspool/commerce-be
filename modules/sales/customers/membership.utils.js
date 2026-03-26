@@ -91,7 +91,7 @@ export async function reservePoints(customerId, points) {
         'membership.points.redeemed': points,
       },
     },
-    { new: true }
+    { returnDocument: 'after' }
   );
 
   if (!result) {
@@ -141,7 +141,7 @@ export async function releasePoints(customerId, points) {
         'membership.points.redeemed': -points,
       },
     },
-    { new: true }
+    { returnDocument: 'after' }
   );
 
   return { success: !!result, customer: result };

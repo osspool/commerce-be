@@ -13,7 +13,7 @@ class TransferController {
    */
   async create(req, reply) {
     try {
-      const userRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+      const userRoles = Array.isArray(req.user?.role) ? req.user.role : [];
       const hasRole = (allowed = []) => allowed.some(role => userRoles.includes(role));
 
       const transfer = await transferService.createTransfer(req.body, req.user._id || req.user.id, {

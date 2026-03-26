@@ -15,7 +15,7 @@ export const events = {
         userId: { type: 'string', format: 'objectId' },
         email: { type: 'string', format: 'email' },
         name: { type: 'string' },
-        roles: { type: 'array', items: { type: 'string' } }
+        role: { type: 'array', items: { type: 'string' } }
       }
     }
   },

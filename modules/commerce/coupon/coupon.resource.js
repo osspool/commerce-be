@@ -5,7 +5,9 @@
  * Standard CRUD + custom validation endpoint.
  */
 
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
+import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import Coupon from './coupon.model.js';
 import couponRepository from './coupon.repository.js';
@@ -20,14 +22,11 @@ const couponResource = defineResource({
   tag: 'Coupons',
   prefix: '/coupons',
 
-  adapter: createMongooseAdapter({
-    model: Coupon,
-    repository: couponRepository,
-  }),
+  adapter: createAdapter(Coupon, couponRepository),
   controller: couponController,
   queryParser,
 
-  permissions: permissions.coupons,
+  permissions: getResourcePermissions('coupon'),
   schemaOptions: couponSchemas,
 
   additionalRoutes: [

@@ -5,7 +5,9 @@
  * Follows @classytic/revenue patterns for payment processing.
  */
 
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
+import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import Order from './order.model.js';
 import orderRepository from './order.repository.js';
@@ -42,14 +44,11 @@ const orderResource = defineResource({
   tag: 'Orders',
   prefix: '/orders',
 
-  adapter: createMongooseAdapter({
-    model: Order,
-    repository: orderRepository,
-  }),
+  adapter: createAdapter(Order, orderRepository),
   controller: orderController,
   queryParser,
 
-  permissions: permissions.orders,
+  permissions: getResourcePermissions('order'),
   schemaOptions: orderSchemas,
 
   // Custom create schema with paymentData

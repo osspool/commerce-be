@@ -49,7 +49,7 @@ describe('POS Comprehensive Features', () => {
         slug: 'electronics',
         vatRate: 15, // Product VAT rate field (not vat.rate)
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // Product with VAT (15% rate set directly on product)
@@ -160,7 +160,7 @@ describe('POS Comprehensive Features', () => {
           },
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
   });
 

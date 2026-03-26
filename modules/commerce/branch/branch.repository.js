@@ -5,20 +5,34 @@ import {
   uniqueField,
   cascadePlugin,
 } from '@classytic/mongokit';
-import Branch from './branch.model.js';
+import mongoose from 'mongoose';
 import { emitBranchUpdated, emitBranchDeleted } from '#shared/events/branch.handlers.js';
+
+/**
+ * Branch Repository — Now backed by BA's `organization` collection
+ *
+ * After the Better Auth migration, branches are stored as BA organizations.
+ * This repository uses a strict:false stub model on the `organization` collection
+ * (same trick as auth.config.js) to preserve the exact same API for all consumers
+ * (inventory, orders, transfers, POS, etc.).
+ */
+
+// Register stub model on the `organization` collection if not already done.
+// auth.config.js does the same — whichever runs first wins, both are identical.
+if (!mongoose.models.organization) {
+  mongoose.model('organization', new mongoose.Schema({}, { strict: false, collection: 'organization' }));
+}
+const OrgModel = mongoose.models.organization;
 
 /**
  * Branch Repository
  *
- * Uses MongoKit:
- * - validationChainPlugin: Required field validation
- * - cascadePlugin: Deletes related StockEntry/StockMovement on branch delete
- * - Events: Auto-filter inactive, ensure default branch exists
+ * Uses MongoKit Repository over the organization collection.
+ * All existing query patterns preserved.
  */
 class BranchRepository extends Repository {
   constructor() {
-    super(Branch, [
+    super(OrgModel, [
       validationChainPlugin([
         requireField('code', ['create']),
         requireField('name', ['create']),
@@ -51,24 +65,29 @@ class BranchRepository extends Repository {
       const count = await this.Model.countDocuments();
       if (count === 0) {
         context.data.isDefault = true;
-        context.data.role = 'head_office';
+        context.data.branchRole = 'head_office';
+      }
+      // Map 'role' to 'branchRole' for BA org schema
+      if (context.data.role && !context.data.branchRole) {
+        context.data.branchRole = context.data.role;
       }
     });
 
-    // Emit branch updated event for user sync
+    // Emit branch updated event
     this.on('after:update', ({ context, result }) => {
-      const { code, name, role } = context.data || {};
+      const { code, name, branchRole, role } = context.data || {};
       const updates = {};
       if (code !== undefined) updates.code = code;
       if (name !== undefined) updates.name = name;
-      if (role !== undefined) updates.role = role;
+      if (branchRole !== undefined) updates.role = branchRole;
+      if (role !== undefined && !branchRole) updates.role = role;
 
       if (Object.keys(updates).length > 0 && result?._id) {
         emitBranchUpdated(result._id.toString(), updates);
       }
     });
 
-    // Emit branch deleted event for user cleanup
+    // Emit branch deleted event
     this.on('after:delete', ({ context, result }) => {
       if (result?._id) {
         emitBranchDeleted(result._id.toString());
@@ -78,29 +97,33 @@ class BranchRepository extends Repository {
 
   /**
    * Get default branch, creating one if none exists
-   * @returns {Promise<Object>} Default branch document
    */
   async getDefaultBranch() {
     let defaultBranch = await this.Model.findOne({ isDefault: true, isActive: true }).lean();
 
     if (!defaultBranch) {
-      // Check if any branch exists
       const anyBranch = await this.Model.findOne({ isActive: true }).lean();
 
       if (anyBranch) {
-        // Make existing branch the default
         await this.Model.updateOne({ _id: anyBranch._id }, { isDefault: true });
         defaultBranch = { ...anyBranch, isDefault: true };
       } else {
-        // Create default branch
+        // Create default branch as BA org
         defaultBranch = await this.create({
           code: 'MAIN',
           name: 'Main Store',
-          type: 'store',
+          slug: 'main-store',
+          branchType: 'store',
+          branchRole: 'head_office',
           isDefault: true,
           isActive: true,
         });
       }
+    }
+
+    // Normalize: expose `role` field for backward compat
+    if (defaultBranch && defaultBranch.branchRole && !defaultBranch.role) {
+      defaultBranch.role = defaultBranch.branchRole;
     }
 
     return defaultBranch;
@@ -108,53 +131,53 @@ class BranchRepository extends Repository {
 
   /**
    * Get head office branch
-   * Creates one from default if no head office exists yet
-   * @returns {Promise<Object>} Head office branch document
    */
   async getHeadOffice() {
-    let headOffice = await this.Model.findOne({ role: 'head_office', isActive: true }).lean();
+    let headOffice = await this.Model.findOne({ branchRole: 'head_office', isActive: true }).lean();
 
     if (!headOffice) {
-      // Promote default branch to head office
+      // Try old field name
+      headOffice = await this.Model.findOne({ role: 'head_office', isActive: true }).lean();
+    }
+
+    if (!headOffice) {
       const defaultBranch = await this.getDefaultBranch();
       if (defaultBranch) {
         await this.Model.updateOne(
           { _id: defaultBranch._id },
-          { role: 'head_office' }
+          { branchRole: 'head_office' }
         );
-        headOffice = { ...defaultBranch, role: 'head_office' };
+        headOffice = { ...defaultBranch, branchRole: 'head_office', role: 'head_office' };
       }
     }
 
+    if (headOffice && !headOffice.role) headOffice.role = headOffice.branchRole;
     return headOffice;
   }
 
   /**
    * Check if a branch is head office
-   * @param {string} branchId - Branch ID to check
-   * @returns {Promise<boolean>}
    */
   async isHeadOffice(branchId) {
-    const branch = await this.Model.findById(branchId).select('role').lean();
-    return branch?.role === 'head_office';
+    const branch = await this.Model.findById(branchId).select('branchRole role').lean();
+    return branch?.branchRole === 'head_office' || branch?.role === 'head_office';
   }
 
   /**
-   * Get all sub-branches (non-head-office branches)
-   * @returns {Promise<Array>}
+   * Get all sub-branches
    */
   async getSubBranches() {
-    return this.Model.find({ role: { $ne: 'head_office' }, isActive: true })
-      .sort({ name: 1 })
-      .lean();
+    return this.Model.find({
+      branchRole: { $ne: 'head_office' },
+      isActive: true,
+    }).sort({ name: 1 }).lean();
   }
 
   /**
    * Set a branch as head office
-   * @param {string} branchId - Branch ID to promote
    */
   async setHeadOffice(branchId) {
-    return this.update(branchId, { role: 'head_office' });
+    return this.update(branchId, { branchRole: 'head_office' });
   }
 
   /**
@@ -173,10 +196,31 @@ class BranchRepository extends Repository {
 
   /**
    * Set a branch as default
-   * Note: Model hooks automatically unset other defaults when isDefault is set to true
    */
   async setDefault(branchId) {
     return this.update(branchId, { isDefault: true });
+  }
+
+  /**
+   * Override getById to normalize role field
+   */
+  async getById(id) {
+    const doc = await super.getById(id);
+    if (doc && doc.branchRole && !doc.role) {
+      doc.role = doc.branchRole;
+    }
+    return doc;
+  }
+
+  /**
+   * Override getOne to normalize role field
+   */
+  async getOne(filter) {
+    const doc = await this.Model.findOne(filter).lean();
+    if (doc && doc.branchRole && !doc.role) {
+      doc.role = doc.branchRole;
+    }
+    return doc;
   }
 }
 

@@ -2,17 +2,20 @@
  * User Resource Definition
  *
  * CRUD operations for user management (admin only)
- * Plus profile operations for authenticated users
+ * Plus profile operations for authenticated users.
+ *
+ * Password change is handled by Better Auth at POST /api/auth/change-password.
  */
 
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
 import { requireAuth } from '@classytic/arc/permissions';
+import { createAdapter } from '#shared/adapter.js';
+import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import User from './user.model.js';
 import userRepository from './user.repository.js';
 import userController from './user.controller.js';
-import permissions from '#config/permissions.js';
-import { userSchemaOptions, updateUserBody, changePasswordBody } from './schemas.js';
+import { userSchemaOptions, updateUserBody } from './schemas.js';
 import { events } from './events.js';
 
 const userResource = defineResource({
@@ -21,18 +24,14 @@ const userResource = defineResource({
   tag: 'Users',
   prefix: '/users',
 
-  adapter: createMongooseAdapter({
-    model: User,
-    repository: userRepository,
-  }),
+  adapter: createAdapter(User, userRepository),
   controller: userController,
   queryParser,
 
-  permissions: permissions.users,
+  permissions: getResourcePermissions('user'),
   schemaOptions: userSchemaOptions,
 
   additionalRoutes: [
-    // Profile routes (authenticated users, no role required)
     {
       method: 'GET',
       path: '/me',
@@ -51,25 +50,11 @@ const userResource = defineResource({
       handler: 'updateProfile',
       permissions: requireAuth(),
       wrapHandler: false,
-      schema: {
-        body: updateUserBody,
-      },
-    },
-    {
-      method: 'POST',
-      path: '/me/change-password',
-      summary: 'Change password',
-      description: 'Change current user password (requires current password)',
-      handler: 'changePassword',
-      permissions: requireAuth(),
-      wrapHandler: false,
-      schema: {
-        body: changePasswordBody,
-      },
+      schema: { body: updateUserBody },
     },
   ],
 
-  events: events,
+  events,
 });
 
 export default userResource;

@@ -162,7 +162,7 @@ class OrderController extends BaseController {
   async getAll(req, reply) {
     const rawQuery = req.validated?.query || req.query;
     const queryParams = this.queryParser.parse(rawQuery);
-    const options = this._buildContext(req);
+    const options = { context: { userId: req.user?.id || req.user?._id } };
 
     // Check if query includes lookups (custom field joins)
     if (queryParams.lookups && queryParams.lookups.length > 0) {
@@ -197,7 +197,7 @@ class OrderController extends BaseController {
   }
 
   async getById(req, reply) {
-    const options = this._buildContext(req);
+    const options = { context: { userId: req.user?.id || req.user?._id } };
     const document = await this.repository.getById(req.params.id, options);
     const filtered = filterOrderCostPriceByUser(document, req.user);
     return reply.code(200).send({ success: true, data: filtered });

@@ -239,7 +239,7 @@ describe('Variant System Integration', () => {
             },
             $set: { quantity: 50, isActive: true },
           },
-          { upsert: true, new: true }
+          { upsert: true, returnDocument: 'after' }
         );
       }
     });
@@ -308,7 +308,7 @@ describe('Variant System Integration', () => {
             },
             $set: { quantity: 30, isActive: true },
           },
-          { upsert: true, new: true }
+          { upsert: true, returnDocument: 'after' }
         );
       }
     });
@@ -438,7 +438,7 @@ describe('Variant System Integration', () => {
           },
           $set: { quantity: 50, isActive: true },
         },
-        { new: true, upsert: true }
+        { returnDocument: 'after', upsert: true }
       );
     });
 

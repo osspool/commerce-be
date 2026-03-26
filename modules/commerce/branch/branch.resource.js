@@ -5,7 +5,9 @@
  * Each branch can have its own stock levels, POS transactions, and settings.
  */
 
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
+import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import Branch from './branch.model.js';
 import branchRepository from './branch.repository.js';
@@ -20,14 +22,17 @@ const branchResource = defineResource({
   tag: 'Branches',
   prefix: '/branches',
 
-  adapter: createMongooseAdapter({
-    model: Branch,
-    repository: branchRepository,
-  }),
+  adapter: createAdapter(Branch, branchRepository),
   controller: branchController,
   queryParser,
 
-  permissions: permissions.branches,
+  permissions: getResourcePermissions('branch'),
+
+  cache: {
+    staleTime: 30,
+    gcTime: 180,
+    tags: ['branches'],
+  },
   schemaOptions: branchSchemas,
 
   additionalRoutes: [

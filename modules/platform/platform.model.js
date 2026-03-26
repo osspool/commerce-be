@@ -296,7 +296,7 @@ platformConfigSchema.statics.getNextInvoiceNumber = async function() {
         'vat.invoice.startNumber': 1,
       },
     },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   );
 
   const prefix = config.vat?.invoice?.prefix || 'INV-';

@@ -21,7 +21,7 @@ vatInvoiceCounterSchema.statics.nextSeq = async function(branchId, dateKey, sess
   const doc = await this.findOneAndUpdate(
     { branch: branchId, dateKey },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true, ...(session ? { session } : {}) }
+    { returnDocument: 'after', upsert: true, ...(session ? { session } : {}) }
   );
 
   return doc.seq;

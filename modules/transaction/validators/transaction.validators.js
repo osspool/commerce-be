@@ -18,7 +18,7 @@ export const restrictManualCreateToAdmins = () =>
     'restrict-manual-create',
     ['create'],
     (context) => {
-      const roles = context?.request?.user?.roles;
+      const roles = context?.request?.user?.role;
       if (!roles) return false; // internal/system create
       const isAdmin = roles.includes('admin') || roles.includes('superadmin');
       return !isAdmin;
@@ -65,7 +65,7 @@ export const blockTransactionDelete = () =>
     'block-transaction-delete',
     ['delete'],
     (context) => {
-      const roles = context?.request?.user?.roles;
+      const roles = context?.request?.user?.role;
       console.log('roles', roles);
       // If we cannot read roles (e.g., internal delete or missing request), defer to route auth and allow
       if (!roles) return false;

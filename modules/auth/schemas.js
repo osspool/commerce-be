@@ -2,84 +2,14 @@ import User from './user.model.js';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
 
 /**
- * Auth Schemas
- * 
- * User model is auth-only (email, password, roles).
- * Profile data (addresses, phone) lives in Customer model.
+ * User Schemas
+ *
+ * Auth schemas (login, register, password reset) are handled by Better Auth.
+ * This file defines schemas for user CRUD (admin) and profile operations.
  */
 
-export const loginBody = {
-  type: 'object',
-  properties: {
-    email: { type: 'string', format: 'email' },
-    password: { type: 'string', minLength: 1 },
-  },
-  required: ['email', 'password'],
-  additionalProperties: false,
-};
-
-export const registerBody = {
-  type: 'object',
-  properties: {
-    name: { type: 'string', minLength: 1 },
-    email: { type: 'string', format: 'email' },
-    password: { type: 'string', minLength: 6 },
-    phone: { type: 'string' },
-  },
-  required: ['name', 'email', 'password'],
-  additionalProperties: false,
-};
-
-export const refreshBody = {
-  type: 'object',
-  properties: {
-    token: { type: 'string', minLength: 1 },
-  },
-  required: ['token'],
-  additionalProperties: false,
-};
-
-export const forgotBody = {
-  type: 'object',
-  properties: {
-    email: { type: 'string', format: 'email' },
-  },
-  required: ['email'],
-  additionalProperties: false,
-};
-
-export const resetBody = {
-  type: 'object',
-  properties: {
-    token: { type: 'string', minLength: 1 },
-    newPassword: { type: 'string', minLength: 6 },
-  },
-  required: ['token', 'newPassword'],
-  additionalProperties: false,
-};
-
-export const changePasswordBody = {
-  type: 'object',
-  properties: {
-    currentPassword: { type: 'string', minLength: 1 },
-    newPassword: { type: 'string', minLength: 6 },
-  },
-  required: ['currentPassword', 'newPassword'],
-  additionalProperties: false,
-};
-
-export const getProfileBody = {
-  type: 'object',
-  properties: {
-    email: { type: 'string', format: 'email' },
-  },
-  required: ['email'],
-  additionalProperties: false,
-};
-
 /**
- * Update user body - auth fields only
- * Name and email only. Addresses/phone managed via Customer.
+ * Update user body — profile fields only
  */
 export const updateUserBody = {
   type: 'object',
@@ -101,10 +31,7 @@ const {
   crudSchemas,
 } = buildCrudSchemasFromModel(User, {
   fieldRules: {
-    password: { systemManaged: true },
-    roles: { systemManaged: true },
-    resetPasswordToken: { systemManaged: true },
-    resetPasswordExpires: { systemManaged: true },
+    role: { systemManaged: true },
     isActive: { systemManaged: true },
     lastLoginAt: { systemManaged: true },
   },
@@ -112,7 +39,7 @@ const {
     filterableFields: {
       name: 'string',
       email: 'string',
-      roles: 'string',
+      role: 'string',
       isActive: 'boolean',
     },
   },
@@ -126,20 +53,18 @@ const resolvedCrudSchemas = crudSchemas || {
   delete: { params },
 };
 
-// Export schema options for controller
 export const userSchemaOptions = {
   query: {
     allowedPopulate: [],
     filterableFields: {
       name: 'string',
       email: 'string',
-      roles: 'string',
+      role: 'string',
       isActive: 'boolean',
     },
   },
 };
 
-// Re-export shapes expected by auth routes
 export const userCreateBody = resolvedCrudSchemas.create.body;
 export const userUpdateBody = resolvedCrudSchemas.update.body;
 export const userGetParams = resolvedCrudSchemas.get.params;

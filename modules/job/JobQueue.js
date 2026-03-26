@@ -254,7 +254,7 @@ class PersistentJobQueue extends EventEmitter {
         },
         {
           sort: { priority: -1, createdAt: 1 }, // Higher priority first, then FIFO
-          new: true,
+          returnDocument: 'after',
         }
       );
 
@@ -413,7 +413,7 @@ class PersistentJobQueue extends EventEmitter {
         scheduledFor: new Date(),
         error: null,
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (job) {

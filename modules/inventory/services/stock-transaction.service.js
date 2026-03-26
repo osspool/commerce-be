@@ -122,7 +122,7 @@ class StockTransactionService {
           },
         },
         { $inc: { quantity: -quantity } },
-        { new: true, ...sessionOpts }
+        { returnDocument: 'after', ...sessionOpts }
       );
 
       if (!result) {
@@ -199,7 +199,7 @@ class StockTransactionService {
           branch,
         },
         { $inc: { quantity }, $set: { isActive: desiredIsActive } },
-        { new: true, upsert: true, setDefaultsOnInsert: true, ...sessionOpts }
+        { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true, ...sessionOpts }
       );
 
       restoredItems.push({

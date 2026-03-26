@@ -46,7 +46,7 @@ export function requireMediaModel() {
 /**
  * Get variant URL by name
  * @param {Object} media - Media document
- * @param {'thumbnail'|'medium'|'large'} name - Variant name
+ * @param {'thumbnail'|'medium'|'large'|string} name - Variant name
  * @returns {string|undefined}
  */
 export function getVariantUrl(media, name) {

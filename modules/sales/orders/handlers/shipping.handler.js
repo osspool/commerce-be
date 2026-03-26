@@ -145,7 +145,7 @@ export async function getShippingInfoHandler(request, reply) {
       });
     }
 
-    const roles = Array.isArray(request.user?.roles) ? request.user.roles : [];
+    const roles = Array.isArray(request.user?.role) ? request.user.role : [];
     const isAdmin = roles.includes('admin') || roles.includes('superadmin');
 
     if (!isAdmin) {

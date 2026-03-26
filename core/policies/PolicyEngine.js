@@ -131,12 +131,12 @@ class Policy {
     }
 
     // Superadmin always bypasses
-    if (user?.roles?.includes('superadmin')) {
+    if (user?.role?.includes('superadmin')) {
       return { allowed: true };
     }
 
     // Check if user has any allowed role
-    const userRoles = user?.roles || [];
+    const userRoles = user?.role || [];
     const hasRole = allowedRoles.some(role => userRoles.includes(role));
 
     if (!hasRole) {
@@ -157,12 +157,12 @@ class Policy {
     const { field, allowRoles = [] } = this.ownership;
 
     // Bypass roles skip ownership check
-    if (allowRoles.some(role => user?.roles?.includes(role))) {
+    if (allowRoles.some(role => user?.role?.includes(role))) {
       return { allowed: true };
     }
 
     // Superadmin bypasses
-    if (user?.roles?.includes('superadmin')) {
+    if (user?.role?.includes('superadmin')) {
       return { allowed: true };
     }
 
@@ -200,12 +200,12 @@ class Policy {
     const { field, source, bypassRoles = [] } = this.tenant;
 
     // Bypass roles skip tenant filter
-    if (bypassRoles.some(role => user?.roles?.includes(role))) {
+    if (bypassRoles.some(role => user?.role?.includes(role))) {
       return { allowed: true, filters: {} };
     }
 
     // Superadmin bypasses
-    if (user?.roles?.includes('superadmin')) {
+    if (user?.role?.includes('superadmin')) {
       return { allowed: true, filters: {} };
     }
 
@@ -234,7 +234,7 @@ class Policy {
       return null; // No field restrictions
     }
 
-    const userRoles = user?.roles || [];
+    const userRoles = user?.role || [];
     const isRead = ['list', 'get'].includes(operation);
     const mask = { include: [], exclude: [] };
 

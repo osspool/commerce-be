@@ -203,7 +203,7 @@ class PurchaseService {
             },
             { $unset: ['_oldQty', '_oldCost', '_inQty', '_inCost'] },
           ],
-          { new: true, upsert: true, setDefaultsOnInsert: true, updatePipeline: true, ...sessionOptions }
+          { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true, updatePipeline: true, ...sessionOptions }
         );
 
         // Sync a denormalized snapshot for faster reads/fallback.

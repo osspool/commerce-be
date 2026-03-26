@@ -6,11 +6,14 @@ const env = process.env.NODE_ENV || process.env.ENV || "dev";
 const isDevelopment = env === "dev" || env === "development";
 
 export default {
+  betterAuth: {
+    secret: process.env.BETTER_AUTH_SECRET,
+  },
   app: {
     adminEmail: process.env.EMAIL_USER,
-    port: parseInt(process.env.PORT, 8040),
+    port: parseInt(process.env.PORT, 8050),
     url:
-      process.env.APP_URL || `http://localhost:${process.env.PORT || 8040}`,
+      process.env.APP_URL || `http://localhost:${process.env.PORT || 8050}`,
     frontendUrl: process.env.FRONTEND_URL || "http://localhost:3000",
     jwtSecret: process.env.JWT_SECRET,
     jwtRefresh: process.env.JWT_REFRESH_SECRET,

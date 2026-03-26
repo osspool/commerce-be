@@ -2,7 +2,10 @@
  * Category Resource Definition
  */
 
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
+import { getResourcePermissions } from '#shared/permissions.js';
+import { slugLookup, tree } from '#shared/presets.js';
 import { queryParser } from '#shared/query-parser.js';
 import Category from './category.model.js';
 import categoryRepository from './category.repository.js';
@@ -16,17 +19,21 @@ const categoryResource = defineResource({
   tag: 'Categories',
   prefix: '/categories',
 
-  adapter: createMongooseAdapter({
-    model: Category,
-    repository: categoryRepository,
-  }),
+  adapter: createAdapter(Category, categoryRepository),
   controller: categoryController,
   queryParser,
 
   // Presets add: /slug/:slug, /tree, /:parent/children routes
-  presets: ['slugLookup', 'tree'],
+  presets: [slugLookup, tree],
 
-  permissions: permissions.categories,
+  permissions: getResourcePermissions('category'),
+
+  // Categories change rarely — aggressive caching
+  cache: {
+    staleTime: 60,
+    gcTime: 300,
+    tags: ['categories'],
+  },
 
   schemaOptions: {
     strictAdditionalProperties: true,

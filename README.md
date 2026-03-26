@@ -57,18 +57,18 @@ arc docs                 # Export OpenAPI spec
 ## Environment Variables
 
 **Required:**
-- `JWT_SECRET` - JWT signing secret (min 32 chars)
+- `BETTER_AUTH_SECRET` - Better Auth encryption secret (min 32 chars)
+- `BETTER_AUTH_URL` - Backend base URL (e.g. `http://localhost:8050`)
 - `MONGO_URI` - MongoDB connection string
 
 **Production Required:**
 - `CORS_ORIGIN` - Allowed CORS origins
-- `JWT_REFRESH_SECRET` - Refresh token secret
-- `SESSION_SECRET` - Session secret
-- `COOKIE_SECRET` - Cookie signing secret
+- `FRONTEND_URL` - Frontend URL (for password reset emails)
 
 **Optional:**
-- `PORT` - Server port (default: 8040)
+- `PORT` - Server port (default: 8050)
 - `NODE_ENV` - Environment (production/development)
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - Google OAuth (optional)
 
 ## CLI Commands
 
@@ -107,7 +107,7 @@ arc docs ./docs/openapi.json
 
 - **Framework**: Fastify + Arc
 - **Database**: MongoDB + Mongoose
-- **Auth**: JWT with refresh tokens
+- **Auth**: Better Auth 1.5.6 (bearer tokens, organization plugin for branches)
 - **Validation**: Joi/Zod schemas
 - **Testing**: Vitest
 - **Code Generation**: Arc CLI

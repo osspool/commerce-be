@@ -63,7 +63,7 @@ describe('Web Checkout Stock Reservation', () => {
     await StockEntry.findOneAndUpdate(
       { product: product._id, branch: branch._id, variantSku: null },
       { $set: { quantity: 10, reservedQuantity: 0, isActive: true } },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     Cart = mongoose.models.Cart;
@@ -189,7 +189,7 @@ describe('Web Checkout Stock Reservation', () => {
     await StockEntry.findOneAndUpdate(
       { product: paidProduct._id, branch: branch._id, variantSku: null },
       { $set: { quantity: 5, reservedQuantity: 0, isActive: true } },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     await Cart.deleteMany({ user: userId });

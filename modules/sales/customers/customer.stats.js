@@ -214,7 +214,7 @@ export async function onMembershipPointsEarned(customerId, pointsEarned) {
         'membership.points.lifetime': pointsEarned,
       },
     },
-    { new: true }
+    { returnDocument: 'after' }
   );
 
   // Recalculate tier if customer has membership and no override
@@ -255,7 +255,7 @@ export async function redeemPoints(customerId, pointsToRedeem) {
         'membership.points.redeemed': pointsToRedeem,
       },
     },
-    { new: true }
+    { returnDocument: 'after' }
   );
 
   return {

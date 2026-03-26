@@ -24,13 +24,9 @@ export * from './utils/index.js';
 export * from './docs/index.js';
 
 // Re-export Arc framework utilities for convenience
-// (Use Arc directly: import { resourceRegistry } from '@classytic/arc')
-export { resourceRegistry } from '@classytic/arc';
-export { hookSystem } from '@classytic/arc';
+export { ResourceRegistry } from '@classytic/arc/registry';
+export { createHookSystem } from '@classytic/arc/hooks';
 
 // Policy Engine (application-specific RBAC + ownership + tenant)
 // TODO: Redesign as pluggable interface in Arc
 export { definePolicy, policyRegistry, combinePolicies } from './policies/PolicyEngine.js';
-
-// Testing utilities - Re-export from Arc
-export { createTestHarness, generateTestFile } from '@classytic/arc/testing';

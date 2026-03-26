@@ -139,7 +139,7 @@ export async function cancelOrderHandler(request, reply) {
 
     // Check permission: owner or admin
     const userId = request.user._id || request.user.id;
-    const roles = Array.isArray(request.user.roles) ? request.user.roles : [];
+    const roles = Array.isArray(request.user.role) ? request.user.role : [];
     const isAdmin = roles.includes('admin') || roles.includes('superadmin');
 
     // Walk-in/POS orders may not have a customer - restrict to admins only

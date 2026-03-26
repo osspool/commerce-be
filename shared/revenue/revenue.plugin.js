@@ -2,6 +2,7 @@ import fp from 'fastify-plugin';
 import { Revenue } from '@classytic/revenue';
 import { definePlugin } from '@classytic/revenue/plugins';
 import { ManualProvider } from '@classytic/revenue-manual';
+import config from '#config/index.js';
 import Transaction from '#modules/transaction/transaction.model.js';
 import Order from '#modules/sales/orders/order.model.js';
 import { updateEntityAfterPaymentVerification } from '#shared/revenue/payment-verification.utils.js';
@@ -141,13 +142,21 @@ async function revenuePlugin(fastify) {
     fastify.log.info('Initializing Manual payment provider for Bangladesh ecommerce');
 
     revenueInstance = Revenue.create({
-      logger: fastify.log,
       defaultCurrency: 'BDT',
     })
       .withModels({ Transaction })
       .withProvider('manual', new ManualProvider())
+      .withLogger(fastify.log)
+      .forEnvironment(config.isProduction ? 'production' : 'development')
+      .withDebug(!config.isProduction)
+      .withRetry({ maxAttempts: 3, baseDelay: 1000 })
+      .withCircuitBreaker(config.isProduction)
       .withCategoryMappings({
         Order: 'order_purchase',
+      })
+      .withTransactionTypeMapping({
+        order_purchase: 'inflow',
+        refund: 'outflow',
       })
       .withPlugin(createEcommerceHooksPlugin(fastify))
       .build();
@@ -157,41 +166,35 @@ async function revenuePlugin(fastify) {
     });
 
     // Register event listeners for better observability
-    revenueInstance.events.on('payment:initiated', (event) => {
-      fastify.log.info('Payment initiated', {
-        transactionId: event.transactionId,
-        amount: event.amount,
-        provider: event.provider,
+    revenueInstance.on('monetization.created', (event) => {
+      fastify.log.info('Monetization created', {
+        monetizationType: event.monetizationType,
+        sourceModel: event.transaction?.sourceModel,
+        amount: event.transaction?.amount,
       });
     });
 
-    revenueInstance.events.on('payment:succeeded', (event) => {
-      fastify.log.info('Payment succeeded', {
-        transactionId: event.transactionId,
+    revenueInstance.on('payment.verified', (event) => {
+      fastify.log.info('Payment verified', {
+        transactionId: event.transaction._id,
         amount: event.transaction.amount,
+        verifiedBy: event.verifiedBy,
       });
     });
 
-    revenueInstance.events.on('payment:failed', (event) => {
+    revenueInstance.on('payment.failed', (event) => {
       fastify.log.error('Payment failed', {
-        transactionId: event.transactionId,
-        error: event.error?.message,
+        transactionId: event.transaction._id,
+        error: event.error,
         provider: event.provider,
       });
     });
 
-    revenueInstance.events.on('transaction:created', (event) => {
-      fastify.log.info('Transaction created', {
-        transactionId: event.transactionId,
-        type: event.transaction.type,
-        status: event.transaction.status,
-      });
-    });
-
-    revenueInstance.events.on('transaction:verified', (event) => {
-      fastify.log.info('Transaction verified', {
-        transactionId: event.transactionId,
-        amount: event.transaction.amount,
+    revenueInstance.on('payment.refunded', (event) => {
+      fastify.log.info('Payment refunded', {
+        transactionId: event.transaction._id,
+        refundAmount: event.refundAmount,
+        isPartialRefund: event.isPartialRefund,
       });
     });
 

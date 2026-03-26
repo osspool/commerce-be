@@ -7,7 +7,9 @@
  * This is the NEW WAY - world-class architecture!
  */
 
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
+import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import Customer from './customer.model.js';
 import customerRepository from './customer.repository.js';
@@ -37,10 +39,7 @@ const customerResource = defineResource({
   prefix: '/customers',
 
   // Data Layer
-  adapter: createMongooseAdapter({
-    model: Customer,
-    repository: customerRepository,
-  }),
+  adapter: createAdapter(Customer, customerRepository),
   controller: customerController,
   queryParser,
 
@@ -67,13 +66,16 @@ const customerResource = defineResource({
         name: { type: 'string' },
         phone: { type: 'string' },
         email: { type: 'string' },
-        userId: { type: 'ObjectId' },
+        userId: { type: 'string', pattern: '^[0-9a-fA-F]{24}$' },
       },
     },
   },
 
   // RBAC Permissions
-  permissions: permissions.customers,
+  permissions: {
+    ...getResourcePermissions('customer'),
+    getMe: permissions.customers.getMe,
+  },
 
   // Additional Routes (beyond CRUD)
   additionalRoutes: [

@@ -56,9 +56,9 @@ export class ArchiveController extends BaseController {
    */
   async purgeArchive(request, reply) {
     // Double-check superadmin role
-    const roles = Array.isArray(request.user?.roles)
-      ? request.user.roles
-      : (request.user?.roles ? [request.user.roles] : []);
+    const roles = Array.isArray(request.user?.role)
+      ? request.user.role
+      : (request.user?.role ? [request.user.role] : []);
 
     if (!roles.includes('superadmin')) {
       throw new ForbiddenError('Superadmin role required');

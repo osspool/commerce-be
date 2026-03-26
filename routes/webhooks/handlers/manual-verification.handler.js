@@ -117,7 +117,7 @@ export async function rejectManualPayment(request, reply) {
     }
 
     // Get transaction first to find linked order
-    const transaction = await revenue.payments.getTransaction(transactionId);
+    const transaction = await revenue.payments.get(transactionId);
     if (!transaction) {
       return reply.code(404).send({
         success: false,
@@ -190,14 +190,17 @@ export async function rejectManualPayment(request, reply) {
       },
     });
   } catch (error) {
+    const statusCode = error.name === 'TransactionNotFoundError' ? 404 : 500;
+
     request.log.error({
       transactionId,
       errorName: error.name,
       errorMessage: error.message,
       stack: error.stack,
+      statusCode,
     }, 'ERROR: Manual rejection failed');
 
-    return reply.code(500).send({
+    return reply.code(statusCode).send({
       success: false,
       message: error.message,
       error: error.name || 'PaymentRejectionError',

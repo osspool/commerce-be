@@ -53,7 +53,7 @@ class OrderRepository extends Repository {
     // Super-admin can delete if needed for data management (testing, GDPR, etc.)
     // Note: before:* hooks receive context directly, after:* hooks receive { context, result }
     this.on('before:delete', (context) => {
-      const userRoles = context?.user?.roles || context?.userRoles || [];
+      const userRoles = context?.user?.role || context?.userRoles || [];
       const isSuperAdmin = Array.isArray(userRoles)
         ? userRoles.includes('superadmin')
         : userRoles === 'superadmin';

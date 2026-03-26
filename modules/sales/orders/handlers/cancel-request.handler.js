@@ -12,7 +12,7 @@ export async function requestCancelHandler(request, reply) {
     }
 
     // Only owner or admin can request cancellation
-    const roles = Array.isArray(request.user?.roles) ? request.user.roles : [];
+    const roles = Array.isArray(request.user?.role) ? request.user.role : [];
     const isAdmin = roles.includes('admin') || roles.includes('superadmin');
     const customerId = request.user?.customer || request.user?.customerId;
     const isOwner =

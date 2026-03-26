@@ -1,4 +1,4 @@
-import permissions from '#config/permissions.js';
+import { exportActions } from '#shared/permissions.js';
 import { stringify as csvStringify } from 'csv-stringify/sync';
 import ExcelJS from 'exceljs';
 import { canViewCostPrice, filterCostPriceByRole } from '#modules/catalog/products/product.utils.js';
@@ -48,7 +48,7 @@ function filterSensitiveFields(docs, collection, user) {
 
 async function exportPlugin(fastify, opts) {
   // Build preHandler chain: authenticate (JWT) + permission check (Arc standard)
-  const exportPermission = permissions.export.any;
+  const exportPermission = exportActions.any;
   const preHandler = [];
 
   if (fastify.authenticate) {

@@ -89,7 +89,7 @@ class StockSyncService {
           branch: branchId,
         },
       },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     const normalizedNotes = String(notes || '').toLowerCase();

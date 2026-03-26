@@ -22,7 +22,7 @@ class PurchaseRepository extends Repository {
         ...updates,
         $push: { statusHistory: statusEntry },
       },
-      { new: true, ...(session ? { session } : {}) }
+      { returnDocument: 'after', ...(session ? { session } : {}) }
     ).lean();
   }
 
@@ -34,7 +34,7 @@ class PurchaseRepository extends Repository {
         $push: { transactionIds: transactionId },
         ...paymentUpdate,
       },
-      { new: true, ...(session ? { session } : {}) }
+      { returnDocument: 'after', ...(session ? { session } : {}) }
     ).lean();
   }
 }

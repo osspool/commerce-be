@@ -1,221 +1,203 @@
-# Authentication API Guide
+# Authentication & Branch Management — Better Auth
 
-Quick reference for implementing authentication, user registration, and profile management.
+Quick reference for authentication, organization (branch) management, and user profiles.
 
-> **Architecture Note:** User model handles auth only (email, password, roles). Profile data (addresses, phone) lives in Customer model. On registration, user is auto-linked to existing Customer (by email) or a new one is created.
+> **Stack:** Better Auth 1.5.6 with bearer tokens, organization plugin (branches = orgs), admin plugin.
+> Auth routes are at `/api/auth/*` (managed by Better Auth). User CRUD is at `/api/v1/users/*`.
 
 ---
 
 ## Authentication Flow
 
 ```
-1. Register  → POST /api/v1/auth/register (creates user + customer)
-2. Login     → POST /api/v1/auth/login (returns JWT tokens)
+1. Sign Up   → POST /api/auth/sign-up/email    (creates user + session)
+2. Sign In   → POST /api/auth/sign-in/email    (returns bearer token)
 3. Use API   → Include Authorization: Bearer <token> header
-4. Refresh   → POST /api/v1/auth/refresh (when token expires)
+4. Session   → GET  /api/auth/get-session       (validate token, get user)
+5. Sign Out  → POST /api/auth/sign-out          (invalidate session)
 ```
+
+Better Auth manages sessions automatically — no manual token refresh needed.
 
 ---
 
-## Public Endpoints
+## Auth Endpoints (Better Auth)
 
-### Register
-
-```http
-POST /api/v1/auth/register
-```
-
-**Request:**
-```json
-{
-  "name": "John Doe",
-  "email": "john@example.com",
-  "password": "securePass123"
-}
-```
-
-**Response (201):**
-```json
-{
-  "success": true,
-  "message": "User registered successfully"
-}
-```
-
-**Validation:**
-| Field | Required | Notes |
-|-------|----------|-------|
-| `name` | Yes | Min 1 character |
-| `email` | Yes | Valid email format |
-| `password` | Yes | Min 6 characters |
-
-**Errors:**
-| Status | Message |
-|--------|---------|
-| 400 | User already exists |
-
----
-
-### Login
+### Sign Up
 
 ```http
-POST /api/v1/auth/login
-```
+POST /api/auth/sign-up/email
+Content-Type: application/json
 
-**Request:**
-```json
-{
-  "email": "john@example.com",
-  "password": "securePass123"
-}
+{ "name": "John Doe", "email": "john@example.com", "password": "securePass123" }
 ```
 
 **Response (200):**
 ```json
 {
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "token": "session-token-string",
   "user": {
     "id": "user_id",
     "name": "John Doe",
     "email": "john@example.com",
-    "roles": ["user"],
-    "branch": {
-      "branchId": "branch_id",
-      "branchCode": "HQ",
-      "branchName": "Head Office",
-      "branchRole": "head_office",
-      "roles": ["branch_manager"]
-    },
-    "branchIds": ["branch_id"],
-    "branches": [...],
-    "isAdmin": false,
-    "isWarehouseStaff": false
+    "emailVerified": false,
+    "role": ["user"],
+    "isActive": true,
+    "createdAt": "2026-03-26T..."
   }
 }
 ```
 
-**Errors:**
-| Status | Message |
-|--------|---------|
-| 401 | Invalid email or password |
-| 401 | Account is disabled |
-
----
-
-### Refresh Token
+### Sign In
 
 ```http
-POST /api/v1/auth/refresh
+POST /api/auth/sign-in/email
+Content-Type: application/json
+
+{ "email": "john@example.com", "password": "securePass123" }
 ```
 
-**Request:**
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIs..."
-}
+**Response (200):** Same shape as sign-up.
+
+### Get Session
+
+```http
+GET /api/auth/get-session
+Authorization: Bearer <token>
 ```
 
 **Response (200):**
 ```json
 {
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIs..."
+  "session": {
+    "id": "session_id",
+    "userId": "user_id",
+    "token": "session-token",
+    "expiresAt": "2026-04-02T...",
+    "activeOrganizationId": "org_id_or_null"
+  },
+  "user": {
+    "id": "user_id",
+    "name": "John Doe",
+    "email": "john@example.com",
+    "role": ["user"],
+    "isActive": true
+  }
 }
 ```
 
-**Errors:**
-| Status | Message |
-|--------|---------|
-| 401 | Refresh token required |
-| 401 | Invalid or expired refresh token |
-| 401 | Account is disabled |
-
----
-
-### Forgot Password
+### Password Reset
 
 ```http
-POST /api/v1/auth/forgot-password
+POST /api/auth/forget-password
+Content-Type: application/json
+
+{ "email": "john@example.com", "redirectTo": "https://yourapp.com/reset-password" }
 ```
 
-**Request:**
-```json
-{
-  "email": "john@example.com"
-}
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "message": "Password reset email sent"
-}
-```
-
-**Notes:**
-- Sends email with reset link: `{FRONTEND_URL}/reset-password?token=xxx`
-- Token expires in 1 hour
-
-**Errors:**
-| Status | Message |
-|--------|---------|
-| 404 | User not found |
-
----
-
-### Reset Password
+User receives email with link. Then:
 
 ```http
-POST /api/v1/auth/reset-password
+POST /api/auth/reset-password
+Content-Type: application/json
+
+{ "token": "token-from-email", "newPassword": "newSecurePass456" }
 ```
 
-**Request:**
-```json
-{
-  "token": "abc123...",
-  "newPassword": "newSecurePass456"
-}
+### Change Password (authenticated)
+
+```http
+POST /api/auth/change-password
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "currentPassword": "oldPass", "newPassword": "newPass" }
 ```
 
-**Response (200):**
-```json
-{
-  "success": true,
-  "message": "Password has been reset"
-}
+### Sign Out
+
+```http
+POST /api/auth/sign-out
+Authorization: Bearer <token>
 ```
 
-**Validation:**
-| Field | Required | Notes |
-|-------|----------|-------|
-| `token` | Yes | From reset email |
-| `newPassword` | Yes | Min 6 characters |
+### Health Check
 
-**Errors:**
-| Status | Message |
-|--------|---------|
-| 400 | Invalid or expired token |
+```http
+GET /api/auth/ok
+→ { "ok": true }
+```
 
 ---
 
-## Authenticated Endpoints
+## Organization (Branch) Endpoints
 
-All endpoints below require: `Authorization: Bearer <token>`
+Branches are Better Auth organizations. Each branch has members with roles.
+
+### List Organizations (branches user belongs to)
+
+```http
+GET /api/auth/organization/list
+Authorization: Bearer <token>
+```
+
+**Response:** Array of organizations the user is a member of.
+
+### Create Organization (branch)
+
+```http
+POST /api/auth/organization/create
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "name": "Dhaka Store", "slug": "dhaka-store" }
+```
+
+After creation, set branch metadata via the Branch API (`PATCH /api/v1/branches/:id`).
+
+### Set Active Organization (switch branch)
+
+```http
+POST /api/auth/organization/set-active
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "organizationId": "org_id" }
+```
+
+This sets the active branch for the session. Subsequent API calls scoped by `x-organization-id` header will use this branch.
+
+### Invite Member to Branch
+
+```http
+POST /api/auth/organization/invite-member
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "email": "staff@example.com", "role": "cashier" }
+```
+
+Sends invitation email. Invitee accepts at `/accept-invitation/:id`.
+
+### List Members
+
+```http
+GET /api/auth/organization/list-members
+Authorization: Bearer <token>
+```
 
 ---
 
-### Get Current User Profile
+## User Profile Endpoints
+
+### Get Profile
 
 ```http
 GET /api/v1/users/me
 Authorization: Bearer <token>
 ```
 
-**Response (200):**
+**Response:**
 ```json
 {
   "success": true,
@@ -223,331 +205,208 @@ Authorization: Bearer <token>
     "id": "user_id",
     "name": "John Doe",
     "email": "john@example.com",
-    "roles": ["user"],
+    "role": ["user"],
+    "phone": "+8801700000000",
     "isActive": true,
-    "lastLoginAt": "2025-12-21T10:00:00.000Z",
-    "createdAt": "2025-01-15T08:30:00.000Z"
+    "createdAt": "2026-01-15T..."
   }
 }
 ```
 
----
-
-### Update Current User Profile
+### Update Profile
 
 ```http
 PATCH /api/v1/users/me
 Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "name": "John Updated" }
 ```
 
-**Request:**
-```json
-{
-  "name": "John Updated",
-  "email": "john.new@example.com"
-}
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "message": "User updated successfully",
-  "data": {
-    "id": "user_id",
-    "name": "John Updated",
-    "email": "john.new@example.com",
-    "roles": ["user"]
-  }
-}
-```
-
-**Allowed Fields:**
-| Field | Type | Notes |
-|-------|------|-------|
-| `name` | string | Min 1 character |
-| `email` | string | Valid email format |
-
-> **Note:** For addresses and phone, use the Customer API.
-
-**Errors:**
-| Status | Message |
-|--------|---------|
-| 400 | Email already exists |
-| 400 | Validation error |
-
----
-
-### Get User Organizations
+### Branch List (via resource API)
 
 ```http
-GET /api/v1/auth/organizations
+GET /api/v1/branches
 Authorization: Bearer <token>
 ```
 
-**Response (200):**
-```json
-{
-  "success": true,
-  "data": [...]
-}
-```
+Returns all branches from the `organization` collection. Each branch has:
+`_id`, `name`, `slug`, `code`, `branchType`, `branchRole`, `isDefault`, `isActive`
 
 ---
 
-## Token Management
+## Branch Scoping
 
-### JWT Token Structure
+All resource APIs (inventory, orders, transfers, POS) can be scoped to a branch:
 
-The access token contains:
-```json
-{
-  "id": "user_id",
-  "name": "John Doe",
-  "email": "john@example.com",
-  "roles": ["user"],
-  "organizations": []
-}
+```http
+GET /api/v1/stock?limit=20
+Authorization: Bearer <token>
+x-organization-id: <branch_id>
 ```
 
-### Token Expiry
+The `x-organization-id` header tells the backend which branch to scope queries to.
+Arc's `orgContext` middleware reads this and injects it into the request scope.
 
-- **Access Token:** Configured via `JWT_EXPIRES_IN` env variable
-- **Refresh Token:** Configured via `JWT_REFRESH_EXPIRES_IN` env variable
-
-### Frontend Implementation
-
-```javascript
-// Store tokens after login
-const { token, refreshToken } = await login(email, password);
-localStorage.setItem('token', token);
-localStorage.setItem('refreshToken', refreshToken);
-
-// Use token in requests
-const headers = {
-  'Authorization': `Bearer ${localStorage.getItem('token')}`,
-  'Content-Type': 'application/json'
-};
-
-// Refresh when token expires (401 response)
-async function refreshAccessToken() {
-  const response = await fetch('/api/v1/auth/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: localStorage.getItem('refreshToken') })
-  });
-
-  if (response.ok) {
-    const { token, refreshToken } = await response.json();
-    localStorage.setItem('token', token);
-    localStorage.setItem('refreshToken', refreshToken);
-    return token;
-  }
-
-  // Refresh failed - redirect to login
-  localStorage.clear();
-  window.location.href = '/login';
-}
-```
+Superadmin users bypass branch scoping (elevation) and see all data.
 
 ---
 
-## User Roles
+## Roles
 
-### System-Level Roles
+### System-Level Roles (user.role)
 
 | Role | Description |
 |------|-------------|
 | `user` | Default role for customers |
 | `admin` | Full system access |
-| `superadmin` | Super administrator |
-| `finance-admin` | Finance admin (approvals, reporting, adjustments) |
+| `superadmin` | Super administrator (bypasses branch scoping) |
+| `finance-admin` | Finance admin |
 | `finance-manager` | Financial operations |
 | `store-manager` | Store management |
-| `warehouse-admin` | Warehouse admin (transfers, purchasing, approvals) |
+| `store-staff` | Store operations |
+| `warehouse-admin` | Warehouse admin |
 | `warehouse-staff` | Warehouse operations |
 
-### Branch-Level Roles
+### Branch-Level Roles (organization member role)
 
-| Role | Key | Description |
-|------|-----|-------------|
-| Branch Manager | `branch_manager` | Full branch control |
-| Inventory Staff | `inventory_staff` | Stock operations (receive, adjust, request) |
-| Cashier | `cashier` | POS operations only |
-| Stock Receiver | `stock_receiver` | Receive transfers only |
-| Stock Requester | `stock_requester` | Can request stock from head office |
-| Viewer | `viewer` | Read-only access |
+| Role | Description |
+|------|-------------|
+| `branch_manager` | Full branch control |
+| `inventory_staff` | Stock operations (receive, adjust, request) |
+| `cashier` | POS operations only |
+| `stock_receiver` | Receive transfers only |
+| `stock_requester` | Request stock from head office |
+| `viewer` | Read-only access |
+
+---
+
+## Environment Variables
+
+### Backend (.env)
+
+```env
+BETTER_AUTH_SECRET=<min-32-chars>          # Required
+BETTER_AUTH_URL=http://localhost:8050       # Backend URL
+MONGO_URI=mongodb+srv://...               # MongoDB connection
+FRONTEND_URL=http://localhost:3000         # For password reset emails
+```
+
+### Frontend (.env)
+
+```env
+BETTER_AUTH_SECRET=<same-as-backend>
+NEXT_PUBLIC_API_URL=http://localhost:8050
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+---
+
+## Frontend Integration
+
+### Better Auth Client (bearer token mode)
+
+```typescript
+// app/(auth)/_lib/client.ts
+import { createAuthClient } from "better-auth/react";
+import { organizationClient, adminClient } from "better-auth/client/plugins";
+
+const TOKEN_KEY = "bigboss:auth-token";
+
+export const authClient = createAuthClient({
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  fetchOptions: {
+    auth: { type: "Bearer", token: () => getAuthToken() ?? undefined },
+    onSuccess(ctx) {
+      const data = ctx.data as { session?: { token?: string } };
+      if (data?.session?.token) setAuthToken(data.session.token);
+    },
+  },
+  plugins: [adminClient(), organizationClient({ ac, roles: { ... } })],
+});
+
+// Sign in
+await authClient.signIn.email({ email, password });
+
+// Sign out
+await authClient.signOut();
+
+// Get session (React hook)
+const { data: session } = useSession();
+
+// List branches
+const { data: orgs } = useListOrganizations();
+
+// Switch branch
+await authClient.organization.setActive({ organizationId: branchId });
+```
+
+### Commerce SDK (auto-injects bearer token)
+
+```typescript
+// components/providers/Providers.jsx
+import { configureSDK } from "@classytic/commerce-sdk";
+import { getAuthToken } from "@/app/(auth)/_lib/client";
+
+configureSDK({
+  baseUrl: process.env.NEXT_PUBLIC_API_URL,
+  getToken: () => getAuthToken(),  // Auto-injected on every API call
+});
+```
+
+All SDK API calls (products, orders, inventory, media, etc.) automatically include the bearer token. No explicit `token` parameter needed.
 
 ---
 
 ## TypeScript Types
 
 ```typescript
-// Login request
-interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-// Login response
-interface LoginResponse {
-  success: true;
-  token: string;
-  refreshToken: string;
-  user: {
-    id: string;
-    name: string;
-    email: string;
-    roles: string[];
-    branch?: {
-      branchId: string;
-      branchCode: string;
-      branchName: string;
-      branchRole: 'head_office' | 'sub_branch';
-      roles: string[];
-    };
-    branchIds: string[];
-    branches: BranchAssignment[];
-    isAdmin: boolean;
-    isWarehouseStaff: boolean;
-  };
-}
-
-// Register request
-interface RegisterRequest {
-  name: string;
-  email: string;
-  password: string;
-}
-
-// User profile
-interface UserProfile {
+// User (from Better Auth + custom fields)
+interface User {
   id: string;
   name: string;
   email: string;
-  roles: string[];
-  isActive: boolean;
-  lastLoginAt?: string;
+  emailVerified: boolean;
+  role?: string[];       // System-level roles
+  phone?: string;
+  isActive?: boolean;
+  image?: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
-// Update profile request
-interface UpdateProfileRequest {
-  name?: string;
-  email?: string;
-}
-
-// Branch assignment
-interface BranchAssignment {
-  branchId: string;
-  branchCode: string;
-  branchName: string;
-  branchRole: 'head_office' | 'sub_branch';
-  roles: string[];
-  isPrimary: boolean;
-  assignedAt: string;
+// Session
+interface Session {
+  session: {
+    id: string;
+    userId: string;
+    token: string;
+    expiresAt: string;
+    activeOrganizationId?: string;
+  };
+  user: User;
 }
 
 // System roles
-type SystemRole = 'user' | 'admin' | 'superadmin' | 'finance-admin' | 'finance-manager' | 'store-manager' | 'warehouse-admin' | 'warehouse-staff';
+type SystemRole = 'user' | 'admin' | 'superadmin' | 'finance-admin' | 'finance-manager'
+  | 'store-manager' | 'store-staff' | 'warehouse-admin' | 'warehouse-staff';
 
-// Branch roles
-type BranchRole = 'branch_manager' | 'inventory_staff' | 'cashier' | 'stock_receiver' | 'stock_requester' | 'viewer';
+// Branch roles (organization member roles)
+type BranchRole = 'branch_manager' | 'inventory_staff' | 'cashier'
+  | 'stock_receiver' | 'stock_requester' | 'viewer';
 ```
 
 ---
 
-## Error Response Shape
+## Migration Scripts
 
-All error responses follow this format:
+```bash
+# Migrate existing branches to BA organizations (preserves _id)
+npm run migrate:branches
 
-```json
-{
-  "success": false,
-  "message": "Error description"
-}
-```
+# Migrate existing users to BA (default password: bigboss@2026)
+npm run migrate:users
 
-For validation errors:
-```json
-{
-  "success": false,
-  "message": "Validation error",
-  "errors": ["Email is required", "Password must be at least 6 characters"]
-}
-```
-
----
-
-## Complete Flow Example
-
-**1. Register a new user:**
-```javascript
-const registerResponse = await fetch('/api/v1/auth/register', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    name: 'Jane Smith',
-    email: 'jane@example.com',
-    password: 'securePass123'
-  })
-});
-// { success: true, message: "User registered successfully" }
-```
-
-**2. Login:**
-```javascript
-const loginResponse = await fetch('/api/v1/auth/login', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email: 'jane@example.com',
-    password: 'securePass123'
-  })
-});
-const { token, refreshToken, user } = await loginResponse.json();
-
-// Store tokens
-localStorage.setItem('token', token);
-localStorage.setItem('refreshToken', refreshToken);
-```
-
-**3. Get profile:**
-```javascript
-const profileResponse = await fetch('/api/v1/users/me', {
-  headers: { 'Authorization': `Bearer ${token}` }
-});
-const { data: profile } = await profileResponse.json();
-```
-
-**4. Update profile:**
-```javascript
-const updateResponse = await fetch('/api/v1/users/me', {
-  method: 'PATCH',
-  headers: {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({ name: 'Jane Updated' })
-});
-```
-
-**5. Password reset flow:**
-```javascript
-// Request reset email
-await fetch('/api/v1/auth/forgot-password', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: 'jane@example.com' })
-});
-
-// User clicks link in email, then:
-await fetch('/api/v1/auth/reset-password', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    token: 'token_from_email_link',
-    newPassword: 'newSecurePass456'
-  })
-});
+# Seed fresh admin + branches (for new installs)
+npm run seed:auth
 ```

@@ -10,7 +10,7 @@
  */
 function canManageCostPrice(user) {
   if (!user) return false;
-  const roles = user.roles || [];
+  const roles = user.role || [];
   return roles.includes('admin') || roles.includes('superadmin') || roles.includes('finance-manager');
 }
 

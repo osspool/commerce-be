@@ -9,15 +9,17 @@
  * - Graceful shutdown
  */
 import './config/env-loader.js';
-import { createApp } from '@classytic/arc';
+import { createApp } from '@classytic/arc/factory';
+import { createBetterAuthAdapter } from '@classytic/arc/auth';
 import closeWithGrace from 'close-with-grace';
 import config from './config/index.js';
 import logger from '#lib/utils/logger.js';
-import { eventPlugin } from '@classytic/arc/events';
 import { eventTransport } from '#lib/events/EventBus.js';
 import { setEventApi } from '#lib/events/arcEvents.js';
 import registerCorePlugins from '#core/plugins/register-core-plugins.js';
 import setupFastifyDocs from './config/fastify-docs.js';
+import { registerResourceHooks } from '#shared/hooks.js';
+import { getAuth } from '#modules/auth/auth.config.js';
 
 // Routes and plugins
 import erpRoutes from './routes/erp.index.js';
@@ -53,25 +55,47 @@ async function createApplication() {
     // Environment preset (production/development/testing)
     preset: getPreset(),
 
-    // Authentication
+    // Authentication — Better Auth with branch-as-organization
     auth: {
-      jwt: {
-        secret: config.app.jwtSecret,
-        expiresIn: config.app.jwtExpiresIn,
-        refreshSecret: config.app.jwtRefresh,
-        refreshExpiresIn: config.app.jwtRefreshExpiresIn,
-      },
+      type: 'betterAuth',
+      betterAuth: createBetterAuthAdapter({
+        auth: getAuth(),
+        orgContext: true, // Enables automatic branch scoping via x-organization-id
+      }),
     },
 
     // Security (override preset defaults)
-    cors: config.cors,
+    cors: {
+      ...config.cors,
+      allowedHeaders: [
+        ...(config.cors.allowedHeaders || ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']),
+        'x-organization-id',
+        'x-arc-scope',
+      ],
+    },
     rateLimit: {
       max: config.rateLimit.max,
       timeWindow: `${config.rateLimit.windowMs}ms`,
     },
 
-    // Disable Arc's built-in compression - we'll register it manually in correct order
-    compression: false,
+    // Use our own error handler (handles Mongoose, JWT, MongoDB errors)
+    errorHandler: false,
+
+    // Superadmin elevation (centralizes platform-level access bypass)
+    elevation: {
+      platformRoles: ['superadmin'],
+    },
+
+    // Arc-managed event system with shared transport
+    stores: {
+      events: eventTransport,
+    },
+    arcPlugins: {
+      events: {
+        logEvents: !config.isProduction,
+      },
+      queryCache: true, // In-memory SWR cache for read-heavy resources
+    },
 
     plugins: async (fastify) => {
       // ============================================
@@ -80,28 +104,28 @@ async function createApplication() {
       await fastify.register(mongoosePlugin);
 
       // ============================================
-      // ARC EVENTS (shared in-memory transport)
+      // ARC EVENTS — Wire arcEvents.js to use Arc's managed event API
+      // (eventPlugin is registered by Arc via stores.events + arcPlugins.events)
       // ============================================
-      await fastify.register(eventPlugin, { transport: eventTransport });
       setEventApi(fastify.events);
 
       // ============================================
-      // CORE PLUGINS (custom utilities and schemas)
+      // CORE PLUGINS (custom error handler)
       // ============================================
       await fastify.register(registerCorePlugins);
 
       // ============================================
-      // COMPRESSION - Disabled (let reverse proxy handle it)
+      // IDEMPOTENCY (prevent duplicate mutations)
       // ============================================
-      // @fastify/compress v8.x has known issues with Fastify 5.x
-      // causing "premature close" errors. In production, nginx/cloudflare
-      // handles compression more efficiently anyway.
-      //
-      // To re-enable (if needed):
-      // const compress = (await import('@fastify/compress')).default;
-      // await fastify.register(compress, { global: true, threshold: 1024 });
-      
-      fastify.log.info('ℹ️  Compression disabled (use reverse proxy in production)');
+      if (config.isProduction) {
+        const { idempotencyPlugin } = await import('@classytic/arc/idempotency');
+        await fastify.register(idempotencyPlugin, {
+          enabled: true,
+          headerName: 'idempotency-key',
+          ttlMs: 86400000, // 24h
+          methods: ['POST', 'PUT', 'PATCH'],
+        });
+      }
 
       // ============================================
       // DOCS (OpenAPI + Scalar UI)
@@ -133,6 +157,11 @@ async function createApplication() {
       // API ROUTES (ERP Structure)
       // ============================================
       await fastify.register(erpRoutes, { prefix: '/api/v1' });
+
+      // ============================================
+      // ARC RESOURCE HOOKS (after routes are registered)
+      // ============================================
+      registerResourceHooks(fastify);
 
       // ============================================
       // BACKGROUND JOB QUEUE (inline mode only)

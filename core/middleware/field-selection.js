@@ -42,7 +42,7 @@ export const getFieldsForUser = (user, preset) => {
     fields.push(...(preset.authenticated || []));
 
     // Add admin fields if user is admin/superadmin
-    const roles = Array.isArray(user.roles) ? user.roles : (user.roles ? [user.roles] : []);
+    const roles = Array.isArray(user.role) ? user.role : (user.role ? [user.role] : []);
     if (roles.includes('admin') || roles.includes('superadmin')) {
       fields.push(...(preset.admin || []));
     }

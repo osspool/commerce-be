@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
 import { createActionRouter } from '@classytic/arc/core';
 import { transferController, transferSchemas } from './transfer/index.js';
 import { purchaseController, purchaseSchemas } from './purchase/index.js';
@@ -17,10 +18,7 @@ const supplierResource = defineResource({
   tag: 'Inventory - Suppliers',
   prefix: '/inventory/suppliers',
 
-  adapter: createMongooseAdapter({
-    model: Supplier,
-    repository: supplierRepository,
-  }),
+  adapter: createAdapter(Supplier, supplierRepository),
   controller: supplierController,
   schemaOptions: supplierSchemaOptions,
   customSchemas: {

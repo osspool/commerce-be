@@ -5,15 +5,20 @@
  * 150 lines → 80 lines with presets!
  */
 
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
-import { allowPublic } from '@classytic/arc/permissions';
+import { defineResource } from '@classytic/arc';
+import { allowPublic, fields } from '@classytic/arc/permissions';
+import { createAdapter } from '#shared/adapter.js';
+import { getResourcePermissions } from '#shared/permissions.js';
+import { softDelete, slugLookup } from '#shared/presets.js';
 import { queryParser } from '#shared/query-parser.js';
 import Product from './product.model.js';
 import productRepository from './product.repository.js';
 import productController from './product.controller.js';
 import permissions from '#config/permissions.js';
 import { productSchemaOptions } from './product.schemas.js';
-import { costPriceFilterMiddleware, stripCostPriceMiddleware } from '#shared/middleware/cost-price-filter.js';
+// costPriceFilterMiddleware replaced by Arc field-level permissions (fields.visibleTo)
+// Kept for recommendations additionalRoute preHandler (non-CRUD context)
+import { costPriceFilterMiddleware } from '#shared/middleware/cost-price-filter.js';
 
 const productResource = defineResource({
   name: 'product',
@@ -21,27 +26,33 @@ const productResource = defineResource({
   tag: 'Products',
   prefix: '/products',
 
-  adapter: createMongooseAdapter({
-    model: Product,
-    repository: productRepository,
-  }),
+  adapter: createAdapter(Product, productRepository),
   controller: productController,
   queryParser,
 
   // Presets add: /slug/:slug, /deleted, /:id/restore routes automatically
-  presets: ['softDelete', 'slugLookup'],
+  presets: [softDelete, slugLookup],
 
   schemaOptions: productSchemaOptions,
 
-  permissions: permissions.products,
+  // SWR cache for read-heavy product catalog
+  cache: {
+    staleTime: 15,  // 15s fresh
+    gcTime: 120,    // 2min stale-while-revalidate
+    tags: ['products'],
+  },
 
-  // Cost price filtering middleware - now centralized
-  middlewares: {
-    list: [costPriceFilterMiddleware],
-    get: [costPriceFilterMiddleware],
-    create: [stripCostPriceMiddleware],
-    update: [stripCostPriceMiddleware],
-    deleted: [costPriceFilterMiddleware],
+  // Field-level permissions (replaces costPriceFilterMiddleware for CRUD routes)
+  fields: {
+    costPrice: fields.visibleTo(['admin', 'superadmin', 'finance-manager']),
+    'variants.costPrice': fields.visibleTo(['admin', 'superadmin', 'finance-manager']),
+  },
+
+  permissions: {
+    ...getResourcePermissions('product'),
+    deleted: permissions.products.deleted,
+    restore: permissions.products.restore,
+    syncStock: permissions.products.syncStock,
   },
 
   // Only custom routes - presets handle softDelete and slugLookup

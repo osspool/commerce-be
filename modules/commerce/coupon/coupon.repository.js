@@ -34,7 +34,7 @@ class CouponRepository extends Repository {
     return this.Model.findByIdAndUpdate(
       couponId,
       { $inc: { usedCount: 1 } },
-      { new: true }
+      { returnDocument: 'after' }
     );
   }
 }

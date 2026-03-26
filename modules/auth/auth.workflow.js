@@ -1,241 +1,54 @@
-import crypto from 'crypto';
 import { createError } from '@fastify/error';
+import mongoose from 'mongoose';
 import userRepository from './user.repository.js';
 import customerRepository from '#modules/sales/customers/customer.repository.js';
-import { generateTokens } from '#utils/generateToken.js';
-import { sendEmail } from '#utils/email.js';
 
-const ValidationError = createError('VALIDATION_ERROR', '%s', 400);
-const UnauthorizedError = createError('UNAUTHORIZED', '%s', 401);
 const NotFoundError = createError('NOT_FOUND', '%s', 404);
 
 /**
- * Auth Workflows
- * 
- * Business logic for authentication.
- * User model is auth-only (email, password, roles).
- * Profile data (addresses, phone) lives in Customer model.
- * 
- * On registration: Auto-links to existing Customer (by email) or creates new one.
+ * Auth Workflows (Better Auth era)
+ *
+ * Better Auth handles: sign-in, sign-up, password reset/change, token refresh, OAuth.
+ * This module provides supplementary business logic for user management.
  */
+
+function isValidObjectId(id) {
+  return id && mongoose.Types.ObjectId.isValid(id);
+}
 
 /**
- * Register new user
- * Auto-links to existing Customer if email matches (e.g., from guest checkout)
- * 
- * @param {Object} data - User registration data
- * @param {string} data.name - User name
- * @param {string} data.email - User email
- * @param {string} data.password - User password
- * @param {string} [data.phone] - User phone (optional, format: 01XXXXXXXXX)
- * @returns {Promise<Object>} Created user with linked customer
+ * Auto-link a new user to Customer model.
+ * Called from BA's databaseHooks.user.create.after
  */
-export async function registerUser({ name, email, password, phone }) {
-  // Check if user already exists
-  const exists = await userRepository.emailExists(email);
-  if (exists) {
-    throw new ValidationError('User already exists');
-  }
-
-  // Create user (password will be hashed by model hook)
-  const user = await userRepository.create({
-    name,
-    email: email.toLowerCase().trim(),
-    password,
-    phone: phone?.trim() || undefined,
-    roles: ['user'],
-  });
-
-  // Auto-link or create customer profile
-  // This links to existing customer (from guest checkout) or creates new one
+export async function linkCustomerOnRegistration(user) {
   try {
-    await customerRepository.linkOrCreateForUser(user);
+    await customerRepository.linkOrCreateForUser({
+      _id: user.id,
+      name: user.name,
+      email: user.email,
+    });
   } catch (error) {
-    // Log but don't fail registration if customer linking fails
-    console.error('Failed to link customer on registration:', error.message);
+    console.error('[auth] Failed to link customer on registration:', error.message);
   }
-
-  return user;
-}
-
-/**
- * Login user
- * @param {Object} credentials - Login credentials
- * @param {string} credentials.email - User email
- * @param {string} credentials.password - User password
- * @returns {Promise<Object>} { token, refreshToken, expiresIn, refreshExpiresIn, user }
- */
-export async function loginUser({ email, password }) {
-  // Find user by email (include password for verification)
-  const user = await userRepository.findByEmail(email);
-
-  if (!user) {
-    throw new UnauthorizedError('Invalid email or password');
-  }
-
-  // Check if account is active
-  if (user.isActive === false) {
-    throw new UnauthorizedError('Account is disabled');
-  }
-
-  // Verify password (using model method)
-  const isValid = await user.matchPassword(password);
-  if (!isValid) {
-    throw new UnauthorizedError('Invalid email or password');
-  }
-
-  // Update last login
-  user.lastLoginAt = new Date();
-  await user.save();
-
-  // Generate tokens
-  const { token, refreshToken, expiresIn, refreshExpiresIn } = generateTokens(user);
-
-  // Get primary branch
-  const primaryBranch = user.getPrimaryBranch?.();
-  const branchData = primaryBranch ? {
-    branchId: primaryBranch.branchId?.toString?.() || primaryBranch.branchId,
-    branchCode: primaryBranch.branchCode,
-    branchName: primaryBranch.branchName,
-    branchRole: primaryBranch.branchRole,
-    roles: primaryBranch.roles || [],
-  } : null;
-
-  // Map branches array with consistent structure for dashboard/branch switching
-  const branches = (user.branches || []).map(b => ({
-    branchId: b.branchId?.toString?.() || b.branchId,
-    branchCode: b.branchCode,
-    branchName: b.branchName,
-    branchRole: b.branchRole,
-    roles: b.roles || [],
-    isPrimary: b.isPrimary || false,
-  }));
-
-  // Build user response
-  const userData = {
-    id: user._id,
-    name: user.name,
-    email: user.email,
-    roles: user.roles,
-    // Branch info
-    branch: branchData,             // Primary/active branch
-    branches,                       // All assigned branches with roles
-    branchIds: user.getBranchIds?.() || [],
-    // Employee flags
-    isAdmin: user.isAdmin?.() || false,
-    isWarehouseStaff: user.isWarehouseStaff?.() || false,
-  };
-
-  return { token, refreshToken, expiresIn, refreshExpiresIn, user: userData };
-}
-
-/**
- * Refresh access token
- * @param {string} userId - User ID from decoded refresh token
- * @returns {Promise<Object>} { token, refreshToken, expiresIn, refreshExpiresIn }
- */
-export async function refreshAccessToken(userId) {
-  const user = await userRepository.getById(userId);
-
-  if (!user) {
-    throw new UnauthorizedError('Invalid refresh token');
-  }
-
-  if (user.isActive === false) {
-    throw new UnauthorizedError('Account is disabled');
-  }
-
-  const { token, refreshToken, expiresIn, refreshExpiresIn } = generateTokens(user);
-
-  return { token, refreshToken, expiresIn, refreshExpiresIn };
-}
-
-/**
- * Request password reset
- * @param {string} email - User email
- * @returns {Promise<void>}
- */
-export async function requestPasswordReset(email) {
-  const user = await userRepository.findByEmail(email);
-
-  if (!user) {
-    throw new NotFoundError('User not found');
-  }
-
-  // Generate reset token
-  const token = crypto.randomBytes(20).toString('hex');
-  const expiresAt = new Date(Date.now() + 3600000); // 1 hour
-
-  // Save token to user
-  await userRepository.setResetToken(user._id, token, expiresAt);
-
-  // Send reset email
-  const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
-
-  const htmlTemplate = `
-    <h2>Password Reset Request</h2>
-    <p>You requested a password reset. Click the link below to reset your password:</p>
-    <p><a href="${resetLink}">Reset Password</a></p>
-    <p>This link will expire in 1 hour.</p>
-    <p>If you didn't request this, please ignore this email.</p>
-    <p>Thank you!</p>
-  `;
-
-  const textVersion = `
-    Password Reset Request
-
-    You requested a password reset. Click the following link to reset your password:
-    ${resetLink}
-
-    This link will expire in 1 hour.
-
-    If you didn't request this, please ignore this email.
-
-    Thank you!
-  `;
-
-  await sendEmail({
-    to: email,
-    subject: 'Password Reset Request',
-    text: textVersion,
-    html: htmlTemplate,
-  });
-}
-
-/**
- * Reset password with token
- * @param {string} token - Password reset token
- * @param {string} newPassword - New password
- * @returns {Promise<void>}
- */
-export async function resetPassword(token, newPassword) {
-  const user = await userRepository.findByResetToken(token);
-
-  if (!user) {
-    throw new ValidationError('Invalid or expired token');
-  }
-
-  // Update password (model hook will hash it)
-  await userRepository.updatePassword(user._id, newPassword);
 }
 
 /**
  * Get user profile (auth info only)
- * @param {string} userId - User ID
- * @returns {Promise<Object>} User profile
  */
 export async function getUserProfile(userId) {
-  const user = await userRepository.getById(userId);
-
-  if (!user) {
-    throw new NotFoundError('User not found');
+  if (!isValidObjectId(userId)) {
+    throw new NotFoundError('Invalid user ID');
   }
+
+  const user = await userRepository.getById(userId);
+  if (!user) throw new NotFoundError('User not found');
 
   return {
     id: user._id,
     name: user.name,
     email: user.email,
-    roles: user.roles,
+    role: user.role,
+    phone: user.phone,
     isActive: user.isActive,
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
@@ -244,22 +57,28 @@ export async function getUserProfile(userId) {
 
 /**
  * Update user profile (auth fields only)
- * @param {string} userId - User ID
- * @param {Object} updates - Profile updates (name, email only)
- * @returns {Promise<Object>} Updated user
  */
 export async function updateUserProfile(userId, updates) {
-  const { name, email } = updates;
-
-  const user = await userRepository.getById(userId);
-
-  if (!user) {
-    throw new NotFoundError('User not found');
+  if (!isValidObjectId(userId)) {
+    throw new NotFoundError('Invalid user ID');
   }
 
-  // Only allow updating name and email
+  const { name, email } = updates;
+  const user = await userRepository.getById(userId);
+  if (!user) throw new NotFoundError('User not found');
+
   if (name !== undefined) user.name = name;
-  if (email !== undefined) user.email = email.toLowerCase().trim();
+  if (email !== undefined) {
+    const normalizedEmail = email.toLowerCase().trim();
+    if (normalizedEmail !== user.email) {
+      const taken = await userRepository.emailExists(normalizedEmail);
+      if (taken) {
+        const EmailTakenError = createError('EMAIL_TAKEN', '%s', 409);
+        throw new EmailTakenError('Email already in use');
+      }
+      user.email = normalizedEmail;
+    }
+  }
 
   await user.save();
 
@@ -267,66 +86,50 @@ export async function updateUserProfile(userId, updates) {
     id: user._id,
     name: user.name,
     email: user.email,
-    roles: user.roles,
+    role: user.role,
   };
 }
 
 /**
- * Change password (requires current password)
- * @param {string} userId - User ID
- * @param {string} currentPassword - Current password
- * @param {string} newPassword - New password
- */
-export async function changePassword(userId, currentPassword, newPassword) {
-  const user = await userRepository.findByIdWithPassword(userId);
-
-  if (!user) {
-    throw new NotFoundError('User not found');
-  }
-
-  // Verify current password
-  const isValid = await user.matchPassword(currentPassword);
-  if (!isValid) {
-    throw new ValidationError('Current password is incorrect');
-  }
-
-  // Update password
-  await userRepository.updatePassword(userId, newPassword);
-}
-
-/**
- * Get user organizations (branches)
- * @param {string} userId - User ID
- * @returns {Promise<Array>} List of organizations/branches user has access to
+ * Get user organizations (branches) — reads from BA organization + member collections.
  */
 export async function getUserOrganizations(userId) {
-  const user = await userRepository.getById(userId);
-
-  if (!user) {
-    throw new NotFoundError('User not found');
+  if (!isValidObjectId(userId)) {
+    throw new NotFoundError('Invalid user ID');
   }
 
-  // Return branches as organizations
-  const organizations = (user.branches || []).map(b => ({
-    id: b.branchId?.toString?.() || b.branchId,
-    code: b.branchCode,
-    name: b.branchName,
-    role: b.branchRole,
-    roles: b.roles || [],
-    isPrimary: b.isPrimary || false,
-  }));
+  const db = mongoose.connection.getClient().db();
 
-  return organizations;
+  const members = await db.collection('member').find({
+    userId: new mongoose.Types.ObjectId(userId),
+  }).toArray();
+
+  if (!members.length) return [];
+
+  const orgIds = members.map(m => m.organizationId);
+  const orgs = await db.collection('organization').find({
+    _id: { $in: orgIds },
+  }).toArray();
+
+  return orgs.map(org => {
+    const membership = members.find(m => m.organizationId.toString() === org._id.toString());
+    return {
+      id: org._id.toString(),
+      code: org.code,
+      name: org.name,
+      slug: org.slug,
+      branchType: org.branchType,
+      branchRole: org.branchRole,
+      memberRole: membership?.role || 'viewer',
+      isDefault: org.isDefault || false,
+      isActive: org.isActive !== false,
+    };
+  });
 }
 
 export default {
-  registerUser,
-  loginUser,
-  refreshAccessToken,
-  requestPasswordReset,
-  resetPassword,
+  linkCustomerOnRegistration,
   getUserProfile,
   updateUserProfile,
-  changePassword,
   getUserOrganizations,
 };

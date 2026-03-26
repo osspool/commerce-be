@@ -20,7 +20,7 @@ export const productSchemaOptions = {
     allowedPopulate: ['sizeGuide'], // Allow populating size guide reference
     filterableFields: {
       category: { type: 'string' },
-      sizeGuide: { type: 'objectId' },
+      sizeGuide: { type: 'string', pattern: '^[0-9a-fA-F]{24}$' },
       style: { type: 'string' },
       tags: { type: 'string' },
       basePrice: { type: 'number' },

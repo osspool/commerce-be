@@ -9,7 +9,7 @@ function normalizeRoles(userOrRoles) {
   if (!userOrRoles) return [];
   if (Array.isArray(userOrRoles)) return userOrRoles.filter(Boolean);
   if (typeof userOrRoles === 'string') return [userOrRoles];
-  const roles = userOrRoles.roles;
+  const roles = userOrRoles.role;
   if (Array.isArray(roles)) return roles.filter(Boolean);
   if (typeof roles === 'string') return [roles];
   return [];

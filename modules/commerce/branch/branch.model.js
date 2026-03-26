@@ -182,5 +182,10 @@ branchSchema.plugin(slugPlugin, {
   updateOnChange: true,
 });
 
-const Branch = mongoose.models.Branch || mongoose.model('Branch', branchSchema);
+// After BA migration, branches live in the `organization` collection.
+// Register Branch model on `organization` collection so that:
+// 1. ref: 'Branch' in other models resolves to organization docs
+// 2. .populate('branch') works against organization collection
+// 3. All existing branchId ObjectIds are valid (same-ID migration)
+const Branch = mongoose.models.Branch || mongoose.model('Branch', new Schema({}, { strict: false, collection: 'organization' }));
 export default Branch;

@@ -69,7 +69,7 @@ class CMSController extends BaseController {
     const page = await CMSRepository.Model.findOneAndUpdate(
       { slug },
       { $set: updates },
-      { upsert: true, new: true, runValidators: true }
+      { upsert: true, returnDocument: 'after', runValidators: true }
     );
 
     return reply.code(200).send({ success: true, data: page });

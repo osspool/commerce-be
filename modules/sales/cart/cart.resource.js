@@ -1,4 +1,5 @@
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
 import Cart from './cart.model.js';
 import cartRepository from './cart.repository.js';
 import cartController from './cart.controller.js';
@@ -11,10 +12,7 @@ const cartResource = defineResource({
   tag: 'Cart',
   prefix: '/cart',
   
-  adapter: createMongooseAdapter({
-    model: Cart,
-    repository: cartRepository,
-  }),
+  adapter: createAdapter(Cart, cartRepository),
   controller: cartController,
   
   disableDefaultRoutes: true,

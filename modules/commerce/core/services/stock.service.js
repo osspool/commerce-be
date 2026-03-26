@@ -288,7 +288,7 @@ class StockService {
             $expr: { $gte: ['$quantity', { $add: ['$reservedQuantity', item.quantity] }] },
           },
           { $inc: { reservedQuantity: item.quantity } },
-          { new: true, ...(session ? { session } : {}) }
+          { returnDocument: 'after', ...(session ? { session } : {}) }
         );
 
         if (!updated) {
@@ -327,7 +327,7 @@ class StockService {
         const reverted = await StockEntry.findOneAndUpdate(
           { _id: u.id },
           { $inc: { reservedQuantity: -u.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         ).catch(() => null);
         await this._emitInventoryUpdate(reverted, { skipProductSync: true });
       }
@@ -387,7 +387,7 @@ class StockService {
             reservedQuantity: { $gte: item.quantity },
           },
           { $inc: { reservedQuantity: -item.quantity } },
-          { new: true, ...(session ? { session } : {}) }
+          { returnDocument: 'after', ...(session ? { session } : {}) }
         );
         if (!updated) {
           throw new StockReservationError('Failed to release reservation', reservationId);
@@ -428,7 +428,7 @@ class StockService {
         const rolledBack = await StockEntry.findOneAndUpdate(
           { _id: r.id },
           { $inc: { reservedQuantity: r.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         ).catch(() => null);
         await this._emitInventoryUpdate(rolledBack, { skipProductSync: true });
       }
@@ -489,7 +489,7 @@ class StockService {
             reservedQuantity: { $gte: item.quantity },
           },
           { $inc: { quantity: -item.quantity, reservedQuantity: -item.quantity } },
-          { new: true, ...(session ? { session } : {}) }
+          { returnDocument: 'after', ...(session ? { session } : {}) }
         );
 
         if (!updated) {
@@ -556,7 +556,7 @@ class StockService {
         const rolledBack = await StockEntry.findOneAndUpdate(
           { _id: d.stockEntryId },
           { $inc: { quantity: d.quantity, reservedQuantity: d.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         ).catch(() => null);
 
         if (rolledBack) {
@@ -595,7 +595,7 @@ class StockService {
             $expr: { $gte: ['$quantity', { $add: ['$reservedQuantity', item.quantity] }] },
           },
           { $inc: { reservedQuantity: item.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         );
         if (!updated) throw new StockReservationError('Insufficient stock to reserve', reservationId);
         updatedEntries.push({ id: updated._id, quantity: item.quantity, doc: updated });
@@ -615,7 +615,7 @@ class StockService {
         const reverted = await StockEntry.findOneAndUpdate(
           { _id: u.id },
           { $inc: { reservedQuantity: -u.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         ).catch(() => null);
         await this._emitInventoryUpdate(reverted, { skipProductSync: true });
       }
@@ -649,7 +649,7 @@ class StockService {
             reservedQuantity: { $gte: item.quantity },
           },
           { $inc: { reservedQuantity: -item.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         );
         if (!updated) throw new StockReservationError('Failed to release reservation', reservationId);
         reverted.push({ id: updated._id, quantity: item.quantity, doc: updated });
@@ -674,7 +674,7 @@ class StockService {
         const rolledBack = await StockEntry.findOneAndUpdate(
           { _id: r.id },
           { $inc: { reservedQuantity: r.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         ).catch(() => null);
         await this._emitInventoryUpdate(rolledBack, { skipProductSync: true });
       }
@@ -706,7 +706,7 @@ class StockService {
             reservedQuantity: { $gte: item.quantity },
           },
           { $inc: { quantity: -item.quantity, reservedQuantity: -item.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         );
         if (!updated) throw new StockReservationError('Failed to commit reservation', reservationId);
         decremented.push({
@@ -754,7 +754,7 @@ class StockService {
         const rolledBack = await StockEntry.findOneAndUpdate(
           { _id: d.stockEntryId },
           { $inc: { quantity: d.quantity, reservedQuantity: d.quantity } },
-          { new: true }
+          { returnDocument: 'after' }
         ).catch(() => null);
 
         if (rolledBack) {

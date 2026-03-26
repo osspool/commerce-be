@@ -20,7 +20,7 @@ inventoryCounterSchema.statics.nextSeq = async function(type, yyyymm, session = 
   const doc = await this.findOneAndUpdate(
     { type, yyyymm },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true, ...(session ? { session } : {}) }
+    { returnDocument: 'after', upsert: true, ...(session ? { session } : {}) }
   );
 
   return doc.seq;

@@ -107,7 +107,7 @@ System configuration and utilities.
 
 | API | Description |
 |-----|-------------|
-| [Auth](auth/auth.md) | Registration, login, password reset, JWT tokens |
+| [Auth](auth/auth.md) | Sign-in/up, password reset, bearer sessions, branch (org) management |
 
 ---
 

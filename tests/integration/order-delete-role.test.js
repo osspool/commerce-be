@@ -47,19 +47,19 @@ describe('Order Deletion Role-Based Access', () => {
     superAdminToken = createTestUser(app, {
       _id: new mongoose.Types.ObjectId().toString(),
       name: 'Super Admin',
-      roles: ['user', 'superadmin', 'admin'],
+      role: ['user', 'superadmin', 'admin'],
     }).token;
 
     adminToken = createTestUser(app, {
       _id: new mongoose.Types.ObjectId().toString(),
       name: 'Admin User',
-      roles: ['user', 'admin'],
+      role: ['user', 'admin'],
     }).token;
 
     userToken = createTestUser(app, {
       _id: new mongoose.Types.ObjectId().toString(),
       name: 'Regular User',
-      roles: ['user'],
+      role: ['user'],
     }).token;
 
     // Create test branch

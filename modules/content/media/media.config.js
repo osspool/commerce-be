@@ -1,27 +1,27 @@
 /**
  * Media Module Configuration
- * 
+ *
  * Configuration for @classytic/media-kit.
- * All processing, validation, and storage is handled by media-kit.
- * This file just provides the configuration values.
+ *
+ * media-kit SizeVariant: { name, width?, height?, quality?, format?, aspectRatio?, condition? }
+ * media-kit AspectRatioPreset: { aspectRatio?, fit?, preserveRatio? }
+ *
+ * When preserveRatio is true, width/height act as max bounds (scale to fit).
+ * fit: 'cover' crops to fill exact dimensions (used only for avatars).
  */
 
 // ============================================
 // BASE FOLDERS
 // ============================================
 
-/**
- * Allowed base folders for media organization.
- * FE can use this statically (no API call needed for folder dropdown).
- */
 export const BASE_FOLDERS = [
-  'general',     // Default/uncategorized
-  'products',    // Product images → 3:4 aspect ratio
-  'categories',  // Category tiles → 1:1 square
-  'blog',        // Blog images → preserve ratio
-  'users',       // Avatars → 1:1 square
-  'banners',     // Banners → 16:9 wide
-  'brands',      // Brand logos → preserve ratio
+  'general',
+  'products',
+  'categories',
+  'blog',
+  'users',
+  'banners',
+  'brands',
 ];
 
 // ============================================
@@ -30,22 +30,11 @@ export const BASE_FOLDERS = [
 
 /**
  * Size variants auto-generated for each uploaded image.
- * Media-kit generates these automatically on upload.
- *
- * Main image is always stored at full quality.
- *
- * Response includes:
- * {
- *   url: "main-image.webp",
- *   variants: [
- *     { name: "thumbnail", url: "...", width: 150, height: 200 },
- *     { name: "medium", url: "...", width: 600, height: 800 }
- *   ]
- * }
+ * width/height are max bounds — aspect ratio is controlled by ASPECT_RATIO_PRESETS.
  */
 export const SIZE_VARIANTS = [
-  { name: 'thumbnail', width: 150, height: 200, quality: 75, format: 'webp' },
-  { name: 'medium', width: 600, height: 800, quality: 80, format: 'webp' },
+  { name: 'thumbnail', width: 200, height: 200, quality: 80, format: 'avif' },
+  { name: 'medium', width: 800, height: 800, quality: 80, format: 'avif' },
 ];
 
 // ============================================
@@ -54,25 +43,30 @@ export const SIZE_VARIANTS = [
 
 /**
  * Aspect ratio presets by content type.
- * Auto-detected from folder path or can be specified via contentType param.
+ *
+ * preserveRatio: true — scale to fit within bounds, never crop/distort.
+ * aspectRatio + fit: 'cover' — crop to exact ratio (only for avatars).
+ *
+ * Matched via FOLDER_CONTENT_TYPE_MAP or explicit contentType param.
  */
 export const ASPECT_RATIO_PRESETS = {
-  product: { aspectRatio: 3/4, fit: 'cover' },   // Vertical for e-commerce
-  category: { aspectRatio: 1, fit: 'cover' },    // Square tiles
-  banner: { aspectRatio: 16/9, fit: 'cover' },   // Wide banners
-  avatar: { aspectRatio: 1, fit: 'cover' },      // Square avatars
-  default: { preserveRatio: true },              // Keep original
+  default: { preserveRatio: true },
+  product: { preserveRatio: true },
+  category: { preserveRatio: true },
+  banner: { preserveRatio: true },
+  brand: { preserveRatio: true },
+  avatar: { aspectRatio: 1, fit: 'cover' },
 };
 
 /**
  * Folder → Content type mapping for auto-detection.
- * When uploading to "products/xyz", contentType becomes "product".
  */
 export const FOLDER_CONTENT_TYPE_MAP = {
   product: ['products', 'product'],
   category: ['categories', 'category'],
   banner: ['banners', 'banner'],
   avatar: ['users', 'avatars'],
+  brand: ['brands', 'brand'],
 };
 
 // ============================================
@@ -80,19 +74,21 @@ export const FOLDER_CONTENT_TYPE_MAP = {
 // ============================================
 
 export const IMAGE_SETTINGS = {
-  // Processing
-  defaultMaxWidth: 2048,
-  quality: 80,
-  format: 'webp',
-  
-  // Auto alt-text from filename
+  defaultMaxWidth: 3840,
+  quality: {
+    jpeg: 85,
+    webp: 85,
+    avif: 80,
+    png: 100,
+  },
+  format: 'avif',
+
   generateAlt: {
     enabled: true,
     strategy: 'filename',
     fallback: 'Image',
   },
-  
-  // Allowed types
+
   allowedMimeTypes: [
     'image/jpeg',
     'image/jpg',
@@ -102,8 +98,7 @@ export const IMAGE_SETTINGS = {
     'image/svg+xml',
     'image/avif',
   ],
-  
-  // Max 50MB
+
   maxSize: 50 * 1024 * 1024,
 };
 

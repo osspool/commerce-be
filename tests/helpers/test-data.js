@@ -4,29 +4,19 @@
  * Helper functions to create test data for integration tests
  */
 
-import jwt from 'jsonwebtoken';
-
+/**
+ * Create a mock user object for tests that don't need actual auth.
+ * For real auth tests, use signUp/signIn from helpers/setup.js instead.
+ */
 export function createTestUser(app, overrides = {}) {
   const userId = overrides._id || '507f1f77bcf86cd799439011';
-  const roles = overrides.roles || (overrides.role ? [overrides.role] : ['user']);
+  const role = overrides.role || ['user'];
   const name = overrides.name || 'Test User';
   const email = overrides.email || 'test@example.com';
-  
-  const token = jwt.sign(
-    { id: userId, roles, name, email },
-    process.env.JWT_SECRET || 'test-secret',
-    { expiresIn: '1h' }
-  );
 
   return {
-    user: {
-      _id: userId,
-      name,
-      email,
-      roles,
-      ...overrides
-    },
-    token
+    user: { _id: userId, id: userId, name, email, role, ...overrides },
+    token: null, // Use signIn() from setup.js for real tokens
   };
 }
 

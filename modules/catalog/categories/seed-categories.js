@@ -167,7 +167,7 @@ async function seedCategories() {
       const result = await Category.findOneAndUpdate(
         { slug: category.slug },
         { $set: category },
-        { upsert: true, new: true, runValidators: true }
+        { upsert: true, returnDocument: 'after', runValidators: true }
       );
 
       if (result.createdAt.getTime() === result.updatedAt.getTime()) {

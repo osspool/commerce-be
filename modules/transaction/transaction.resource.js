@@ -6,7 +6,9 @@
  * This provides CRUD + financial reporting endpoints with role restrictions.
  */
 
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
+import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import Transaction from './transaction.model.js';
 import transactionRepository from './transaction.repository.js';
@@ -29,14 +31,11 @@ const transactionResource = defineResource({
   tag: 'Transaction',
   prefix: '/transactions',
 
-  adapter: createMongooseAdapter({
-    model: Transaction,
-    repository: transactionRepository,
-  }),
+  adapter: createAdapter(Transaction, transactionRepository),
   controller: transactionController,
   queryParser,
 
-  permissions: permissions.transactions,
+  permissions: getResourcePermissions('transaction'),
   schemaOptions: transactionSchemas,
 
   additionalRoutes: [

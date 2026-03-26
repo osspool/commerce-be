@@ -60,6 +60,17 @@ class MediaService {
   }
 
   // ============================================
+  // Presigned uploads
+  // ============================================
+  async getSignedUploadUrl(filename, mimeType, options = {}) {
+    return this.media.getSignedUploadUrl(filename, mimeType, options);
+  }
+
+  async confirmUpload(input, context) {
+    return this.media.confirmUpload(input, context);
+  }
+
+  // ============================================
   // Bulk & folders
   // ============================================
   async deleteMany(ids, context) {
@@ -82,8 +93,27 @@ class MediaService {
     return this.media.getBreadcrumb(folder);
   }
 
+  async getSubfolders(folder, context) {
+    return this.media.getSubfolders(folder, context);
+  }
+
+  async renameFolder(oldPath, newPath, context) {
+    return this.media.renameFolder(oldPath, newPath, context);
+  }
+
   async deleteFolder(folder, context) {
     return this.media.deleteFolder(folder, context);
+  }
+
+  // ============================================
+  // Tags
+  // ============================================
+  async addTags(id, tags, context) {
+    return this.media.addTags(id, tags, context);
+  }
+
+  async removeTags(id, tags, context) {
+    return this.media.removeTags(id, tags, context);
   }
 }
 

@@ -26,10 +26,15 @@ class CategoryController extends BaseController {
     }
 
     /**
-     * Override delete to check product count
+     * Override delete to check product count before allowing deletion
      */
     async delete(context) {
-        const category = await categoryRepository.getById(context.params.id);
+        let category;
+        try {
+            category = await categoryRepository.getById(context.params.id);
+        } catch {
+            throw new NotFoundError('Category not found');
+        }
 
         if (!category) {
             throw new NotFoundError('Category not found');

@@ -1,3 +1,12 @@
+/**
+ * Permission Index
+ *
+ * Aggregates custom action permissions that are too complex or
+ * resource-specific for the centralized shared/permissions.js policy map.
+ *
+ * Simple permissions (analytics, platform, finance, logistics, archive, export)
+ * have been consolidated into shared/permissions.js.
+ */
 import users from './users.js';
 import customers from './customers.js';
 import transactions from './transactions.js';
@@ -13,14 +22,8 @@ import commerce, {
   pos,
   orderActions,
 } from './commerce.js';
-import platform from './platform.js';
-import analytics from './analytics.js';
-import exportPerms from './export.js';
 import inventory from './inventory.js';
-import finance from './finance.js';
 import { cms, media } from './content.js';
-import logistics from './logistics.js';
-import archive from './archive.js';
 
 const permissions = {
   users,
@@ -36,16 +39,10 @@ const permissions = {
   branches,
   pos,
   orderActions,
-  platform,
-  analytics,
-  export: exportPerms,
   commerce,
   inventory,
-  finance,
   cms,
   media,
-  logistics,
-  archive,
 };
 
 export default permissions;

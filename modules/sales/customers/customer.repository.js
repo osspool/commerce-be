@@ -215,7 +215,7 @@ class CustomerRepository extends Repository {
     return this.Model.findByIdAndUpdate(
       customerId,
       { $pull: { addresses: { _id: addressId } } },
-      { new: true }
+      { returnDocument: 'after' }
     );
   }
 
@@ -316,7 +316,7 @@ class CustomerRepository extends Repository {
     return this.Model.findByIdAndUpdate(
       customerId,
       { 'membership.isActive': false },
-      { new: true }
+      { returnDocument: 'after' }
     );
   }
 
@@ -330,7 +330,7 @@ class CustomerRepository extends Repository {
     return this.Model.findByIdAndUpdate(
       customerId,
       { 'membership.isActive': true },
-      { new: true }
+      { returnDocument: 'after' }
     );
   }
 }

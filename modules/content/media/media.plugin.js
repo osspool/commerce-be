@@ -11,7 +11,8 @@ import { createMedia } from '@classytic/media-kit';
 import { cachePlugin, createMemoryCache } from '@classytic/mongokit';
 import { S3Provider } from '@classytic/media-kit/providers/s3';
 import config from '#config/index.js';
-import { defineResource, createMongooseAdapter } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createAdapter } from '#shared/adapter.js';
 import permissions from '#config/permissions.js';
 import MediaController from './media.controller.js';
 import MediaService from './media.service.js';
@@ -41,7 +42,7 @@ async function mediaPlugin(fastify) {
 
   // 2. Create media-kit (handles EVERYTHING)
   mediaInstance = createMedia({
-    provider,
+    driver: provider,
     fileTypes: {
       allowed: IMAGE_SETTINGS.allowedMimeTypes,
       maxSize: IMAGE_SETTINGS.maxSize,
@@ -59,6 +60,14 @@ async function mediaPlugin(fastify) {
       aspectRatios: ASPECT_RATIO_PRESETS,
       sizes: SIZE_VARIANTS,
       generateAlt: IMAGE_SETTINGS.generateAlt,
+      thumbhash: true,
+      dominantColor: true,
+      smartSkip: true,
+    },
+    deduplication: {
+      enabled: true,
+      returnExisting: true,
+      algorithm: 'sha256',
     },
     // Mongokit cache plugin (in-memory by default)
     plugins: [
@@ -95,10 +104,7 @@ async function mediaPlugin(fastify) {
     tag: 'Media',
     prefix: '/media',
     
-    adapter: createMongooseAdapter({
-      model: Media,
-      repository: mediaService,
-    }),
+    adapter: createAdapter(Media, mediaService),
     controller,
     customSchemas: mediaSchemas,
     permissions: {
@@ -144,6 +150,24 @@ async function mediaPlugin(fastify) {
         schema: mediaSchemas.folderParam,
       },
       {
+        method: 'GET',
+        path: '/folders/:folder/subfolders',
+        handler: controller.getSubfolders.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Get subfolders of a folder',
+        schema: mediaSchemas.folderParam,
+      },
+      {
+        method: 'PATCH',
+        path: '/folders/:folder',
+        handler: controller.renameFolder.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Rename a folder',
+        schema: mediaSchemas.renameFolder,
+      },
+      {
         method: 'DELETE',
         path: '/folders/:folder',
         handler: controller.deleteFolder.bind(controller),
@@ -173,6 +197,26 @@ async function mediaPlugin(fastify) {
         description: 'Multipart: files[] (required), folder, contentType, skipProcessing',
       },
 
+      // Presigned uploads (client-side direct-to-S3)
+      {
+        method: 'POST',
+        path: '/presigned-upload',
+        handler: controller.getPresignedUploadUrl.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Get presigned URL for direct S3 upload',
+        schema: mediaSchemas.presignedUpload,
+      },
+      {
+        method: 'POST',
+        path: '/presigned-upload/confirm',
+        handler: controller.confirmPresignedUpload.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Confirm a presigned upload after client finishes',
+        schema: mediaSchemas.confirmUpload,
+      },
+
       // Bulk operations
       {
         method: 'POST',
@@ -191,6 +235,26 @@ async function mediaPlugin(fastify) {
         wrapHandler: false,
         summary: 'Move files to folder',
         schema: mediaSchemas.move,
+      },
+
+      // Tags
+      {
+        method: 'POST',
+        path: '/:id/tags',
+        handler: controller.addTags.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Add tags to a media item',
+        schema: mediaSchemas.addTags,
+      },
+      {
+        method: 'DELETE',
+        path: '/:id/tags',
+        handler: controller.removeTags.bind(controller),
+        permissions: permissions.media.manage,
+        wrapHandler: false,
+        summary: 'Remove tags from a media item',
+        schema: mediaSchemas.removeTags,
       },
     ],
   });

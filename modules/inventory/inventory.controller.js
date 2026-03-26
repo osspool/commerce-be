@@ -173,8 +173,8 @@ class InventoryController extends BaseController {
       return reply.code(400).send({ success: false, message: 'Invalid branch' });
     }
 
-    const isAdminUser = Array.isArray(req.user?.roles)
-      && (req.user.roles.includes('admin') || req.user.roles.includes('superadmin'));
+    const isAdminUser = Array.isArray(req.user?.role)
+      && (req.user.role.includes('admin') || req.user.role.includes('superadmin'));
 
     if (branch.role === 'head_office' && !isAdminUser) {
       return reply.code(403).send({

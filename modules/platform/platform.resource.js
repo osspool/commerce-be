@@ -1,6 +1,6 @@
 import { defineResource } from '@classytic/arc';
 import platformConfigController from './platform.controller.js';
-import permissions from '#config/permissions.js';
+import { platformActions } from '#shared/permissions.js';
 
 const platformResource = defineResource({
   name: 'platform',
@@ -16,7 +16,7 @@ const platformResource = defineResource({
       path: '/config',
       summary: 'Get platform configuration',
       description: 'Returns full config or selected fields via ?select=field1,field2',
-      permissions: permissions.platform.getConfig,
+      permissions: platformActions.getConfig,
       wrapHandler: false,
       handler: platformConfigController.getConfig.bind(platformConfigController),
     },
@@ -24,7 +24,7 @@ const platformResource = defineResource({
       method: 'PATCH',
       path: '/config',
       summary: 'Update platform configuration',
-      permissions: permissions.platform.updateConfig,
+      permissions: platformActions.updateConfig,
       wrapHandler: false,
       handler: platformConfigController.updateConfig.bind(platformConfigController),
     },

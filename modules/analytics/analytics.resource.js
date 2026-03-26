@@ -1,5 +1,5 @@
 import { defineResource } from '@classytic/arc';
-import permissions from '#config/permissions.js';
+import { getResourcePermissions, analyticsActions } from '#shared/permissions.js';
 import analyticsController from './analytics.controller.js';
 import analyticsSchemas from './analytics.schemas.js';
 
@@ -23,8 +23,8 @@ export default defineResource({
   controller: analyticsController,
 
   permissions: {
-    list: permissions.analytics.overview,
-    get: permissions.analytics.overview,
+    list: analyticsActions.overview,
+    get: analyticsActions.overview,
   },
 
   // Service resource - no CRUD, only custom endpoints
@@ -38,7 +38,7 @@ export default defineResource({
       handler: 'getDashboard',
       summary: 'Get ecommerce dashboard analytics',
       description: 'Comprehensive analytics including customer stats, orders, revenue, and trends',
-      permissions: permissions.analytics.overview,
+      permissions: analyticsActions.overview,
       wrapHandler: false,
       schema: {
         querystring: analyticsSchemas.dashboardQuery,

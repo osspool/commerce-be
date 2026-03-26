@@ -61,6 +61,7 @@ export const mediaSchemas = {
         title: { type: 'string', maxLength: 255 },
         description: { type: 'string', maxLength: 1000 },
         folder: { type: 'string', pattern: baseFolderPattern },
+        tags: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 20 },
       },
       additionalProperties: false,
     },
@@ -100,19 +101,104 @@ export const mediaSchemas = {
     body: {
       type: 'object',
       properties: {
-        ids: { 
-          type: 'array', 
-          items: { type: 'string' }, 
-          minItems: 1, 
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
           maxItems: 100,
         },
-        targetFolder: { 
-          type: 'string', 
+        targetFolder: {
+          type: 'string',
           pattern: baseFolderPattern,
           description: 'Target folder path (e.g., products/featured)',
         },
       },
       required: ['ids', 'targetFolder'],
+      additionalProperties: false,
+    },
+  },
+
+  // Presigned upload
+  presignedUpload: {
+    body: {
+      type: 'object',
+      properties: {
+        filename: { type: 'string', minLength: 1 },
+        mimeType: { type: 'string', minLength: 1 },
+        folder: { type: 'string', pattern: baseFolderPattern },
+      },
+      required: ['filename', 'mimeType'],
+      additionalProperties: false,
+    },
+  },
+
+  // Confirm presigned upload
+  confirmUpload: {
+    body: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', minLength: 1, description: 'S3 object key from presigned URL' },
+        filename: { type: 'string', minLength: 1 },
+        mimeType: { type: 'string', minLength: 1 },
+        size: { type: 'integer', minimum: 1, description: 'File size in bytes' },
+        folder: { type: 'string', pattern: baseFolderPattern },
+        alt: { type: 'string', maxLength: 255 },
+        title: { type: 'string', maxLength: 255 },
+      },
+      required: ['key', 'filename', 'mimeType', 'size'],
+      additionalProperties: false,
+    },
+  },
+
+  // Rename folder
+  renameFolder: {
+    params: {
+      type: 'object',
+      properties: {
+        folder: { type: 'string', minLength: 1 },
+      },
+      required: ['folder'],
+    },
+    body: {
+      type: 'object',
+      properties: {
+        newName: { type: 'string', minLength: 1, pattern: '^[a-zA-Z0-9_-]+$' },
+      },
+      required: ['newName'],
+      additionalProperties: false,
+    },
+  },
+
+  // Add tags
+  addTags: {
+    params: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+    body: {
+      type: 'object',
+      properties: {
+        tags: { type: 'array', items: { type: 'string', maxLength: 50 }, minItems: 1, maxItems: 20 },
+      },
+      required: ['tags'],
+      additionalProperties: false,
+    },
+  },
+
+  // Remove tags
+  removeTags: {
+    params: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+    body: {
+      type: 'object',
+      properties: {
+        tags: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 20 },
+      },
+      required: ['tags'],
       additionalProperties: false,
     },
   },
