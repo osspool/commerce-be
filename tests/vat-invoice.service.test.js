@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBdDateKey, buildVatInvoiceNumber } from '../modules/sales/orders/vatInvoice.service.js';
+import { getBdDateKey, buildVatInvoiceNumber } from '../src/resources/sales/orders/vatInvoice.service.ts';
 
 describe('VAT invoice utilities', () => {
   it('generates BD date key (YYYYMMDD) in Asia/Dhaka', () => {
@@ -19,4 +19,3 @@ describe('VAT invoice utilities', () => {
     expect(invoice).toBe('INV-DHK-20251218-0007');
   });
 });
-

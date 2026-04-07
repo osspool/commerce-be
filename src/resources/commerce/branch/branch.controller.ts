@@ -1,0 +1,63 @@
+import { BaseController } from '@classytic/arc';
+import type { FastifyRequest, FastifyReply } from 'fastify';
+import branchRepository from './branch.repository.js';
+import { branchSchemaOptions } from './branch.schemas.js';
+import type { IBranch } from './branch.model.js';
+
+type BranchRepo = typeof branchRepository;
+
+/**
+ * Branch Controller
+ *
+ * Extends BaseController for auto query/pagination handling.
+ * Additional methods for branch-specific operations.
+ */
+class BranchController extends BaseController<IBranch> {
+  constructor() {
+    super(branchRepository, { schemaOptions: branchSchemaOptions });
+
+    // Bind additional methods
+    this.getByCode = this.getByCode.bind(this);
+    this.getDefault = this.getDefault.bind(this);
+    this.setDefault = this.setDefault.bind(this);
+    this.getActive = this.getActive.bind(this);
+  }
+
+  // ============================================
+  // ADDITIONAL HANDLERS
+  // ============================================
+
+  async getByCode(req: FastifyRequest<{ Params: { code: string } }>, reply: FastifyReply): Promise<void> {
+    const { code } = req.params;
+    const result = await (this.repository as BranchRepo).getByCode(code);
+
+    if (!result) {
+      return reply.code(404).send({ success: false, message: 'Branch not found' });
+    }
+
+    return reply.send({ success: true, data: result });
+  }
+
+  async getDefault(_req: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const result = await (this.repository as BranchRepo).getDefaultBranch();
+    return reply.send({ success: true, data: result });
+  }
+
+  async setDefault(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
+    const { id } = req.params;
+    const result = await (this.repository as BranchRepo).setDefault(id);
+
+    if (!result) {
+      return reply.code(404).send({ success: false, message: 'Branch not found' });
+    }
+
+    return reply.send({ success: true, data: result, message: 'Default branch updated' });
+  }
+
+  async getActive(_req: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const result = await (this.repository as BranchRepo).getActiveBranches();
+    return reply.send({ success: true, data: result });
+  }
+}
+
+export default new BranchController();

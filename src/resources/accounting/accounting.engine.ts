@@ -1,0 +1,186 @@
+/**
+ * Accounting Engine — Top-Level Eager Singleton (ledger 0.5.1)
+ *
+ * The engine OWNS all models and repositories. It is created at module
+ * import time as a top-level const, mirroring the @classytic/promo and
+ * fajr-be-arc reference patterns. No init function, no lazy getters.
+ *
+ * Why this works without a connected DB at import time: Mongoose model
+ * registration only requires `mongoose.connection` (the default connection
+ * object) to exist — no live socket. Schemas are compiled and models
+ * registered immediately; queries simply queue or fail until
+ * `connectDatabase()` runs in the app boot. By the time any handler runs,
+ * the connection is open.
+ *
+ * Usage:
+ *   import { JournalEntry, journalEntryRepository } from '../accounting.engine.js';
+ */
+
+import mongoose from 'mongoose';
+import { createAccountingEngine, registerJournalType } from '@classytic/ledger';
+import { bangladeshPack } from '@classytic/ledger-bd';
+import config from '#config/index.js';
+import { dayCloseLockPlugin } from './posting/period-lock-guard.js';
+
+export { bangladeshPack as bdPack };
+
+// ─── Budget Status Values ───────────────────────────────────────────────────
+
+export const BUDGET_STATUS_VALUES = [
+  'draft',
+  'submitted',
+  'approved',
+  'rejected',
+  'closed',
+] as const;
+
+// ─── Custom journal types — registered before engine creation ──────────────
+// (the JournalEntry schema reads the type enum at construction time)
+
+registerJournalType('POS_SALES', {
+  code: 'POS_SALES',
+  name: 'POS Sales Journal',
+  description: 'Point-of-sale transactions aggregated by day per branch',
+});
+registerJournalType('ECOM_SALES', {
+  code: 'ECOM_SALES',
+  name: 'E-Commerce Sales Journal',
+  description: 'Online order transactions posted per-order',
+});
+
+// ─── Engine ─────────────────────────────────────────────────────────────────
+
+export const accounting = createAccountingEngine({
+  mongoose: mongoose.connection,
+  country: bangladeshPack,
+  currency: 'BDT',
+  fiscalYearStartMonth: config.accounting.fiscalYearStartMonth,
+  audit: { trackActor: true },
+  strictness: { immutable: true, requireActor: true },
+  idempotency: true,
+  // Repository pagination caps. Mongokit's Repository.list defaults to
+  // maxLimit=100, which clips the BD chart of accounts (~150+ rows). Set
+  // here so every consumer of the engine sees the same cap — no resource
+  // file should hardcode this.
+  pagination: {
+    account: { maxLimit: 1000 },
+  },
+  // Day-close lock — blocks entries whose date falls in a closed branch
+  // day. Hooks both `before:create` (manual creates + reversals) and
+  // `before:update` (post/unpost/archive — ledger 0.5.1 routes these
+  // through the update pipeline). Fiscal-period close at the company
+  // level is enforced by the ledger's built-in fiscalLockPlugin.
+  //
+  // Lookup is via mongoose connection (rather than the `accounting`
+  // const) because we're inside its initializer — TDZ would bite.
+  plugins: {
+    journalEntry: [
+      dayCloseLockPlugin({
+        getJournalEntryModel: () =>
+          mongoose.connection.model('JournalEntry') as mongoose.Model<unknown>,
+      }),
+    ],
+  },
+  // NO multiTenant — single company, multi-branch.
+  // Account + FiscalPeriod are company-wide (no org field).
+  // JournalEntry + Budget get organizationId via extraFields below.
+  schemaOptions: {
+    journalEntry: {
+      indexes: true,
+      autoReference: true,
+      textSearch: true,
+      extraFields: {
+        /** Branch that created this entry (optional tag, not a filter) */
+        organizationId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'organization',
+          default: null,
+          index: true,
+        },
+        /** Links journal entry back to the originating commerce document */
+        sourceRef: {
+          sourceModel: { type: String, default: null },
+          sourceId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        },
+      },
+      extraIndexes: [
+        { fields: { 'sourceRef.sourceId': 1 }, options: { sparse: true } },
+        {
+          fields: { organizationId: 1, 'sourceRef.sourceModel': 1, date: -1 },
+          options: { sparse: true },
+        },
+      ],
+    },
+    budget:
+      config.accounting.mode !== 'simple'
+        ? {
+            extraFields: {
+              /** Branch that owns this budget (required — budgets are per-branch) */
+              organizationId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'organization',
+                required: true,
+                index: true,
+              },
+              status: {
+                type: String,
+                enum: BUDGET_STATUS_VALUES,
+                default: 'draft',
+                index: true,
+              },
+              category: { type: String, default: null, trim: true },
+              notes: { type: String, default: null },
+              revision: { type: Number, default: 1, min: 1 },
+              submittedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+              submittedAt: { type: Date, default: null },
+              approvedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+              approvedAt: { type: Date, default: null },
+              rejectedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+              rejectedAt: { type: Date, default: null },
+              rejectionReason: { type: String, default: null },
+            },
+            extraIndexes: [
+              { fields: { organizationId: 1, status: 1 }, options: {} },
+              { fields: { organizationId: 1, category: 1, periodStart: 1 }, options: {} },
+            ],
+          }
+        : undefined,
+  },
+});
+
+// ─── Direct model exports ──────────────────────────────────────────────────
+// Cast to Model<any> matches the fajr-be-arc / reference pattern. Ledger
+// surfaces models as Model<unknown>; until we generate typed Doc interfaces,
+// `any` keeps consumer code free of repeated narrowing.
+
+// biome-ignore lint/suspicious/noExplicitAny: consumer-side model is loosely typed
+export const Account = accounting.models.Account as mongoose.Model<any>;
+// biome-ignore lint/suspicious/noExplicitAny: consumer-side model is loosely typed
+export const JournalEntry = accounting.models.JournalEntry as mongoose.Model<any>;
+// biome-ignore lint/suspicious/noExplicitAny: consumer-side model is loosely typed
+export const FiscalPeriod = accounting.models.FiscalPeriod as mongoose.Model<any>;
+// biome-ignore lint/suspicious/noExplicitAny: consumer-side model is loosely typed
+export const Budget =
+  config.accounting.mode !== 'simple'
+    ? (accounting.models.Budget as mongoose.Model<any>)
+    : (null as unknown as mongoose.Model<any>);
+
+// ─── Direct repository exports ─────────────────────────────────────────────
+
+export const accountRepository = accounting.repositories.accounts;
+export const journalEntryRepository = accounting.repositories.journalEntries;
+export const fiscalPeriodRepository = accounting.repositories.fiscalPeriods;
+export const budgetRepository =
+  config.accounting.mode !== 'simple' ? accounting.repositories.budgets : null;
+
+// ─── Auto-increment budget revision on update ──────────────────────────────
+// (mode-gated; was previously inside initAccountingEngine)
+
+if (config.accounting.mode !== 'simple') {
+  const BudgetSchema = (accounting.models.Budget as mongoose.Model<unknown>).schema;
+  BudgetSchema.pre('findOneAndUpdate', function (this: mongoose.Query<unknown, unknown>) {
+    this.setUpdate({ ...this.getUpdate(), $inc: { revision: 1 } });
+  });
+}
+
+export default accounting;

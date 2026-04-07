@@ -36,8 +36,8 @@ describe('Product view tracking (TRACK_PRODUCT_VIEWS)', () => {
     delete process.env.TRACK_PRODUCT_VIEWS;
     await vi.resetModules();
 
-    const { default: productRepository } = await import('#modules/catalog/products/product.repository.js');
-    const { default: productController } = await import('#modules/catalog/products/product.controller.js');
+    const { default: productRepository } = await import('#resources/catalog/products/product.repository.js');
+    const { default: productController } = await import('#resources/catalog/products/product.controller.js');
 
     // Avoid needing full BaseController context wiring
     productController._buildContext = () => ({});
@@ -58,8 +58,8 @@ describe('Product view tracking (TRACK_PRODUCT_VIEWS)', () => {
     process.env.TRACK_PRODUCT_VIEWS = '1';
     await vi.resetModules();
 
-    const { default: productRepository } = await import('#modules/catalog/products/product.repository.js');
-    const { default: productController } = await import('#modules/catalog/products/product.controller.js');
+    const { default: productRepository } = await import('#resources/catalog/products/product.repository.js');
+    const { default: productController } = await import('#resources/catalog/products/product.controller.js');
 
     productController._buildContext = () => ({});
 

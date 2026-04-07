@@ -10,16 +10,16 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import mongoose from 'mongoose';
 import { createMedia } from '@classytic/media-kit';
-import { request, createTestAuth, waitFor } from '@classytic/arc/testing';
+import { request, waitFor } from '@classytic/arc/testing';
 import {
   BASE_FOLDERS,
   SIZE_VARIANTS,
   ASPECT_RATIO_PRESETS,
   FOLDER_CONTENT_TYPE_MAP,
   IMAGE_SETTINGS,
-} from '#modules/content/media/media.config.js';
-import { CONTENT_TYPES, mediaSchemas } from '#modules/content/media/media.schemas.js';
-import { getVariantUrl, getVariantUrls } from '#modules/content/media/media.model.js';
+} from '#resources/content/media/media.config.js';
+import { CONTENT_TYPES, mediaSchemas } from '#resources/content/media/media.schemas.js';
+import { getVariantUrl, getVariantUrls } from '#resources/content/media/media.model.js';
 
 // ─── Minimal test image buffers ─────────────────────────────────────────────
 
@@ -95,42 +95,38 @@ describe('Media Config', () => {
     expect(BASE_FOLDERS).toContain('blog');
   });
 
-  it('should have 3 size variants (thumbnail, medium, large)', () => {
-    expect(SIZE_VARIANTS).toHaveLength(3);
+  it('should have 2 size variants (thumbnail, medium)', () => {
+    expect(SIZE_VARIANTS).toHaveLength(2);
 
     const names = SIZE_VARIANTS.map(v => v.name);
     expect(names).toContain('thumbnail');
     expect(names).toContain('medium');
-    expect(names).toContain('large');
   });
 
   it('should have correct variant dimensions', () => {
     const thumb = SIZE_VARIANTS.find(v => v.name === 'thumbnail');
-    expect(thumb.width).toBe(150);
+    expect(thumb.width).toBe(200);
     expect(thumb.height).toBe(200);
-    expect(thumb.format).toBe('webp');
+    expect(thumb.format).toBe('avif');
 
     const medium = SIZE_VARIANTS.find(v => v.name === 'medium');
-    expect(medium.width).toBe(600);
+    expect(medium.width).toBe(800);
     expect(medium.height).toBe(800);
-
-    const large = SIZE_VARIANTS.find(v => v.name === 'large');
-    expect(large.width).toBe(1200);
-    expect(large.format).toBe('webp');
+    expect(medium.format).toBe('avif');
   });
 
   it('should have per-format quality map (not a flat number)', () => {
     expect(typeof IMAGE_SETTINGS.quality).toBe('object');
-    expect(IMAGE_SETTINGS.quality.jpeg).toBe(80);
-    expect(IMAGE_SETTINGS.quality.webp).toBe(80);
-    expect(IMAGE_SETTINGS.quality.avif).toBe(50);
+    expect(IMAGE_SETTINGS.quality.jpeg).toBe(85);
+    expect(IMAGE_SETTINGS.quality.webp).toBe(85);
+    expect(IMAGE_SETTINGS.quality.avif).toBe(80);
     expect(IMAGE_SETTINGS.quality.png).toBe(100);
   });
 
   it('should have aspect ratio presets for all content types', () => {
-    expect(ASPECT_RATIO_PRESETS.product.aspectRatio).toBe(3 / 4);
-    expect(ASPECT_RATIO_PRESETS.category.aspectRatio).toBe(1);
-    expect(ASPECT_RATIO_PRESETS.banner.aspectRatio).toBe(16 / 9);
+    expect(ASPECT_RATIO_PRESETS.product.preserveRatio).toBe(true);
+    expect(ASPECT_RATIO_PRESETS.category.preserveRatio).toBe(true);
+    expect(ASPECT_RATIO_PRESETS.banner.preserveRatio).toBe(true);
     expect(ASPECT_RATIO_PRESETS.avatar.aspectRatio).toBe(1);
     expect(ASPECT_RATIO_PRESETS.default.preserveRatio).toBe(true);
   });
@@ -780,7 +776,7 @@ describe('MediaService', () => {
       await mongoose.connect(MONGO_URI);
     }
 
-    const MediaService = (await import('#modules/content/media/media.service.js')).default;
+    const MediaService = (await import('#resources/content/media/media.service.js')).default;
 
     driver = createMockDriver();
     mediaKit = createMedia({
@@ -955,7 +951,20 @@ describe('MediaService', () => {
 
 describe('Media API (full app)', () => {
   let server;
-  let auth;
+  let adminToken = '';
+  let userToken = '';
+
+  function authHeaders(token) {
+    return { authorization: `Bearer ${token}` };
+  }
+
+  function parseBody(payload) {
+    try {
+      return JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  }
 
   beforeAll(async () => {
     process.env.JWT_SECRET = 'test-secret-key-1234567890-abcdefgh';
@@ -966,10 +975,40 @@ describe('Media API (full app)', () => {
       process.env.MONGO_URI = globalThis.__MONGO_URI__;
     }
 
-    const { createApplication } = await import('../app.js');
-    server = await createApplication();
+    const { loadTestResources } = await import('./setup/preload-resources.js');
+    const { resources } = await loadTestResources();
+    const { createApplication } = await import('../src/app.js');
+    server = await createApplication({ resources });
     await server.ready();
-    auth = createTestAuth(server);
+
+    const adminSignup = await server.inject({
+      method: 'POST',
+      url: '/api/auth/sign-up/email',
+      payload: { email: 'media-admin@test.com', password: 'password123456', name: 'Media Admin' },
+    });
+    const adminUserId = parseBody(adminSignup.body)?.user?.id;
+    await mongoose.connection.getClient().db().collection('user').updateOne(
+      { _id: new mongoose.Types.ObjectId(adminUserId) },
+      { $set: { role: ['admin', 'superadmin'] } },
+    );
+    const adminLogin = await server.inject({
+      method: 'POST',
+      url: '/api/auth/sign-in/email',
+      payload: { email: 'media-admin@test.com', password: 'password123456' },
+    });
+    adminToken = parseBody(adminLogin.body)?.token || '';
+
+    await server.inject({
+      method: 'POST',
+      url: '/api/auth/sign-up/email',
+      payload: { email: 'media-user@test.com', password: 'password123456', name: 'Media User' },
+    });
+    const userLogin = await server.inject({
+      method: 'POST',
+      url: '/api/auth/sign-in/email',
+      payload: { email: 'media-user@test.com', password: 'password123456' },
+    });
+    userToken = parseBody(userLogin.body)?.token || '';
   }, 60000);
 
   afterAll(async () => {
@@ -981,42 +1020,46 @@ describe('Media API (full app)', () => {
   });
 
   it('should serve GET /api/v1/media with admin auth', async () => {
-    const res = await request(server)
-      .get('/api/v1/media')
-      .withAuth({ id: 'admin1', role: 'admin' })
-      .send();
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/v1/media',
+      headers: authHeaders(adminToken),
+    });
 
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.payload);
+    const body = parseBody(res.body);
     expect(body.success).toBe(true);
   });
 
   it('should reject GET /api/v1/media without admin role', async () => {
-    const res = await request(server)
-      .get('/api/v1/media')
-      .withAuth({ id: 'user1', role: 'user' })
-      .send();
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/v1/media',
+      headers: authHeaders(userToken),
+    });
 
     expect(res.statusCode).toBe(403);
   });
 
   it('should serve GET /api/v1/media/folders', async () => {
-    const res = await request(server)
-      .get('/api/v1/media/folders')
-      .withAuth({ id: 'admin1', role: 'admin' })
-      .send();
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/v1/media/folders',
+      headers: authHeaders(adminToken),
+    });
 
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.payload);
+    const body = parseBody(res.body);
     expect(body.success).toBe(true);
     expect(body.data).toEqual(BASE_FOLDERS);
   });
 
   it('should serve GET /api/v1/media/folders/tree', async () => {
-    const res = await request(server)
-      .get('/api/v1/media/folders/tree')
-      .withAuth({ id: 'admin1', role: 'admin' })
-      .send();
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/v1/media/folders/tree',
+      headers: authHeaders(adminToken),
+    });
 
     // 200 if DB has data, 500 if S3 not configured in test — route exists either way
     expect(res.statusCode).not.toBe(404);
@@ -1033,10 +1076,11 @@ describe('Media API (full app)', () => {
   });
 
   it('should reject non-admin upload', async () => {
-    const res = await request(server)
-      .post('/api/v1/media/upload')
-      .withAuth({ id: 'user1', role: 'user' })
-      .send();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/api/v1/media/upload',
+      headers: authHeaders(userToken),
+    });
 
     expect(res.statusCode).toBe(403);
   });
@@ -1077,21 +1121,23 @@ describe('Media API (full app)', () => {
   });
 
   it('should have folder rename route registered', async () => {
-    const res = await request(server)
-      .patch('/api/v1/media/folders/general')
-      .withAuth({ id: 'admin1', role: 'admin' })
-      .withBody({ newName: 'test-rename' })
-      .send();
+    const res = await server.inject({
+      method: 'PATCH',
+      url: '/api/v1/media/folders/general',
+      headers: authHeaders(adminToken),
+      payload: { newName: 'test-rename' },
+    });
 
     // Should not be 404 (route exists)
     expect(res.statusCode).not.toBe(404);
   });
 
   it('should have subfolder route registered', async () => {
-    const res = await request(server)
-      .get('/api/v1/media/folders/products/subfolders')
-      .withAuth({ id: 'admin1', role: 'admin' })
-      .send();
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/v1/media/folders/products/subfolders',
+      headers: authHeaders(adminToken),
+    });
 
     // Route exists (not 404) and auth passes (not 403)
     expect(res.statusCode).not.toBe(404);

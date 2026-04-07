@@ -540,7 +540,7 @@ describe('Utility Re-exports', () => {
 
 describe('Refund Utilities', () => {
   it('canRefundOrder returns eligible for verified payment', async () => {
-    const { canRefundOrder } = await import('../shared/revenue/refund.utils.js');
+    const { canRefundOrder } = await import('../src/shared/revenue/refund.utils.ts');
 
     const order = {
       currentPayment: {
@@ -555,7 +555,7 @@ describe('Refund Utilities', () => {
   });
 
   it('canRefundOrder returns ineligible without transactionId', async () => {
-    const { canRefundOrder } = await import('../shared/revenue/refund.utils.js');
+    const { canRefundOrder } = await import('../src/shared/revenue/refund.utils.ts');
 
     const order = { currentPayment: { status: 'pending' } };
     const result = canRefundOrder(order);
@@ -564,7 +564,7 @@ describe('Refund Utilities', () => {
   });
 
   it('canRefundOrder returns ineligible for unverified payment', async () => {
-    const { canRefundOrder } = await import('../shared/revenue/refund.utils.js');
+    const { canRefundOrder } = await import('../src/shared/revenue/refund.utils.ts');
 
     const order = {
       currentPayment: { transactionId: 'txn_456', status: 'pending' },
@@ -575,7 +575,7 @@ describe('Refund Utilities', () => {
   });
 
   it('getRefundableAmount calculates remaining after partial refund', async () => {
-    const { getRefundableAmount } = await import('../shared/revenue/refund.utils.js');
+    const { getRefundableAmount } = await import('../src/shared/revenue/refund.utils.ts');
 
     const order = {
       currentPayment: {
@@ -588,7 +588,7 @@ describe('Refund Utilities', () => {
   });
 
   it('getRefundableAmount returns full amount when no prior refund', async () => {
-    const { getRefundableAmount } = await import('../shared/revenue/refund.utils.js');
+    const { getRefundableAmount } = await import('../src/shared/revenue/refund.utils.ts');
 
     const order = {
       currentPayment: { amount: 50000 },
@@ -598,7 +598,7 @@ describe('Refund Utilities', () => {
   });
 
   it('getRefundableAmount returns 0 for missing payment', async () => {
-    const { getRefundableAmount } = await import('../shared/revenue/refund.utils.js');
+    const { getRefundableAmount } = await import('../src/shared/revenue/refund.utils.ts');
 
     expect(getRefundableAmount({})).toBe(0);
     expect(getRefundableAmount({ currentPayment: {} })).toBe(0);
@@ -607,20 +607,20 @@ describe('Refund Utilities', () => {
 
 describe('Payment Verification Utilities', () => {
   it('validatePaymentData throws without method', async () => {
-    const { validatePaymentData } = await import('../shared/revenue/payment-verification.utils.js');
+    const { validatePaymentData } = await import('../src/shared/revenue/payment-verification.utils.ts');
 
     expect(() => validatePaymentData(null)).toThrow('Payment method is required');
     expect(() => validatePaymentData({})).toThrow('Payment method is required');
   });
 
   it('validatePaymentData passes with valid method', async () => {
-    const { validatePaymentData } = await import('../shared/revenue/payment-verification.utils.js');
+    const { validatePaymentData } = await import('../src/shared/revenue/payment-verification.utils.ts');
 
     expect(() => validatePaymentData({ method: 'bkash' })).not.toThrow();
   });
 
   it('resolveGateway defaults to manual', async () => {
-    const { resolveGateway } = await import('../shared/revenue/payment-verification.utils.js');
+    const { resolveGateway } = await import('../src/shared/revenue/payment-verification.utils.ts');
 
     expect(resolveGateway(null)).toBe('manual');
     expect(resolveGateway({})).toBe('manual');
@@ -630,7 +630,7 @@ describe('Payment Verification Utilities', () => {
 
 describe('Schema Helpers', () => {
   it('buildCurrentPayment creates correct structure', async () => {
-    const { buildCurrentPayment } = await import('../shared/revenue/schemas.js');
+    const { buildCurrentPayment } = await import('../src/shared/revenue/schemas.ts');
 
     const result = buildCurrentPayment(50000, 'bkash', 'BGH3K5L90P');
     expect(result).toEqual({
@@ -642,7 +642,7 @@ describe('Schema Helpers', () => {
   });
 
   it('buildSplitPayment handles single payment', async () => {
-    const { buildSplitPayment } = await import('../shared/revenue/schemas.js');
+    const { buildSplitPayment } = await import('../src/shared/revenue/schemas.ts');
 
     const result = buildSplitPayment(50000, [
       { method: 'cash', amount: 50000 },
@@ -653,7 +653,7 @@ describe('Schema Helpers', () => {
   });
 
   it('buildSplitPayment handles multiple payments', async () => {
-    const { buildSplitPayment } = await import('../shared/revenue/schemas.js');
+    const { buildSplitPayment } = await import('../src/shared/revenue/schemas.ts');
 
     const result = buildSplitPayment(50000, [
       { method: 'cash', amount: 30000 },
@@ -667,13 +667,13 @@ describe('Schema Helpers', () => {
   });
 
   it('validateSplitPayments passes for single payment', async () => {
-    const { validateSplitPayments } = await import('../shared/revenue/schemas.js');
+    const { validateSplitPayments } = await import('../src/shared/revenue/schemas.ts');
 
     expect(validateSplitPayments({ amount: 50000, method: 'cash' })).toBe(true);
   });
 
   it('validateSplitPayments validates split totals', async () => {
-    const { validateSplitPayments } = await import('../shared/revenue/schemas.js');
+    const { validateSplitPayments } = await import('../src/shared/revenue/schemas.ts');
 
     // Matching totals
     expect(validateSplitPayments({

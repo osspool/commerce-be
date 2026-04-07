@@ -360,213 +360,48 @@ For customers with a membership card, tier is based on **lifetime points earned*
 
 ---
 
-## Membership API
+## Membership & Loyalty
 
-Customers can optionally have membership cards for loyalty points and tier-based discounts.
+> **Full docs: [Loyalty System Guide](../../loyalty.md)**
 
-The Membership API follows **Stripe-style action-based routing** - single endpoint with action in body.
+Membership is powered by the `@classytic/loyalty` engine. The Customer model has a **thin `membership` field** (read cache) that is synced from the loyalty engine via events.
 
-### Action-Based Endpoint
+### Endpoints
 
-```http
-POST /api/v1/customers/:id/membership
-Authorization: Bearer <staff_token>
-Content-Type: application/json
+**New (recommended):** Use `/api/v1/loyalty/*` — see [Loyalty Guide](../../loyalty.md#api-endpoints).
 
-{ "action": "enroll" | "deactivate" | "reactivate" | "adjust", ...params }
-```
+**Legacy (still works):** `POST /customers/:id/membership` with `{ action: 'enroll' | 'deactivate' | 'reactivate' | 'adjust' }`. Delegates to the loyalty engine internally.
 
-| Action | Description | Additional Params |
-|--------|-------------|-------------------|
-| `enroll` | Enroll customer in membership | - |
-| `deactivate` | Deactivate membership card | - |
-| `reactivate` | Reactivate membership card | - |
-| `adjust` | Add/deduct points manually | `points`, `reason`, `type` |
+### Customer.membership (thin field)
 
-### Self-Service Endpoint
-
-```http
-POST /api/v1/customers/me/membership
-Authorization: Bearer <customer_token>
-
-{ "action": "enroll" }
-```
-
-Only `enroll` action is available for self-service.
-
-### Examples
-
-**Enroll customer:**
-```json
-{ "action": "enroll" }
-```
-
-**Deactivate membership:**
-```json
-{ "action": "deactivate" }
-```
-
-**Add bonus points (admin):**
-```json
-{
-  "action": "adjust",
-  "points": 500,
-  "reason": "Birthday bonus",
-  "type": "bonus"
-}
-```
-
-**Deduct points (correction):**
-```json
-{
-  "action": "adjust",
-  "points": -100,
-  "reason": "Refund adjustment",
-  "type": "correction"
-}
-```
-
-### Adjustment Types
-
-| Type | Description | Affects Lifetime |
-|------|-------------|------------------|
-| `bonus` | Promotional/reward points | Yes (counts for tier) |
-| `correction` | Error fix | No |
-| `manual_redemption` | Manual points usage | No (tracks in redeemed) |
-| `redemption` | POS/checkout redemption | No (tracks in redeemed) |
-| `expiry` | Expired points removal | No |
-
-**Response:**
+A read-optimized snapshot synced from the loyalty engine. Included in all customer responses:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "_id": "customer_id",
-    "name": "Rahim Ahmed",
-    "membership": {
-      "cardId": "MBR-12345678",
-      "isActive": true,
-      "enrolledAt": "2025-01-01T00:00:00Z",
-      "points": { "current": 500, "lifetime": 500, "redeemed": 0 },
-      "tier": "Silver"
-    }
-  },
-  "adjustment": {
-    "points": 500,
-    "type": "bonus",
-    "reason": "Birthday bonus",
-    "balanceBefore": 0,
-    "balanceAfter": 500
-  },
-  "message": "Points adjusted: +500"
-}
-```
-
-> **Note:** Enrollment requires membership to be enabled in Platform Config (`membership.enabled: true`).
-
-### Membership Data in Customer Response
-
-When a customer has a membership card, it's included in all customer responses:
-
-```json
-{
-  "_id": "customer_id",
-  "name": "Rahim Ahmed",
-  "phone": "01712345678",
   "membership": {
     "cardId": "MBR-12345678",
     "isActive": true,
     "enrolledAt": "2025-01-01T00:00:00Z",
-    "points": {
-      "current": 2150,
-      "lifetime": 2500,
-      "redeemed": 350
-    },
+    "points": { "current": 2150, "lifetime": 2500, "redeemed": 350 },
     "tier": "Gold"
   }
 }
 ```
 
-### Lookup by Membership Card
+### Card Lookup
 
 ```http
 GET /api/v1/customers?membership.cardId=MBR-12345678
-Authorization: Bearer <token>
 ```
 
-### Membership Fields
+### Points at POS
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `membership.cardId` | string | Unique card ID (e.g., `MBR-12345678`) |
-| `membership.isActive` | boolean | Card active status |
-| `membership.enrolledAt` | date | Enrollment timestamp |
-| `membership.points.current` | number | Available points for redemption |
-| `membership.points.lifetime` | number | Total points earned (for tier calculation) |
-| `membership.points.redeemed` | number | Total points redeemed historically |
-| `membership.tier` | string | Current tier (Bronze, Silver, Gold, Platinum) |
-| `membership.tierOverride` | string | Manual tier override (for VIP customers) |
+1. Scan card → resolve customer via `membership.cardId`
+2. Tier discount auto-applied
+3. Redemption validated + reserved via loyalty engine (race-safe)
+4. Points earned after order success (idempotent)
 
-### Using Membership at POS
-
-When processing a POS order with a membership customer:
-
-1. **Scan/Enter Card ID**: Pass `membershipCardId` in POS order request
-2. **Auto Lookup**: Customer is resolved from card ID
-3. **Tier Discount**: Auto-applied based on tier configuration
-4. **Points Earned**: Calculated from order total and tier multiplier
-5. **Receipt**: Shows membership info (card, tier, points earned, discount)
-
-See [POS API Guide](commerce/pos.md#6-membership-cards) for full details.
-
-### Points Lifecycle & Restoration
-
-**Points Earning:**
-- Points are earned when orders reach `delivered` or `completed` status
-- Calculated based on final order total (after all discounts)
-- Tier multiplier applied based on customer's membership tier
-
-**Points Redemption:**
-- Points are deducted immediately when order is created with `pointsToRedeem`
-- Deduction reflected in `membership.points.current` (decremented) and `membership.points.redeemed` (incremented)
-- Conversion rate defined in platform config (e.g., 10 points = 1 BDT discount)
-
-**Automatic Points Restoration:**
-
-Points are automatically restored in these scenarios:
-
-1. **Order Cancellation** (`status` → `cancelled`)
-   - Redeemed points restored to `membership.points.current`
-   - `membership.points.redeemed` decremented by the same amount
-   - Restoration happens automatically (no manual adjustment needed)
-   - Restoration is idempotent (cancelling same order multiple times won't restore twice)
-
-2. **Payment Refund** (`currentPayment.status` → `refunded`)
-   - Same restoration logic as cancellation
-   - Points restored even if order was delivered before refund
-   - Only redeemed points are restored (not earned points)
-
-**Example Flow:**
-
-```json
-// 1. Before order (initial state)
-"membership": {
-  "points": { "current": 500, "lifetime": 500, "redeemed": 0 }
-}
-
-// 2. After order with 100 points redeemed
-"membership": {
-  "points": { "current": 400, "lifetime": 500, "redeemed": 100 }
-}
-
-// 3. After order cancellation (points restored)
-"membership": {
-  "points": { "current": 500, "lifetime": 500, "redeemed": 0 }
-}
-```
-
-> **Important:** Restoration only applies to redeemed points. Earned points (from completed orders) are not affected by cancellations/refunds. If you need to reverse earned points, use the points adjustment API with `type: 'correction'`.
+See [Loyalty Guide](../../loyalty.md#pos-checkout-flow) for the full flow.
 
 ---
 

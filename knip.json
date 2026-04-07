@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/index.ts",
+    "src/app.ts",
+    "src/worker.ts"
+  ],
+  "project": ["src/**/*.ts"],
+  "ignore": [
+    "src/**/*.test.ts",
+    "src/**/events.ts",
+    "src/config/validator.ts"
+  ],
+  "ignoreDependencies": [
+    "pino-pretty"
+  ],
+  "vitest": {
+    "entry": ["tests/**/*.test.ts", "src/**/*.test.ts"],
+    "config": ["vitest.config.ts"]
+  }
+}

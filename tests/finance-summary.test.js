@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildFinanceSummary } from '../modules/finance/handlers/summary.handler.js';
+import { buildFinanceSummary } from '../src/resources/finance/handlers/summary.handler.ts';
 
 describe('Finance summary formatting', () => {
   it('aggregates by day+branch and computes method breakdown', () => {
@@ -17,4 +17,3 @@ describe('Finance summary formatting', () => {
     expect(data.byDay[0].branchCode).toBe('DHK');
   });
 });
-

@@ -15,8 +15,8 @@ Quick reference for implementing checkout flow with order creation.
 2. Location  → Customer selects delivery area (from bd-areas constants)
 3. Checkout  → Fetch cart + platform config + delivery charge estimate
 4. Order     → POST /api/v1/orders with delivery address + payment info
-5. Backend   → Processes cart, validates stock, applies coupon, calculates VAT (3-tier cascade),
-              → generates invoice number, reserves stock, creates order, clears cart
+5. Backend   → Processes cart, validates stock (via Flow availability), applies coupon, calculates VAT (3-tier cascade),
+              → generates invoice number, reserves stock (Flow soft reservation with TTL), creates order, clears cart
 ```
 
 ### Adding Items to Cart

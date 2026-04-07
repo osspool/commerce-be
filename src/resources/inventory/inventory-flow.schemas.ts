@@ -1,0 +1,203 @@
+/**
+ * Flow-Native Inventory Schemas (Zod v4)
+ *
+ * Request/response validation + auto OpenAPI doc generation for
+ * availability, reservation, and scan endpoints.
+ *
+ * Arc auto-converts Zod schemas to JSON Schema via z.toJSONSchema().
+ */
+import { z } from 'zod';
+
+// ── Shared ──
+
+const idParam = z.object({ id: z.string().describe('Resource ID') });
+
+const successEnvelope = (dataSchema: z.ZodTypeAny) =>
+  z.object({
+    success: z.literal(true),
+    data: dataSchema,
+  });
+
+const _errorEnvelope = z.object({
+  success: z.literal(false),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+
+// ── Availability ──
+
+const availabilityResult = z.object({
+  quantityOnHand: z.number(),
+  quantityReserved: z.number(),
+  quantityAvailable: z.number(),
+  quantityIncoming: z.number(),
+  quantityOutgoing: z.number(),
+});
+
+export const availabilitySchemas = {
+  get: {
+    querystring: z.object({
+      skuRef: z.string().optional().describe('Filter by SKU reference'),
+      nodeId: z.string().optional().describe('Filter by warehouse node ID'),
+      locationId: z.string().optional().describe('Filter by location ID'),
+      branchId: z.string().optional().describe('Organization/branch ID (overrides auth context)'),
+    }),
+    response: { 200: successEnvelope(availabilityResult) },
+  },
+  check: {
+    body: z.object({
+      items: z
+        .array(
+          z.object({
+            skuRef: z.string().describe('SKU reference'),
+            quantity: z.number().min(1).describe('Required quantity'),
+          }),
+        )
+        .min(1)
+        .describe('Items to check availability for'),
+      branchId: z.string().optional().describe('Organization/branch ID'),
+    }),
+    response: {
+      200: successEnvelope(
+        z.object({
+          allAvailable: z.boolean(),
+          items: z.array(
+            z.object({
+              skuRef: z.string(),
+              requested: z.number(),
+              available: z.number(),
+              sufficient: z.boolean(),
+            }),
+          ),
+        }),
+      ),
+    },
+  },
+};
+
+// ── Reservation ──
+
+const reservationResult = z.object({
+  _id: z.string(),
+  organizationId: z.string(),
+  reservationType: z.enum(['soft', 'hard']),
+  ownerType: z.string(),
+  ownerId: z.string(),
+  skuRef: z.string(),
+  locationId: z.string(),
+  quantity: z.number(),
+  quantityConsumed: z.number().optional(),
+  status: z.string(),
+  expiresAt: z.string().datetime().optional(),
+  createdAt: z.string().datetime().optional(),
+});
+
+export const reservationSchemas = {
+  create: {
+    body: z.object({
+      reservationType: z.enum(['soft', 'hard']).describe('Soft = advisory, hard = locked'),
+      ownerType: z.string().describe('Owner entity type (e.g. order, cart, move_group)'),
+      ownerId: z.string().describe('Owner entity ID'),
+      skuRef: z.string().describe('SKU reference'),
+      locationId: z.string().optional().describe('Location ID (defaults to main)'),
+      quantity: z.number().min(1).describe('Quantity to reserve'),
+      expiresAt: z.string().datetime().optional().describe('Reservation expiry (ISO 8601)'),
+      branchId: z.string().optional().describe('Organization/branch ID'),
+    }),
+    response: { 201: successEnvelope(reservationResult) },
+  },
+  release: {
+    params: idParam,
+    response: { 200: successEnvelope(reservationResult) },
+  },
+  consume: {
+    params: idParam,
+    body: z.object({
+      quantity: z.number().min(1).describe('Quantity to consume from reservation'),
+    }),
+    response: { 200: successEnvelope(reservationResult) },
+  },
+};
+
+// ── Scan ──
+
+const scanResult = z.object({
+  type: z.enum(['location', 'lot', 'serial', 'sku', 'unknown']).describe('Resolved entity type'),
+  resolvedId: z.string().optional().describe('Resolved entity ID'),
+  entity: z.any().optional().describe('Resolved entity details'),
+  token: z.string().describe('Original scanned token'),
+});
+
+export const scanSchemas = {
+  resolve: {
+    body: z.object({
+      token: z.string().min(1).describe('Barcode, QR code, RFID, or SKU token to resolve'),
+    }),
+    response: { 200: successEnvelope(scanResult) },
+  },
+};
+
+// ── Adjustments ──
+
+export const adjustmentSchemaZod = {
+  body: z.object({
+    productId: z.string().optional().describe('Product ID (single item)'),
+    variantSku: z.string().optional().describe('Variant SKU'),
+    quantity: z.number().optional().describe('Target quantity or adjustment amount'),
+    mode: z.enum(['set', 'add', 'remove']).default('set').describe('set: absolute, add: increase, remove: decrease'),
+    reason: z.string().optional().describe('Reason for adjustment'),
+    adjustments: z
+      .array(
+        z.object({
+          productId: z.string(),
+          variantSku: z.string().optional(),
+          quantity: z.number(),
+          mode: z.enum(['set', 'add', 'remove']).optional(),
+          reason: z.string().optional(),
+        }),
+      )
+      .optional()
+      .describe('Bulk adjustments (alternative to single item)'),
+    branchId: z.string().optional().describe('Branch ID (defaults to main)'),
+    lostAmount: z.number().min(0).optional().describe('Create expense transaction for this amount'),
+    transactionData: z
+      .object({
+        paymentMethod: z.enum(['cash', 'bkash', 'nagad', 'rocket', 'bank_transfer']).default('cash'),
+        reference: z.string().optional(),
+      })
+      .optional()
+      .describe('Transaction details (only if lostAmount provided)'),
+  }),
+  response: {
+    200: z.object({
+      success: z.literal(true),
+      data: z.any(),
+      message: z.string().optional(),
+      transaction: z
+        .object({
+          _id: z.any(),
+          amount: z.number(),
+          category: z.string(),
+        })
+        .nullable()
+        .optional(),
+    }),
+  },
+};
+
+// ── Movements ──
+
+export const movementSchemas = {
+  list: {
+    querystring: z.object({
+      productId: z.string().optional().describe('Filter by product ID'),
+      branchId: z.string().optional().describe('Filter by branch'),
+      type: z.string().optional().describe('Filter by movement type'),
+      startDate: z.string().optional().describe('Start date (ISO 8601)'),
+      endDate: z.string().optional().describe('End date (ISO 8601)'),
+      page: z.coerce.number().min(1).optional().describe('Page number'),
+      limit: z.coerce.number().min(1).max(100).optional().describe('Items per page'),
+      sort: z.string().optional().describe('Sort field'),
+    }),
+  },
+};

@@ -2,7 +2,31 @@
 
 Complete API reference for the BigBoss e-commerce platform.
 
-## Directory Structure
+## Tech Stack
+
+- **Language:** TypeScript (strict mode)
+- **Runtime:** Node.js with tsx (dev) / tsc build
+- **Framework:** Fastify via **Arc 2.4.0** (`@classytic/arc`)
+- **Database:** MongoDB via **MongoKit 3.4.2** (`@classytic/mongokit`) + Mongoose
+- **Auth:** Better Auth (branch-as-organization model)
+- **Events:** Arc defineEvent + EventRegistry + MemoryEventTransport + EventOutbox
+- **Payments:** `@classytic/revenue`
+- **Testing:** Vitest
+
+## Source Directory Structure
+
+```
+src/
+├── config/         # Environment, permissions, feature flags
+├── core/           # Framework plugins, middleware, policies
+├── shared/         # Cross-cutting: event registry, outbox, permissions, workflows
+├── resources/      # Domain modules (see below)
+├── lib/            # Utility libraries (logger, integrations, adapters)
+├── routes/         # Top-level route registration
+└── cron/           # Background tasks (reservation cleanup, outbox relay)
+```
+
+## API Docs Structure
 
 ```
 docs/api/
@@ -41,7 +65,8 @@ Customer-facing sales flows.
 | [Checkout](sales/checkout.md) | Web checkout flow |
 | [Order](sales/order.md) | Order lifecycle and fulfillment |
 | [POS](sales/pos.md) | Point of sale operations |
-| [Customer](sales/customer.md) | Customer profiles, addresses, membership |
+| [Customer](sales/customer.md) | Customer profiles, addresses |
+| [Loyalty](../loyalty.md) | Membership, points, tiers, redemption |
 
 ---
 
@@ -52,10 +77,11 @@ Stock and supply chain management.
 | API | Description |
 |-----|-------------|
 | [Inventory](inventory/inventory.md) | Stock management overview |
+| [Warehouse](inventory/warehouse.md) | Nodes, locations, audits, availability, reservations |
 | [Purchases](inventory/purchases.md) | Supplier purchases, payments |
+| [Challan (Transfers)](inventory/challan.md) | Inter-branch transfers |
 | [Stock Movements](inventory/stock-movements.md) | Movement types, audit trail |
 | [Vendor](inventory/vendor.md) | Supplier management |
-| [Challan (Transfers)](inventory/challan.md) | Inter-branch transfers |
 
 ---
 
@@ -111,6 +137,22 @@ System configuration and utilities.
 
 ---
 
+## Event-Driven Architecture
+
+The platform uses Arc 2.4.0's event system for domain decoupling:
+
+- **defineEvent** declares typed domain events per resource (e.g., `product.created`, `order.fulfilled`).
+- **EventRegistry** catalogs all events for introspection and optional schema validation.
+- **MemoryEventTransport** delivers events in-process (no external broker required).
+- **EventOutbox** (MongoDB-backed) ensures at-least-once delivery for critical flows like POS transactions. A cron relay delivers pending outbox events every 5 seconds.
+- **withCompensation** provides saga-style rollback for multi-step order workflows (create, fulfill, cancel, refund).
+
+Background tasks run via cron intervals (no job queue):
+- Reservation cleanup (every 5 minutes)
+- Outbox relay (every 5 seconds)
+
+---
+
 ## Quick Reference
 
 ### Authentication
@@ -148,4 +190,5 @@ POST /api/v1/pos/orders
 ## Architecture Docs
 
 For system design and setup guides, see:
+- [Architecture Overview](../architecture.md)
 - [Production Setup (Bangladesh)](../PRODUCTION_SETUP_BD.md)

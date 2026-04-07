@@ -5,7 +5,7 @@ import {
   getCartItemVariantSku,
   resolvePosItemShipping,
   resolveCartItemShipping,
-} from '#modules/sales/orders/checkout.utils.js';
+} from '#resources/sales/orders/checkout.utils.js';
 
 describe('checkout.utils (order parcel metrics)', () => {
   it('resolves variant SKU from direct variantSku', () => {

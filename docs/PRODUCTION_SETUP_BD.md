@@ -41,7 +41,7 @@ Set `MONGO_URI` in your deployment environment.
 
 ### Minimum standard
 - Daily automated backup (or PITR).
-- Monthly restore drill: restore into a separate “staging restore” DB and verify:
+- Monthly restore drill: restore into a separate "staging restore" DB and verify:
   - orders exist
   - stock entries exist
   - latest challans exist
@@ -65,7 +65,7 @@ There must be exactly one `Branch.role=head_office` and at least one active bran
 3. Set the primary selling branch to `isDefault=true` (optional but recommended).
 
 ### Why this matters
-Many flows fall back to default branch when branch isn’t provided. If the default branch is wrong, you can:
+Many flows fall back to default branch when branch isn't provided. If the default branch is wrong, you can:
 - reserve/decrement stock in the wrong branch
 - compute wrong profit (branch-specific cost lookup)
 
@@ -76,7 +76,7 @@ Many flows fall back to default branch when branch isn’t provided. If the defa
 ### Standard used in this codebase
 - **Cost of goods (COGS)** is maintained at head office inventory and propagated.
 - **Product/variant `costPrice`** is treated as a **read-only snapshot** for fast reads/fallback.
-- Transfers inherit cost from sender stock; stores do not “invent” cost locally.
+- Transfers inherit cost from sender stock; stores do not "invent" cost locally.
 
 ### What your warehouse should do
 - Use **Purchases** to add stock and set `items[].costPrice`.
@@ -85,7 +85,7 @@ Many flows fall back to default branch when branch isn’t provided. If the defa
 ### What stores should do
 - Use **POS** for sales (immediate decrement).
 - Use **Receive Challan** for incoming stock.
-- Use **Adjustments** for recount/loss/damage only (not as a “stock in” mechanism).
+- Use **Adjustments** for recount/loss/damage only (not as a "stock in" mechanism).
 
 ---
 
@@ -111,13 +111,16 @@ It prevents oversells in e-commerce where many users can checkout at the same ti
 - POS validates available stock and decrements immediately (no reservation).
 - POS pricing is computed server-side to prevent tampering.
 
+### POS transaction durability (EventOutbox)
+POS sale events are persisted to a MongoDB-backed **EventOutbox** before delivery. A cron relay (every 5 seconds) retries any undelivered events, guaranteeing at-least-once processing even if the server restarts mid-transaction.
+
 ### Operational recommendations (BD reality)
-- Always send `idempotencyKey` from POS terminals so network retries don’t create duplicate sales (multi-instance safe; stored with TTL).
+- Always send `idempotencyKey` from POS terminals so network retries don't create duplicate sales (multi-instance safe; stored with TTL).
 - Keep terminal identifiers stable per device (`terminalId`).
 
 ### Money units (important)
 - `Order.totalAmount`, `StockEntry.costPrice`, and most business-facing amounts are stored/handled in **BDT**.
-- `Transaction.amount` is stored in the **smallest unit** (paisa) per `modules/transaction/transaction.model.js` and `@classytic/revenue`.
+- `Transaction.amount` is stored in the **smallest unit** (paisa) per `src/resources/transaction/transaction.model.ts` and `@classytic/revenue`.
 
 ---
 
@@ -133,7 +136,7 @@ It prevents oversells in e-commerce where many users can checkout at the same ti
 - `store-manager`
   - receive challans
   - POS checkout
-  - local adjustments that do not “add” stock (recount/loss)
+  - local adjustments that do not "add" stock (recount/loss)
 - `finance-admin`
   - view cost and profit fields
   - exports/reports
@@ -142,7 +145,7 @@ It prevents oversells in e-commerce where many users can checkout at the same ti
   - reports
 
 ### Why strict permissions matter
-Inventory correctness depends more on preventing the wrong action than “fixing it later”.
+Inventory correctness depends more on preventing the wrong action than "fixing it later".
 
 ---
 
@@ -161,7 +164,18 @@ Align finance rules first, then lock the platform config accordingly.
 
 ---
 
-## 9) Go-Live Checklist
+## 9) Background Tasks
+
+Background processing uses **Arc events + cron intervals** (no job queue):
+
+- **Outbox relay** (every 5 seconds) — delivers pending EventOutbox entries to in-process handlers. Guarantees at-least-once delivery for POS transactions and other critical flows.
+- **Reservation cleanup** (every 5 minutes) — expires stale stock reservations from abandoned web checkouts across all bootstrapped organizations.
+
+Both tasks are registered in `src/cron/index.ts` and start automatically with the server.
+
+---
+
+## 10) Go-Live Checklist
 
 - Atlas
   - [ ] PITR/backups enabled
@@ -169,8 +183,9 @@ Align finance rules first, then lock the platform config accordingly.
   - [ ] DB user uses least privilege
   - [ ] Network access restricted (IP allowlist / VPC peering)
 - Runtime
-  - [ ] Run the API (and worker, if used) under a supervisor/restart policy (systemd/PM2/Docker/K8s)
+  - [ ] Run the API under a supervisor/restart policy (systemd/PM2/Docker/K8s)
   - [ ] Ensure health checks + auto-restart are working (kill the process and verify it returns)
+  - [ ] Verify outbox relay and reservation cleanup cron are running (check logs for "Cron jobs and event handlers initialized")
 - Platform
   - [ ] Head office branch set
   - [ ] Default branch set
@@ -179,11 +194,11 @@ Align finance rules first, then lock the platform config accordingly.
 - Operations
   - [ ] Warehouse SOP: Purchase → Challan → Dispatch
   - [ ] Store SOP: Receive → POS sale → Recount adjustment
-  - [ ] Staff trained on “never add stock at store via adjustment”
+  - [ ] Staff trained on "never add stock at store via adjustment"
 
 ---
 
-## 10) Transaction Categories (Quick Reference)
+## 11) Transaction Categories (Quick Reference)
 
 Your system records all financial events to proper categories for reporting:
 
@@ -205,17 +220,17 @@ Your system records all financial events to proper categories for reporting:
 | `marketing` | Expense | Ads, promotions |
 | `capital_injection` | Income | Owner investment |
 
-**Best Practice:** 
+**Best Practice:**
 - Use `inventory_purchase` with `createTransaction: true` only when you need actual expense tracking.
 - For manufacturing/homemade products, use `createTransaction: false` (cost is tracked in profit only).
 - Enable `recordCogs: true` during fulfillment for double-entry accounting.
 
 ---
 
-## 11) Related Documentation
+## 12) Related Documentation
 
-- **Architecture Review**: See `docs/COMMERCE_ARCHITECTURE_REVIEW.md` for complete system design
-- **Transaction Guide**: See `modules/transaction/TRANSACTION_API_GUIDE.md`
-- **Inventory Guide**: See `modules/commerce/inventory/INVENTORY_API_GUIDE.md`
-- **POS Guide**: See `modules/commerce/pos/POS_API_GUIDE.md`
-- **Order Guide**: See `modules/commerce/order/ORDER_API_GUIDE.md`
+- **Architecture Overview**: See `docs/architecture.md` for complete system design
+- **Transaction Guide**: See `src/resources/transaction/` for transaction models and workflows
+- **Inventory Guide**: See `src/resources/inventory/` for stock management
+- **POS Guide**: See `src/resources/sales/pos/` for point-of-sale operations
+- **Order Guide**: See `src/resources/sales/orders/` for order lifecycle

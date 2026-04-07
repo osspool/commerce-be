@@ -63,6 +63,7 @@ PATCH /api/v1/cart/items/:itemId
 - Cart uses **product.quantity** for a basic check on simple products only.
 - Variant stock is **not** validated in cart; availability is enforced at checkout via StockEntry.
 - Stock is reserved at checkout, not when adding to cart.
+- When Flow is enabled, reservations are created as `soft` type with TTL expiry. See [Warehouse API](../inventory/warehouse.md#reservations).
 
 ## UI Tips
 - Block double-click while waiting; show toast on success/error.

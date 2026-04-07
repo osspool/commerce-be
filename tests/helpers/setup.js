@@ -39,6 +39,20 @@ export async function signUp(app, data) {
   return { statusCode: res.statusCode, token, user: body?.user || body, body };
 }
 
+/**
+ * Mark a user's email as verified in the database.
+ * Required because auth.config has requireEmailVerification: true.
+ */
+export async function verifyUserEmail(userId) {
+  const mongoose = await import('mongoose');
+  const db = mongoose.default.connection.getClient().db();
+  const { ObjectId } = mongoose.default.Types;
+  await db.collection('user').updateOne(
+    { _id: new ObjectId(userId) },
+    { $set: { emailVerified: true } },
+  );
+}
+
 export async function signIn(app, data) {
   const res = await app.inject({
     method: 'POST',
@@ -81,6 +95,82 @@ export async function addMember(auth, data) {
 }
 
 // ============================================================================
+// Invitation Helpers
+// ============================================================================
+
+export async function inviteMember(app, token, orgId, email, role) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/organization/invite-member',
+    headers: authHeaders(token, orgId),
+    payload: { email, role, organizationId: orgId },
+  });
+  return { statusCode: res.statusCode, body: safeParseBody(res.body) };
+}
+
+export async function cancelInvitation(app, token, invitationId) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/organization/cancel-invitation',
+    headers: authHeaders(token),
+    payload: { invitationId },
+  });
+  return { statusCode: res.statusCode, body: safeParseBody(res.body) };
+}
+
+export async function acceptInvitation(app, invitationId) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/organization/accept-invitation',
+    headers: {},
+    payload: { invitationId },
+  });
+  return { statusCode: res.statusCode, body: safeParseBody(res.body) };
+}
+
+// ============================================================================
+// Member Management Helpers
+// ============================================================================
+
+export async function listMembers(app, token, orgId) {
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/auth/organization/list-members',
+    headers: authHeaders(token, orgId),
+  });
+  return { statusCode: res.statusCode, body: safeParseBody(res.body) };
+}
+
+export async function getFullOrg(app, token, orgId) {
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/auth/organization/get-full-organization',
+    headers: authHeaders(token, orgId),
+  });
+  return { statusCode: res.statusCode, body: safeParseBody(res.body) };
+}
+
+export async function updateMemberRole(app, token, memberId, role) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/organization/update-member-role',
+    headers: authHeaders(token),
+    payload: { memberId, role },
+  });
+  return { statusCode: res.statusCode, body: safeParseBody(res.body) };
+}
+
+export async function removeMember(app, token, memberIdOrEmail) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/organization/remove-member',
+    headers: authHeaders(token),
+    payload: { memberIdOrEmail },
+  });
+  return { statusCode: res.statusCode, body: safeParseBody(res.body) };
+}
+
+// ============================================================================
 // Full Org Setup — Commerce ERP
 // ============================================================================
 
@@ -102,14 +192,17 @@ export async function setupTestOrg() {
   process.env.MONGO_URI = uri;
 
   // Reset auth singleton so it picks up the in-memory DB
-  const { resetAuth } = await import('../../modules/auth/auth.config.js');
+  const { resetAuth } = await import('../../src/resources/auth/auth.config.js');
   resetAuth();
 
-  const { createApplication } = await import('../../app.js');
-  const app = await createApplication();
+  const { loadTestResources } = await import('../setup/preload-resources.js');
+  const { resources } = await loadTestResources();
+
+  const { createApplication } = await import('../../src/app.js');
+  const app = await createApplication({ resources });
   await app.ready();
 
-  const { getAuth } = await import('../../modules/auth/auth.config.js');
+  const { getAuth } = await import('../../src/resources/auth/auth.config.js');
   const auth = getAuth();
   const db = mongoose.connection.getClient().db();
 
@@ -123,15 +216,23 @@ export async function setupTestOrg() {
   const cashierSignup = await signUp(app, { email: 'cashier@test.com', password: 'password123', name: 'Cashier User' });
   expect(cashierSignup.statusCode).toBe(200);
 
-  // Set system-level roles (BA creates users with role: ['user'] by default)
+  // Verify emails + set roles before any sign-in (requireEmailVerification is enabled)
+  await verifyUserEmail(adminSignup.user?.id);
+  await verifyUserEmail(staffSignup.user?.id);
+  await verifyUserEmail(cashierSignup.user?.id);
+
   const { ObjectId } = mongoose.Types;
   const userCol = db.collection('user');
   await userCol.updateOne({ _id: new ObjectId(adminSignup.user?.id) }, { $set: { role: ['admin', 'superadmin'] } });
   await userCol.updateOne({ _id: new ObjectId(staffSignup.user?.id) }, { $set: { role: ['store-staff'] } });
   await userCol.updateOne({ _id: new ObjectId(cashierSignup.user?.id) }, { $set: { role: ['store-staff'] } });
 
+  // Re-login admin to get a token with verified session
+  const adminLogin = await signIn(app, { email: 'admin@test.com', password: 'password123' });
+  expect(adminLogin.statusCode).toBe(200);
+
   // Create branch (organization)
-  const orgResult = await createOrg(app, adminSignup.token, {
+  const orgResult = await createOrg(app, adminLogin.token, {
     name: 'Test Branch',
     slug: 'test-branch',
   });
@@ -150,7 +251,7 @@ export async function setupTestOrg() {
   expect((await addMember(auth, { organizationId: orgId, userId: cashierSignup.user?.id, role: 'cashier' })).statusCode).toBe(200);
 
   // Set active org and re-login
-  await setActiveOrg(app, adminSignup.token, orgId);
+  await setActiveOrg(app, adminLogin.token, orgId);
 
   const staffLogin = await signIn(app, { email: 'staff@test.com', password: 'password123' });
   await setActiveOrg(app, staffLogin.token, orgId);
@@ -164,7 +265,7 @@ export async function setupTestOrg() {
     auth,
     orgId,
     users: {
-      admin: { token: adminSignup.token, userId: adminSignup.user?.id },
+      admin: { token: adminLogin.token, userId: adminSignup.user?.id },
       staff: { token: staffLogin.token, userId: staffSignup.user?.id },
       cashier: { token: cashierLogin.token, userId: cashierSignup.user?.id },
     },

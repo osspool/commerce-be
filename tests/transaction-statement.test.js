@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatStatementRows } from '../modules/transaction/handlers/statement.handler.js';
+import { formatStatementRows } from '../src/resources/transaction/handlers/statement.handler.ts';
 
 describe('Transaction statement formatting', () => {
   it('maps core fields and converts paisa to BDT', () => {
@@ -30,4 +30,3 @@ describe('Transaction statement formatting', () => {
     expect(rows[0].branchCode).toBe('DHK');
   });
 });
-

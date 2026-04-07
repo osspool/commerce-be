@@ -14,17 +14,17 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { subscribe } from '#lib/events/arcEvents.js';
-import { handlers as categoryEventHandlers } from '#modules/catalog/categories/events.js';
+import { handlers as categoryEventHandlers } from '#resources/catalog/categories/events.js';
 
 // Set required environment variables
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-123456789';
 process.env.COOKIE_SECRET = process.env.COOKIE_SECRET || 'test-cookie-secret-key-1234567890123456';
 
 // Import models and repositories after setting env
-import Category from '#modules/catalog/categories/category.model.js';
-import Product from '#modules/catalog/products/product.model.js';
-import categoryRepository from '#modules/catalog/categories/category.repository.js';
-import productRepository from '#modules/catalog/products/product.repository.js';
+import Category from '#resources/catalog/categories/category.model.js';
+import Product from '#resources/catalog/products/product.model.js';
+import categoryRepository from '#resources/catalog/categories/category.repository.js';
+import productRepository from '#resources/catalog/products/product.repository.js';
 
 let mongoServer;
 const _registeredEventHandlers = [];

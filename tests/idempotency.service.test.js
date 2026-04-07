@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mongoose from 'mongoose';
-import { idempotencyService } from '#modules/commerce/core/index.js';
+import { idempotencyService } from '#resources/commerce/core/index.js';
 
 describe('IdempotencyService (Mongo-backed)', () => {
   let shouldDisconnect = false;

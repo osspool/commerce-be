@@ -22,8 +22,11 @@ export async function createTestServer() {
     process.env.MONGO_URI = globalThis.__MONGO_URI__;
   }
 
-  const { createApplication } = await import('../../app.js');
-  const server = await createApplication();
+  const { loadTestResources } = await import('../setup/preload-resources.js');
+  const { resources } = await loadTestResources();
+
+  const { createApplication } = await import('../../src/app.js');
+  const server = await createApplication({ resources });
   await server.ready();
   return server;
 }

@@ -389,6 +389,23 @@ Response includes:
 - `branchStock.quantity` (total at that branch)
 - `branchStock.variants[]` (per-variant quantities)
 
+## Flow Integration (Warehouse-Level Stock)
+
+When `@classytic/flow` is enabled, stock is also tracked at the **warehouse location level** via `StockQuant` records. The `CatalogBridge` connects products to Flow:
+
+- **Variant products:** `variants[].sku` → Flow's `skuRef` (e.g., `TSHIRT-M-RED`)
+- **Simple products:** `product._id` → Flow's `skuRef`
+
+This enables:
+- **Per-location stock:** Which rack/bin holds which variant — `GET /inventory/locations/:id/stock`
+- **Real-time availability:** Aggregated from StockQuants — `GET /inventory/availability?skuRef=TSHIRT-M-RED`
+- **Reservations:** Lock stock for carts/orders before fulfillment — `POST /inventory/reservations`
+- **Barcode scanning:** Resolve barcode → product → location → quant in one call — `POST /inventory/scan/resolve`
+
+`product.quantity` and `StockEntry` remain the **branch-level** source of truth for POS/storefront. Flow's `StockQuant` provides the **location-level** breakdown within a warehouse.
+
+See [Warehouse API](../inventory/warehouse.md) for full endpoint reference.
+
 ---
 
 ## Pagination Modes
@@ -1762,11 +1779,11 @@ The following virtual fields are computed and included in responses:
 - Writes: if the caller role is not in `costPrice.manageRoles`, backend ignores `costPrice` updates in product create/update payloads
 
 **Role Source of Truth:**
-- User roles are validated by `modules/auth/user.model.js` (`roles.enum`)
+- User roles are validated by `src/resources/auth/user.model.ts` (`roles.enum`)
 - If you add a new role (e.g. `cashier`), update:
-  - `modules/auth/user.model.js`
-  - `config/permissions/roles.js` (and any permission groups/routes)
-  - `config/sections/costPrice.config.js` (to grant view/manage access as needed)
+  - `src/resources/auth/user.model.ts`
+  - `src/config/permissions/roles.ts` (and any permission groups/routes)
+  - `src/config/sections/costPrice.config.ts` (to grant view/manage access as needed)
 
 ### Slug Generation
 - Product slugs are auto-generated from the product name
