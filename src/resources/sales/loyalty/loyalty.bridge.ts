@@ -1,8 +1,8 @@
 import type { LoyaltyContext } from '@classytic/loyalty/types';
-import Customer from '../customers/customer.model.js';
-import { getLoyaltyEngine } from './loyalty.plugin.js';
-import { generateCardId } from './card-id.js';
 import platformRepository from '#resources/platform/platform.repository.js';
+import Customer from '../customers/customer.model.js';
+import { generateCardId } from './card-id.js';
+import { getLoyaltyEngine } from './loyalty.plugin.js';
 
 export interface LoyaltyBridgeContext {
   actorId: string;
@@ -53,7 +53,7 @@ export async function enrollCustomer(customerId: string, ctx: LoyaltyBridgeConte
   const cardId = await generateCardId(branchCode, cardConfig);
 
   // Enroll in loyalty engine — cardId is first-class, branch provenance in metadata
-  const member = await engine.services.member.enroll(
+  const member = await engine.repositories.member.enroll(
     {
       externalId: customerId,
       externalType: 'customer',
@@ -82,7 +82,10 @@ export async function enrollCustomer(customerId: string, ctx: LoyaltyBridgeConte
  */
 export async function getMemberForCustomer(customerId: string, ctx: LoyaltyBridgeContext) {
   const engine = getLoyaltyEngine();
-  return engine.services.member.getByExternalId(customerId, 'customer', toLoyaltyCtx(ctx));
+  return engine.repositories.member.getByQuery(
+    { externalId: customerId, externalType: 'customer' },
+    { throwOnNotFound: false },
+  );
 }
 
 /**
@@ -91,10 +94,13 @@ export async function getMemberForCustomer(customerId: string, ctx: LoyaltyBridg
 export async function deactivateCustomerMembership(customerId: string, ctx: LoyaltyBridgeContext) {
   const engine = getLoyaltyEngine();
   const loyaltyCtx = toLoyaltyCtx(ctx);
-  const member = await engine.services.member.getByExternalId(customerId, 'customer', loyaltyCtx);
+  const member = await engine.repositories.member.getByQuery(
+    { externalId: customerId, externalType: 'customer' },
+    { throwOnNotFound: false },
+  );
   if (!member) throw new Error('Customer is not enrolled in loyalty program');
 
-  const deactivated = await engine.services.member.deactivate(member._id, loyaltyCtx);
+  const deactivated = await engine.repositories.member.deactivate(member._id, loyaltyCtx);
 
   await Customer.findByIdAndUpdate(customerId, { 'membership.isActive': false });
 
@@ -107,10 +113,13 @@ export async function deactivateCustomerMembership(customerId: string, ctx: Loya
 export async function reactivateCustomerMembership(customerId: string, ctx: LoyaltyBridgeContext) {
   const engine = getLoyaltyEngine();
   const loyaltyCtx = toLoyaltyCtx(ctx);
-  const member = await engine.services.member.getByExternalId(customerId, 'customer', loyaltyCtx);
+  const member = await engine.repositories.member.getByQuery(
+    { externalId: customerId, externalType: 'customer' },
+    { throwOnNotFound: false },
+  );
   if (!member) throw new Error('Customer is not enrolled in loyalty program');
 
-  const reactivated = await engine.services.member.reactivate(member._id, loyaltyCtx);
+  const reactivated = await engine.repositories.member.reactivate(member._id, loyaltyCtx);
 
   await Customer.findByIdAndUpdate(customerId, { 'membership.isActive': true });
 
@@ -123,8 +132,10 @@ export async function reactivateCustomerMembership(customerId: string, ctx: Loya
  */
 export async function syncCustomerMembership(customerId: string) {
   const engine = getLoyaltyEngine();
-  const ctx: LoyaltyContext = { actorId: 'system' };
-  const member = await engine.services.member.getByExternalId(customerId, 'customer', ctx);
+  const member = await engine.repositories.member.getByQuery(
+    { externalId: customerId, externalType: 'customer' },
+    { throwOnNotFound: false },
+  );
   if (!member) return;
 
   await Customer.findByIdAndUpdate(customerId, {

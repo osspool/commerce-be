@@ -1,5 +1,5 @@
 /**
- * Accounting Engine — Top-Level Eager Singleton (ledger 0.5.1)
+ * Accounting Engine — Top-Level Eager Singleton (ledger 0.8.0)
  *
  * The engine OWNS all models and repositories. It is created at module
  * import time as a top-level const, mirroring the @classytic/promo and
@@ -16,23 +16,37 @@
  *   import { JournalEntry, journalEntryRepository } from '../accounting.engine.js';
  */
 
-import mongoose from 'mongoose';
+import { createBdTaxResolver } from '@classytic/bd-tax';
 import { createAccountingEngine, registerJournalType } from '@classytic/ledger';
 import { bangladeshPack } from '@classytic/ledger-bd';
+import mongoose from 'mongoose';
 import config from '#config/index.js';
 import { dayCloseLockPlugin } from './posting/period-lock-guard.js';
+import { mergeResolvers, type TaxResolver } from './tax/tax-resolver.js';
 
 export { bangladeshPack as bdPack };
 
+// ─── Tax Resolver ──────────────────────────────────────────────────────────
+//
+// The country tax pack (bd-tax) plugs in here via structural typing —
+// `createBdTaxResolver()` returns an object whose shape satisfies the
+// TaxResolver interface declared in `./tax/tax-resolver.ts`. If bd-tax
+// drifts, this line fails to compile. No shared abstraction package; same
+// pattern as every `@classytic/*` repo fitting mongokit's `Repository<TDoc>`.
+//
+// Deployments can inject extra tax classes via config.accounting.extraTaxClasses
+// (e.g. a bespoke NGO exemption class awarded by SRO amendment) — they merge
+// on top of the country pack's seed without patching published packages.
+
+export const taxResolver: TaxResolver = (() => {
+  const base = createBdTaxResolver();
+  const extras = config.accounting.extraTaxClasses ?? [];
+  return extras.length ? mergeResolvers(base, extras) : base;
+})();
+
 // ─── Budget Status Values ───────────────────────────────────────────────────
 
-export const BUDGET_STATUS_VALUES = [
-  'draft',
-  'submitted',
-  'approved',
-  'rejected',
-  'closed',
-] as const;
+export const BUDGET_STATUS_VALUES = ['draft', 'submitted', 'approved', 'rejected', 'closed'] as const;
 
 // ─── Custom journal types — registered before engine creation ──────────────
 // (the JournalEntry schema reads the type enum at construction time)
@@ -48,12 +62,37 @@ registerJournalType('ECOM_SALES', {
   description: 'Online order transactions posted per-order',
 });
 
+// COD lifecycle — three journal types carve a clean audit trail:
+//   ECOM_SALES_COD            — placement: Dr 1141 A/R | Cr 4111 Revenue (+VAT)
+//   ECOM_SALES_COD_SETTLEMENT — settlement: Dr 1112 Bank + Dr 6423 Commission + Dr 6702 Writeoff | Cr 1141
+//   ECOM_SALES_COD_REVERSAL   — cancel-before-settle: mirror of placement
+// See be-prod/src/resources/accounting/posting/contracts/cod-*.contract.ts.
+registerJournalType('ECOM_SALES_COD', {
+  code: 'ECOM_SALES_COD',
+  name: 'COD Placement Journal',
+  description: 'Cash-on-delivery order placement — A/R debited, reclassified on settlement',
+});
+registerJournalType('ECOM_SALES_COD_SETTLEMENT', {
+  code: 'ECOM_SALES_COD_SETTLEMENT',
+  name: 'COD Settlement Journal',
+  description: 'COD reconciliation — Bank + Commission + optional Writeoff, clears A/R',
+});
+registerJournalType('ECOM_SALES_COD_REVERSAL', {
+  code: 'ECOM_SALES_COD_REVERSAL',
+  name: 'COD Cancellation Reversal',
+  description: 'Contra of COD placement when order is cancelled before settlement',
+});
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 export const accounting = createAccountingEngine({
   mongoose: mongoose.connection,
   country: bangladeshPack,
   currency: 'BDT',
+  multiCurrency: {
+    enabled: true,
+    currencies: ['USD', 'EUR', 'GBP', 'CNY', 'INR', 'AED', 'JPY'],
+  },
   fiscalYearStartMonth: config.accounting.fiscalYearStartMonth,
   audit: { trackActor: true },
   strictness: { immutable: true, requireActor: true },
@@ -71,15 +110,11 @@ export const accounting = createAccountingEngine({
   // through the update pipeline). Fiscal-period close at the company
   // level is enforced by the ledger's built-in fiscalLockPlugin.
   //
-  // Lookup is via mongoose connection (rather than the `accounting`
-  // const) because we're inside its initializer — TDZ would bite.
+  // Day-close lock — standardized on ledger 0.7's `createLockPlugin` +
+  // `watermarkResolver`. The plugin uses a lazy Proxy for JournalEntryModel
+  // so it works inside the engine initializer (TDZ-safe).
   plugins: {
-    journalEntry: [
-      dayCloseLockPlugin({
-        getJournalEntryModel: () =>
-          mongoose.connection.model('JournalEntry') as mongoose.Model<unknown>,
-      }),
-    ],
+    journalEntry: [dayCloseLockPlugin()],
   },
   // NO multiTenant — single company, multi-branch.
   // Account + FiscalPeriod are company-wide (no org field).
@@ -97,10 +132,13 @@ export const accounting = createAccountingEngine({
           default: null,
           index: true,
         },
-        /** Links journal entry back to the originating commerce document */
+        /** Links journal entry back to the originating commerce document.
+         * sourceId is an opaque String + sourceModel ref (ledger convention)
+         * — not a Mongoose ObjectId. Allows cross-engine refs (Order, Purchase,
+         * invoice numbers) without coupling ledger to each source's ID shape. */
         sourceRef: {
           sourceModel: { type: String, default: null },
-          sourceId: { type: mongoose.Schema.Types.ObjectId, default: null },
+          sourceId: { type: String, default: null },
         },
       },
       extraIndexes: [
@@ -110,6 +148,17 @@ export const accounting = createAccountingEngine({
           options: { sparse: true },
         },
       ],
+      // Subsidiary-ledger dimensions on journal items. ledger 0.7 exposes
+      // `extraItemFields` so we can tag every line with a partner without
+      // creating a separate Partner model. Supplier._id and Customer._id
+      // are stringified into `partnerId`; `partnerType` disambiguates the
+      // two since a single control account is never shared between them.
+      // generateAgedBalance / generatePartnerLedger read these fields via
+      // `contactField: 'journalItems.partnerId'`.
+      extraItemFields: {
+        partnerId: { type: String, default: null, index: true },
+        partnerType: { type: String, default: null },
+      },
     },
     budget:
       config.accounting.mode !== 'simple'
@@ -170,8 +219,7 @@ export const Budget =
 export const accountRepository = accounting.repositories.accounts;
 export const journalEntryRepository = accounting.repositories.journalEntries;
 export const fiscalPeriodRepository = accounting.repositories.fiscalPeriods;
-export const budgetRepository =
-  config.accounting.mode !== 'simple' ? accounting.repositories.budgets : null;
+export const budgetRepository = config.accounting.mode !== 'simple' ? accounting.repositories.budgets : null;
 
 // ─── Auto-increment budget revision on update ──────────────────────────────
 // (mode-gated; was previously inside initAccountingEngine)

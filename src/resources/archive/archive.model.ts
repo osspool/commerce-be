@@ -1,4 +1,4 @@
-import mongoose, { Schema, type HydratedDocument, type Types } from 'mongoose';
+import mongoose, { type HydratedDocument, Schema, type Types } from 'mongoose';
 
 export interface IArchive {
   type: 'order' | 'transaction';

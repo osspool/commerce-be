@@ -1,9 +1,9 @@
-import type { FastifyRequest, FastifyReply } from 'fastify';
+import fs from 'node:fs/promises';
 import { BaseController } from '@classytic/arc';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { ForbiddenError, NotFoundError } from '#shared/utils/errors.js';
 import archiveRepository from './archive.repository.js';
 import { archiveSchemaOptions } from './schemas.js';
-import fs from 'node:fs/promises';
-import { NotFoundError, ForbiddenError } from '#shared/utils/errors.js';
 
 interface AuthedRequest {
   user?: { role?: string | string[]; [key: string]: unknown };

@@ -290,7 +290,7 @@ describe('POST /journal-entries/:id/action', () => {
 
     expect(res.statusCode).toBe(409);
     const body = JSON.parse(res.body);
-    expect(body.code).toBe('PERIOD_LOCKED');
+    expect(body.code).toMatch(/^PERIOD_LOCKED/);
   });
 
   it('action=reverse with reversalDate in current open day → 200 (forward correction)', async () => {

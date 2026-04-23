@@ -5,7 +5,7 @@
  * Follows 12-factor app principles for clean process termination.
  */
 
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 interface SignalHandlerOptions {
   timeout?: number;

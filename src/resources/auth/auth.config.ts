@@ -7,41 +7,35 @@
  * Branches are modeled as BA organizations. Staff are org members with roles.
  */
 
-import { betterAuth } from 'better-auth';
-import type { BetterAuthOptions } from 'better-auth';
-import mongoose from 'mongoose';
-import { MongoClient, type Db } from 'mongodb';
 import { mongodbAdapter } from '@better-auth/mongo-adapter';
-import { organization } from 'better-auth/plugins/organization';
-import { bearer } from 'better-auth/plugins/bearer';
+import { registerBetterAuthMongooseModels } from '@classytic/arc/auth/mongoose';
+import type { BetterAuthOptions } from 'better-auth';
+import { betterAuth } from 'better-auth';
 import { admin as adminPlugin } from 'better-auth/plugins/admin';
 import { adminAc, userAc } from 'better-auth/plugins/admin/access';
+import { bearer } from 'better-auth/plugins/bearer';
+import { organization } from 'better-auth/plugins/organization';
+import mongoose from 'mongoose';
+import pino from 'pino';
 import config from '#config/index.js';
+import { notify } from '#shared/notifications/index.js';
 import {
   ac,
   branch_manager,
-  inventory_staff,
   cashier,
+  inventory_staff,
   stock_receiver,
   stock_requester,
   viewer,
 } from './access-control.js';
-import { notify } from '#shared/notifications/index.js';
 import { linkCustomerOnRegistration } from './auth.workflow.js';
 
-let _auth: any = null;
-let _mongoClient: MongoClient | null = null;
+const log = pino({ name: 'auth' });
 
-/**
- * Get a native MongoClient (from the `mongodb` package directly, not mongoose's bundled one).
- * This avoids BSON version mismatch between mongoose's bundled mongodb and @better-auth/mongo-adapter.
- */
-function getMongoDb(): Db {
-  if (!_mongoClient) {
-    _mongoClient = new MongoClient(config.db.uri || 'mongodb://localhost:27017/bigboss');
-  }
-  return _mongoClient.db();
-}
+// BA with plugins (organization, bearer, admin) widens the generic beyond
+// base `ReturnType<typeof betterAuth>`. Plugin composition makes the exact
+// type impractical to declare statically — use the structural shape Arc needs.
+let _auth: { handler: (request: Request) => Promise<Response>; api: Record<string, unknown> } | null = null;
 
 /**
  * Reset the auth singleton (for tests only).
@@ -49,10 +43,6 @@ function getMongoDb(): Db {
  */
 export function resetAuth(): void {
   _auth = null;
-  if (_mongoClient) {
-    _mongoClient.close().catch(() => {});
-    _mongoClient = null;
-  }
 }
 
 interface BAUser {
@@ -76,12 +66,21 @@ export function getAuth() {
     const isTest = config.isTest;
     const frontendUrl = config.app.frontendUrl;
 
+    // Cast needed: BA with plugins (org, bearer, admin) produces a wider
+    // generic than base `ReturnType<typeof betterAuth>`.
     _auth = betterAuth({
       secret: config.betterAuth.secret,
       baseURL: config.betterAuth.url || `http://localhost:${port}`,
       basePath: '/api/auth',
 
-      database: mongodbAdapter(getMongoDb()),
+      // Reuse Mongoose's connection — no separate MongoClient needed.
+      // BA 1.6.2+ accepts mongodb ^7 (same as mongoose 9.4's bundled driver).
+      // Cast: commerce packages install via `file:` during local dev, which
+      // symlinks their source trees (including their own nested `mongoose`/
+      // `mongodb`) into be-prod's resolution path. TypeScript sees two nominal
+      // `Db` types from different paths even though they're structurally
+      // identical. Disappears once commerce packages publish to npm.
+      database: mongodbAdapter(mongoose.connection.getClient().db() as unknown as Parameters<typeof mongodbAdapter>[0]),
 
       user: {
         additionalFields: {
@@ -199,12 +198,7 @@ export function getAuth() {
           },
           sendInvitationEmail: async (data: Record<string, unknown>) => {
             const d = data as any;
-            console.log('[invitation-email] BA data keys:', Object.keys(d));
-            console.log('[invitation-email] email:', d.email);
-            console.log('[invitation-email] id:', d.id);
-            console.log('[invitation-email] role:', d.role);
-            console.log('[invitation-email] org:', d.organization?.name);
-            console.log('[invitation-email] inviter:', d.inviter?.user?.name || d.inviter?.user?.email);
+            log.debug({ email: d.email, role: d.role, org: d.organization?.name }, 'Sending invitation email');
             const inviteUrl = `${config.app.frontendUrl}/accept-invitation/${d.id}`;
             const roles = Array.isArray(d.role) ? d.role.join(', ') : d.role || 'member';
             try {
@@ -214,9 +208,9 @@ export function getAuth() {
                 inviterName: d.inviter?.user?.name || d.inviter?.user?.email || 'Admin',
                 inviteUrl,
               });
-              console.log('[invitation-email] Sent successfully to', d.email);
+              log.info({ email: d.email }, 'Invitation email sent');
             } catch (err: any) {
-              console.error('[invitation-email] FAILED:', err.message);
+              log.error({ err, email: d.email }, 'Failed to send invitation email');
             }
           },
         }),
@@ -245,14 +239,14 @@ export function getAuth() {
           create: {
             after: async (user: BAUser) => {
               try {
-                console.log('[auth] New user created:', user.email);
+                log.info({ email: user.email }, 'New user created');
                 await linkCustomerOnRegistration(user);
                 await notify('welcome', user.email, {
                   name: user.name || 'there',
                   loginUrl: `${config.app.frontendUrl}/sign-in`,
                 });
               } catch (err) {
-                console.error('[auth] Failed post-user-create hook:', err);
+                log.error({ err, email: user.email }, 'Failed post-user-create hook');
               }
             },
           },
@@ -260,13 +254,16 @@ export function getAuth() {
       },
     } satisfies BetterAuthOptions);
 
-    // Register stub Mongoose models for Better Auth's collections
-    const baCollections = ['user', 'organization', 'member', 'invitation', 'session', 'account'] as const;
-    for (const name of baCollections) {
-      if (!mongoose.models[name]) {
-        mongoose.model(name, new mongoose.Schema({}, { strict: false, collection: name }));
-      }
-    }
+    // Register stub Mongoose models for Better Auth's collections so that
+    // .populate('userId') / ref: 'User' etc. resolve against BA-owned docs.
+    // Uses arc 2.7.3's helper — idempotent, strict:false, plugin-aware.
+    registerBetterAuthMongooseModels(mongoose, {
+      plugins: ['organization'],
+      // 'Branch' alias → organization collection for ref: 'Branch' in
+      // inventory, order, transfer models.
+      modelOverrides: { organization: 'organization' },
+      extraCollections: [],
+    });
 
     // Register 'Branch' as an alias model pointing to the 'organization' collection.
     // This makes .populate('branch') / ref: 'Branch' resolve from the organization

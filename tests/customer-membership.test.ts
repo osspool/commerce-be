@@ -21,9 +21,8 @@ let loyaltyBridge: typeof import('#resources/sales/loyalty/loyalty.bridge.js');
 async function createCustomerWithMembership(overrides: Record<string, unknown> = {}) {
   const phone = `017${Date.now().toString().slice(-8)}`;
   return Customer.create({
-    name: 'Test Customer',
-    phone,
-    email: `test-${phone}@example.com`,
+    name: { given: 'Test', family: 'Customer' },
+    contact: { phone, email: `test-${phone}@example.com` },
     isActive: true,
     membership: {
       isActive: true,

@@ -9,10 +9,10 @@
  */
 
 import { defineResource } from '@classytic/arc';
+import { requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
 import { createAdapter } from '#shared/adapter.js';
-import { roles, requireAuth } from '@classytic/arc/permissions';
-import { Account, JournalEntry, accountRepository } from '../accounting.engine.js';
+import { Account, accountRepository, JournalEntry } from '../accounting.engine.js';
 
 // Pagination cap (1000) is set on the engine's `pagination.account` config
 // in accounting.engine.ts. This QueryParser only validates query syntax.
@@ -32,22 +32,22 @@ const accountResource = defineResource({
   permissions: {
     list: requireAuth(),
     get: requireAuth(),
-    create: roles('admin'),
-    update: roles('admin'),
-    delete: roles('admin'),
+    create: requireRoles('admin'),
+    update: requireRoles('admin'),
+    delete: requireRoles('admin'),
   },
 
   schemaOptions: {
     excludeFields: ['organizationId'],
   },
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'POST' as const,
       path: '/seed',
       summary: 'Seed default BFRS chart of accounts (company-wide)',
-      permissions: roles('admin'),
-      wrapHandler: false,
+      permissions: requireRoles('admin'),
+      raw: true,
       handler: async (_req: any, reply: any) => {
         const result = await accountRepository.seedAccounts(undefined);
         return reply.status(201).send({ success: true, data: result });
@@ -57,8 +57,8 @@ const accountResource = defineResource({
       method: 'POST' as const,
       path: '/bulk',
       summary: 'Bulk create accounts',
-      permissions: roles('admin'),
-      wrapHandler: false,
+      permissions: requireRoles('admin'),
+      raw: true,
       handler: async (req: any, reply: any) => {
         const { accounts } = req.body;
         const result = await accountRepository.bulkCreate(accounts, undefined);
@@ -70,10 +70,10 @@ const accountResource = defineResource({
       method: 'PATCH' as const,
       path: '/:id/enable',
       summary: 'Enable an account',
-      permissions: roles('admin'),
-      wrapHandler: false,
+      permissions: requireRoles('admin'),
+      raw: true,
       handler: async (req: any, reply: any) => {
-        const account = await Account.findById(req.params.id);
+        const account = await accountRepository.getById(req.params.id);
         if (!account) return reply.status(404).send({ error: 'Account not found' });
         const doc = await accountRepository.update(req.params.id, { active: true });
         return reply.send({ success: true, data: doc });
@@ -83,13 +83,16 @@ const accountResource = defineResource({
       method: 'PATCH' as const,
       path: '/:id/disable',
       summary: 'Disable an account',
-      permissions: roles('admin'),
-      wrapHandler: false,
+      permissions: requireRoles('admin'),
+      raw: true,
       handler: async (req: any, reply: any) => {
-        const account = await Account.findById(req.params.id);
+        const account = await accountRepository.getById(req.params.id);
         if (!account) return reply.status(404).send({ error: 'Account not found' });
-        const hasEntries = await JournalEntry.findOne({ 'journalItems.account': req.params.id }).lean();
-        if (hasEntries) return reply.status(400).send({ error: 'Cannot disable account with existing journal entries' });
+        // Accounts are company-wide; block disable if ANY branch has journal entries
+        // referencing this account. Query runs unscoped on purpose.
+        const hasEntries = await JournalEntry.exists({ 'journalItems.account': req.params.id });
+        if (hasEntries)
+          return reply.status(400).send({ error: 'Cannot disable account with existing journal entries' });
         const doc = await accountRepository.update(req.params.id, { active: false });
         return reply.send({ success: true, data: doc });
       },

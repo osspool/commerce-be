@@ -1,269 +1,238 @@
 /**
- * POS Utilities - Clean & Fast
+ * POS Utilities
  *
- * Simple flow:
- * 1. Query products via productRepository (MongoKit pagination)
- * 2. Batch-enrich with branch stock (single indexed query)
- * 3. Filter by branch stock if needed
+ * Pipeline:
+ * 1. Parse the incoming query via the shared `@classytic/mongokit`
+ *    `QueryParser` singleton — the SAME one Arc wires into every
+ *    adapter-backed CRUD. Gives us bracket-operator filters
+ *    (`status[eq]=active`, `basePrice[gte]=100`), safe sort/page/limit
+ *    parsing, ReDoS-guarded search, and a consistent shape across the
+ *    codebase with zero duplication.
+ * 2. DB-paginated product query via mongokit `getAll` → canonical
+ *    `OffsetPaginationResult` envelope
+ *    (`{ docs, page, limit, total, pages, hasNext, hasPrev }`).
+ * 3. Enrich the paginated page with branch stock via catalog's
+ *    InventoryBridge (single batch query over Flow quants, `$in`-scoped
+ *    to the page's skuRefs).
+ * 4. Optional in-memory `inStockOnly`/`lowStockOnly` trim of the
+ *    enriched page. This distorts `docs.length` but NOT `total` — see
+ *    caveat below.
+ *
+ * ### Why a raw handler, not Arc's BaseController.list
+ * `/pos/products` owns three cross-cutting concerns that the
+ * adapter pipeline doesn't cover:
+ *   - branch resolution (`resolveAuthorizedBranchId`) with a
+ *     cross-branch guard that's custom to inventory
+ *   - parallel fetch of the branch-wide `stockSummary`
+ *   - role-based cost-price redaction on the enriched docs
+ * So we keep a raw handler but reuse Arc's parsing primitive by calling
+ * `queryParser.parse` ourselves — no QueryParser duplication, same
+ * guarantees as any CRUD endpoint.
+ *
+ * ### Why `getAll` (mongokit), not `findAll`
+ * The legacy implementation called `catalog.repositories.product.findAll`
+ * and paginated in memory with `.slice()` — scanned the entire catalog on
+ * every request AND returned the legacy `{ totalDocs, totalPages }`
+ * envelope the SDK / Fluid DataTable no longer read. `getAll` pushes
+ * pagination to MongoDB via mongokit's `PaginationEngine`.
+ *
+ * ### Stock-filter caveat
+ * `inStockOnly` / `lowStockOnly` run AFTER the DB page lands, so a page
+ * may return fewer items than `limit` while `total`/`pages` still
+ * reflect the catalog-level filter. Pushing stock into the aggregate
+ * needs a `$lookup` over `stock_quants` with `$unwind` for variant
+ * joins and per-branch `locationId` correlation — deferred until a
+ * concrete perf/UX requirement justifies coupling catalog to Flow's
+ * collection names.
  */
 
-import productRepository from '#resources/catalog/products/product.repository.js';
-import inventoryRepository from '#resources/inventory/inventory.repository.js';
-
-interface VariantInfo {
-  sku: string;
-  attributes?: Record<string, unknown>;
-  quantity: number;
-  costPrice?: number;
-  priceModifier?: number;
-}
-
-interface BranchStock {
-  quantity: number;
-  variants?: VariantInfo[];
-  inStock: boolean;
-  lowStock: boolean;
-}
+import type { BranchStock } from '@classytic/catalog';
+import type { OffsetPaginationResult } from '@classytic/mongokit';
+import { ensureCatalogEngine, getCatalogInventoryBridge } from '#resources/catalog/catalog.engine.js';
+import { queryParser } from '#shared/query-parser.js';
 
 interface ProductWithStock extends Record<string, unknown> {
   branchStock: BranchStock;
 }
 
-interface StockEntry {
-  quantity?: number;
-  costPrice?: number;
-  reorderPoint?: number;
-  isActive?: boolean;
-}
-
-interface CartStockItem {
-  productId: string;
-  variantSku?: string | null;
-  quantity: number;
-}
-
-interface UnavailableItem {
-  productId: string;
-  variantSku?: string | null;
-  requested: number;
-  available: number;
-  reason: string;
-}
-
-interface GetPosProductsParams {
-  category?: string;
-  search?: string;
-  inStockOnly?: boolean;
-  lowStockOnly?: boolean;
-  page?: number;
-  after?: string;
-  limit?: number;
-  sort?: string;
-}
-
-function toIdString(value: unknown): string | null {
-  if (value == null) return value as null;
-  if (typeof value === 'string') return value;
-  if (typeof (value as Record<string, unknown>).toHexString === 'function')
-    return (value as Record<string, () => string>).toHexString();
-  if (typeof (value as Record<string, unknown>).toString === 'function')
-    return (value as Record<string, () => string>).toString();
-  return String(value);
-}
+const MAX_PAGE_SIZE = 100;
+// 20 matches QueryParser's default + industry norm for inventory browse
+// (Shopify, WooCommerce, Odoo, NetSuite).
+const DEFAULT_PAGE_SIZE = 20;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function addAndClause(filters: Record<string, unknown>, clause: Record<string, unknown>): Record<string, unknown> {
-  if (!clause || (typeof clause === 'object' && !Object.keys(clause).length)) return filters;
-  if (!filters.$and) filters.$and = [];
-  (filters.$and as Array<Record<string, unknown>>).push(clause);
-  return filters;
+/**
+ * POS-specific filter params pulled out of the query BEFORE parsing so
+ * QueryParser doesn't treat them as raw Mongo filters (they need custom
+ * mapping — `category` → `categorySlug`, `search` → multi-field `$or`).
+ */
+interface PosSpecificParams {
+  category?: string;
+  parentCategory?: string;
+  search?: string;
+  inStockOnly?: boolean;
+  lowStockOnly?: boolean;
+  /** UI-only: `ok` | `low` | `out`. InventoryClient maps this to
+   *  inStockOnly/lowStockOnly/local-filter before calling. Stripped here
+   *  so it never leaks into the mongo filter. */
+  stockStatus?: string;
+}
+
+const POS_SPECIFIC_KEYS = new Set<keyof PosSpecificParams>([
+  'category',
+  'parentCategory',
+  'search',
+  'inStockOnly',
+  'lowStockOnly',
+  'stockStatus',
+]);
+
+function splitPosParams(
+  raw: Record<string, unknown>,
+): { pos: PosSpecificParams; forParser: Record<string, unknown> } {
+  const pos: PosSpecificParams = {};
+  const forParser: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (POS_SPECIFIC_KEYS.has(key as keyof PosSpecificParams)) {
+      (pos as Record<string, unknown>)[key] = value;
+    } else {
+      forParser[key] = value;
+    }
+  }
+  return { pos, forParser };
+}
+
+function buildPosSearchOr(search: string): Array<Record<string, unknown>> {
+  const safeRegex = new RegExp(escapeRegex(search), 'i');
+  return [
+    { name: { $regex: safeRegex } },
+    { 'identifiers.custom.sku': { $regex: safeRegex } },
+    { 'variants.sku': { $regex: safeRegex } },
+    { 'identifiers.custom.barcode': search },
+    { 'variants.barcode': search },
+  ];
 }
 
 /**
- * Enrich products with branch-specific stock
+ * Browse products with per-branch stock enrichment.
+ *
+ * Accepts the RAW query object (as Fastify gives us) — the schema has
+ * already coerced known fields (`page`/`limit`/`inStockOnly`), and
+ * anything else flows through QueryParser as a canonical Mongo filter
+ * (supports bracket operators: `basePrice[gte]=100`, `status[in]=a,b`).
+ *
+ * Returns the canonical `OffsetPaginationResult` envelope (spread at the
+ * top level) with `docs` replaced by stock-enriched products.
  */
-export async function enrichWithBranchStock(
-  products: Array<Record<string, unknown>>,
-  branchId: string,
-): Promise<ProductWithStock[]> {
-  if (!products?.length || !branchId) return products as ProductWithStock[];
-
-  const productIds = products.map((p) => p._id);
-  const stockMap: Map<string, StockEntry> = await inventoryRepository.getBatchBranchStock(productIds, branchId);
-
-  return products.map((product) => {
-    const normalizedProductId = toIdString(product?._id);
-    const simpleKey = `${product._id}_null`;
-    const simpleStock = stockMap.get(simpleKey);
-
-    let quantity = 0;
-    const variants: VariantInfo[] = [];
-
-    if (simpleStock?.isActive !== false) {
-      quantity += simpleStock?.quantity || 0;
-    }
-
-    const productVariants = product.variants as Array<Record<string, unknown>> | undefined;
-    if (productVariants?.length) {
-      for (const variant of productVariants) {
-        if (variant.isActive === false) continue;
-
-        const entry = stockMap.get(`${product._id}_${variant.sku}`);
-        if (entry?.isActive === false) continue;
-
-        if (entry) {
-          variants.push({
-            sku: variant.sku as string,
-            attributes: variant.attributes as Record<string, unknown>,
-            quantity: entry.quantity || 0,
-            costPrice: entry.costPrice,
-            priceModifier: (variant.priceModifier as number) || 0,
-          });
-          quantity += entry.quantity || 0;
-        } else {
-          variants.push({
-            sku: variant.sku as string,
-            attributes: variant.attributes as Record<string, unknown>,
-            quantity: 0,
-            priceModifier: (variant.priceModifier as number) || 0,
-          });
-        }
-      }
-    }
-
-    const anyEntry = simpleStock || stockMap.get(`${product._id}_${productVariants?.[0]?.sku || 'null'}`);
-    const reorderPoint = anyEntry?.reorderPoint || 10;
-
-    return {
-      ...product,
-      ...(normalizedProductId && { _id: normalizedProductId, id: normalizedProductId }),
-      branchStock: {
-        quantity,
-        variants: variants.length ? variants : undefined,
-        inStock: quantity > 0,
-        lowStock: quantity > 0 && quantity <= reorderPoint,
+/**
+ * Expand a parent category slug to `{ categorySlug: <slug> | { $in: [...] } }`.
+ * Matches the descendant resolution in `catalog-product.adapter.ts` so the
+ * Products and Inventory dashboards produce identical category filters.
+ */
+async function resolveParentCategoryFilter(
+  catalog: Awaited<ReturnType<typeof ensureCatalogEngine>>,
+  parentCategorySlug: string,
+): Promise<string | { $in: string[] }> {
+  const parentSlug = parentCategorySlug.toLowerCase();
+  const categoryRepo = catalog.repositories.category;
+  const descendants =
+    (await categoryRepo?.findAll?.(
+      {
+        $or: [
+          { slug: parentSlug },
+          { parent: parentSlug },
+          { parentPath: { $regex: `(^|/)${parentSlug}(/|$)` } },
+        ],
       },
-    } as ProductWithStock;
-  });
+      { lean: true },
+    )) as Array<{ slug: string }> | undefined;
+  const slugs = descendants?.map((c) => c.slug) ?? [parentSlug];
+  return slugs.length === 1 ? slugs[0] : { $in: slugs };
 }
 
-/**
- * Get POS products with branch stock
- */
 export async function getPosProducts(
   branchId: string,
-  params: GetPosProductsParams = {},
-): Promise<Record<string, unknown>> {
-  const { category, search, inStockOnly = false, lowStockOnly = false, page, after, limit = 15, sort = 'name' } = params;
+  rawQuery: Record<string, unknown> = {},
+): Promise<OffsetPaginationResult<ProductWithStock>> {
+  const { pos, forParser } = splitPosParams(rawQuery);
+  const parsed = queryParser.parse(forParser);
 
-  const filters: Record<string, unknown> = { isActive: true };
+  const catalog = await ensureCatalogEngine();
+  const ctx = { actorId: 'pos', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
 
-  if (category) {
-    addAndClause(filters, {
-      $or: [{ category: category.toLowerCase() }, { parentCategory: category.toLowerCase() }],
-    });
+  // Compose filter: POS-specific (status:active, categorySlug, $or search)
+  // merged on top of whatever the parser extracted from bracket-ops. The
+  // parser's output wins for any overlapping field but `status` is
+  // force-pinned because we only ever serve active products here.
+  const filters: Record<string, unknown> = {
+    ...(parsed.filters as Record<string, unknown> | undefined),
+    status: 'active',
+  };
+
+  if (pos.category) {
+    filters.categorySlug = String(pos.category).toLowerCase();
+  } else if (pos.parentCategory) {
+    filters.categorySlug = await resolveParentCategoryFilter(catalog, String(pos.parentCategory));
   }
 
-  if (search?.trim()) {
-    const trimmed = search.trim();
-    const safeRegex = new RegExp(escapeRegex(trimmed), 'i');
-
-    addAndClause(filters, {
-      $or: [
-        { name: { $regex: safeRegex } },
-        { sku: { $regex: safeRegex } },
-        { 'variants.sku': { $regex: safeRegex } },
-        { barcode: trimmed },
-        { 'variants.barcode': trimmed },
-      ],
-    });
+  const searchTerm = typeof pos.search === 'string' ? pos.search.trim() : '';
+  if (searchTerm) {
+    filters.$or = buildPosSearchOr(searchTerm);
   }
 
-  if (inStockOnly || lowStockOnly) {
-    filters.quantity = { $gt: 0 };
-  }
+  // Pagination: parser enforces maxLimit globally; we additionally clamp
+  // to the POS-specific MAX_PAGE_SIZE (stricter than the shared parser's
+  // 1000-row cap) and floor page/limit to sane minimums.
+  const parsedLimit = typeof parsed.limit === 'number' ? parsed.limit : DEFAULT_PAGE_SIZE;
+  const parsedPage =
+    typeof (parsed as { page?: unknown }).page === 'number'
+      ? ((parsed as { page: number }).page)
+      : 1;
+  const limit = Math.min(Math.max(1, parsedLimit), MAX_PAGE_SIZE);
+  const page = Math.max(1, parsedPage);
 
-  const result = await productRepository.getAll(
+  // `getAll` auto-detects pagination mode from params (page+limit → offset).
+  // `mode: 'offset'` keeps intent explicit so the union return type narrows
+  // — `ProductDocument[]` / `KeysetPaginationResult` branches are unreachable.
+  const raw = await catalog.repositories.product.getAll(
     {
       filters,
-      sort,
-      limit: Math.min(limit, 100),
-      // Offset pagination (page) takes priority; fall back to keyset (after)
-      ...(page ? { page } : after ? { after } : { page: 1 }),
+      page,
+      limit,
+      sort: parsed.sort as string | Record<string, 1 | -1> | undefined,
+      mode: 'offset',
     },
-    {
-      select: '_id name slug sku barcode category basePrice costPrice quantity images variants discount',
-      lean: true,
-    },
+    ctx,
   );
+  const result = raw as unknown as OffsetPaginationResult<Record<string, unknown>>;
 
-  let docs = await enrichWithBranchStock(result.docs, branchId);
+  const bridge = getCatalogInventoryBridge();
+  let enrichedDocs: ProductWithStock[];
 
-  if (inStockOnly) {
-    docs = docs.filter((p) => p.branchStock.inStock);
+  if (bridge?.enrichWithStock) {
+    enrichedDocs = (await bridge.enrichWithStock(
+      result.docs as unknown as Array<{ _id: string; variants?: Array<{ sku: string }> }>,
+      { branchId },
+      ctx,
+    )) as ProductWithStock[];
+  } else {
+    enrichedDocs = result.docs.map((p) => ({
+      ...p,
+      branchStock: { quantity: 0, inStock: false, lowStock: false },
+    })) as ProductWithStock[];
   }
-  if (lowStockOnly) {
-    docs = docs.filter((p) => p.branchStock.lowStock);
+
+  if (pos.inStockOnly) {
+    enrichedDocs = enrichedDocs.filter((p) => p.branchStock.inStock);
+  }
+  if (pos.lowStockOnly) {
+    enrichedDocs = enrichedDocs.filter((p) => p.branchStock.lowStock);
   }
 
-  return {
-    ...result,
-    docs,
-  };
+  return { ...result, docs: enrichedDocs };
 }
 
-/**
- * Validate cart stock before checkout
- */
-export async function validateCartStock(
-  items: CartStockItem[],
-  branchId: string,
-): Promise<{ valid: boolean; unavailable: UnavailableItem[] }> {
-  if (!items?.length) return { valid: true, unavailable: [] };
-
-  const productIds = [...new Set(items.map((i) => i.productId))];
-  const stockMap: Map<string, StockEntry> = await inventoryRepository.getBatchBranchStock(productIds, branchId, {
-    includeInactive: true,
-  });
-
-  const unavailable: UnavailableItem[] = [];
-
-  for (const item of items) {
-    const key = `${item.productId}_${item.variantSku || 'null'}`;
-    const stockEntry = stockMap.get(key);
-
-    if (stockEntry?.isActive === false) {
-      unavailable.push({
-        productId: item.productId,
-        variantSku: item.variantSku,
-        requested: item.quantity,
-        available: 0,
-        reason: 'variant_inactive',
-      });
-      continue;
-    }
-
-    const available = stockEntry?.quantity || 0;
-
-    if (available < item.quantity) {
-      unavailable.push({
-        productId: item.productId,
-        variantSku: item.variantSku,
-        requested: item.quantity,
-        available,
-        reason: 'insufficient_stock',
-      });
-    }
-  }
-
-  return { valid: unavailable.length === 0, unavailable };
-}
-
-export default {
-  enrichWithBranchStock,
-  getPosProducts,
-  validateCartStock,
-};
+export default { getPosProducts };

@@ -25,10 +25,7 @@ function interpolate(template: string, variables: Record<string, string>): strin
  * Build an in-app notification payload from a type and variables.
  * Looks up the template from the trigger registry.
  */
-export function buildInAppNotification(
-  type: string,
-  variables: Record<string, string>,
-): InAppPayload | null {
+export function buildInAppNotification(type: string, variables: Record<string, string>): InAppPayload | null {
   const trigger = NOTIFICATION_TRIGGERS.find((t) => (t.type || t.event) === type);
   if (!trigger) return null;
 

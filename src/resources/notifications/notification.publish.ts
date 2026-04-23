@@ -54,12 +54,7 @@ export const notifyEvent = {
     fire('transfer:created', data);
   },
 
-  transferApproved(data: {
-    transferId: string;
-    docNumber: string;
-    organizationId: string;
-    triggeredBy?: string;
-  }) {
+  transferApproved(data: { transferId: string; docNumber: string; organizationId: string; triggeredBy?: string }) {
     fire('transfer:approved', data);
   },
 
@@ -74,32 +69,17 @@ export const notifyEvent = {
     fire('transfer:dispatched', data);
   },
 
-  transferReceived(data: {
-    transferId: string;
-    docNumber: string;
-    organizationId: string;
-    triggeredBy?: string;
-  }) {
+  transferReceived(data: { transferId: string; docNumber: string; organizationId: string; triggeredBy?: string }) {
     fire('transfer:received', data);
   },
 
   // ── Inventory Events ──
 
-  stockAdjusted(data: {
-    organizationId: string;
-    count: number;
-    actorName: string;
-    triggeredBy?: string;
-  }) {
+  stockAdjusted(data: { organizationId: string; count: number; actorName: string; triggeredBy?: string }) {
     fire('stock:adjusted', data);
   },
 
-  stockLow(data: {
-    organizationId: string;
-    productId: string;
-    productName: string;
-    quantity: number;
-  }) {
+  stockLow(data: { organizationId: string; productId: string; productName: string; quantity: number }) {
     fire('stock:low', data);
   },
 
@@ -109,9 +89,63 @@ export const notifyEvent = {
     purchaseId: string;
     invoiceNumber: string;
     organizationId: string;
+    supplierId?: string;
+    supplierName?: string;
+    totalAmount?: number;
+    branchId?: string;
     triggeredBy?: string;
   }) {
     fire('purchase:received', data);
+  },
+
+  // ── Return Events ──
+
+  returnCreated(data: {
+    returnId: string;
+    orderId: string;
+    returnNumber: string;
+    organizationId: string;
+    triggeredBy?: string;
+  }) {
+    fire('return:created', data);
+  },
+
+  returnApproved(data: { returnId: string; returnNumber: string; organizationId: string; triggeredBy?: string }) {
+    fire('return:approved', data);
+  },
+
+  returnReceived(data: { returnId: string; returnNumber: string; organizationId: string; triggeredBy?: string }) {
+    fire('return:received', data);
+  },
+
+  returnInspected(data: {
+    returnId: string;
+    returnNumber: string;
+    result: string;
+    organizationId: string;
+    triggeredBy?: string;
+  }) {
+    fire('return:inspected', data);
+  },
+
+  returnRefunded(data: {
+    returnId: string;
+    returnNumber: string;
+    amount: number;
+    organizationId: string;
+    triggeredBy?: string;
+  }) {
+    fire('return:refunded', data);
+  },
+
+  returnRejected(data: {
+    returnId: string;
+    returnNumber: string;
+    reason: string;
+    organizationId: string;
+    triggeredBy?: string;
+  }) {
+    fire('return:rejected', data);
   },
 };
 

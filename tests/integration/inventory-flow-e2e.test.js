@@ -464,7 +464,7 @@ describe('Flow Inventory E2E', () => {
         }],
       }, ctx());
 
-      const moves = await flow.repositories.move.findByGroupId(group._id, ctx());
+      const moves = await flow.repositories.move.findAll({ moveGroupId: group._id }, { organizationId: ctx().organizationId, lean: true });
 
       await expect(
         flow.services.posting.postMove(moves[0]._id, { quantityDone: 50 }, ctx()),
@@ -484,7 +484,7 @@ describe('Flow Inventory E2E', () => {
         }],
       }, ctx());
 
-      const moves = await flow.repositories.move.findByGroupId(group._id, ctx());
+      const moves = await flow.repositories.move.findAll({ moveGroupId: group._id }, { organizationId: ctx().organizationId, lean: true });
 
       await expect(
         flow.services.posting.postMove(moves[0]._id, { quantityDone: 0 }, ctx()),

@@ -5,6 +5,7 @@ export default mergeConfig(createBaseConfig(), {
   test: {
     name: 'shared-db',
     globalSetup: './tests/setup/global-setup.js',
+    setupFiles: ['./tests/setup/mongo-worker-setup.js'],
     fileParallelism: false,
     maxConcurrency: 1,
     maxWorkers: 1,

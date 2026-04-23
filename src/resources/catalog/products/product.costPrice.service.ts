@@ -1,14 +1,12 @@
-import type { ClientSession } from 'mongoose';
-import Product from './product.model.js';
-
 /**
- * Cost price snapshot sync
+ * Cost price snapshot sync — writes via catalog repository.
  *
- * Source of truth: Head office inventory (StockEntry.costPrice via purchases).
- * Product/Variant costPrice fields are treated as denormalized snapshots for:
- * - fast reads
- * - fallback when branch stock entry has no cost
+ * Source of truth: Flow StockQuant.unitCost (via purchases).
+ * Variant.costPrice fields are denormalized snapshots for fast reads.
  */
+
+import type { ClientSession } from 'mongoose';
+import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 
 interface CostPriceOptions {
   session?: ClientSession | null;
@@ -22,17 +20,48 @@ export async function setProductCostPriceSnapshot(
 ): Promise<void> {
   if (!productId) return;
   if (typeof costPrice !== 'number' || Number.isNaN(costPrice) || costPrice < 0) return;
-  const { session = null } = options;
-  const sessionOptions = session ? { session } : {};
+
+  const engine = await ensureCatalogEngine();
+  const ctx = {
+    actorId: 'cost-price-sync',
+    roles: ['admin'] as string[],
+    locale: 'en',
+    currency: 'BDT',
+    session: options.session ?? undefined,
+  };
 
   if (variantSku) {
-    await Product.findOneAndUpdate(
-      { _id: productId, 'variants.sku': variantSku },
-      { $set: { 'variants.$.costPrice': costPrice } },
-      { timestamps: true, ...sessionOptions },
+    // Variant-level cost price update via repository.
+    // `lean: true` returns plain objects so spreading preserves all fields —
+    // spreading a Mongoose subdoc strips data fields and breaks Zod
+    // re-validation in productUpdateSchema.parse().
+    const product = await engine.repositories.product.getByQuery(
+      { 'variants.sku': variantSku },
+      { ...ctx, throwOnNotFound: false, lean: true },
+    );
+    if (!product) return;
+
+    const updatedVariants = product.variants?.map((v) =>
+      (v as { sku?: string }).sku === variantSku ? { ...v, costPrice } : v,
+    );
+
+    await engine.repositories.product.update(
+      String(product._id),
+      { variants: updatedVariants } as Record<string, unknown>,
+      ctx,
     );
     return;
   }
 
-  await Product.findOneAndUpdate({ _id: productId }, { $set: { costPrice } }, { timestamps: true, ...sessionOptions });
+  // Product-level cost price → update monetization.pricing.costPrice
+  await engine.repositories.product.update(
+    productId,
+    {
+      'defaultMonetization.pricing.costPrice': {
+        amount: Math.round(costPrice * 100),
+        currency: 'BDT',
+      },
+    } as Record<string, unknown>,
+    ctx,
+  );
 }

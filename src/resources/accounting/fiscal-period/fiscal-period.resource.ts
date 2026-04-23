@@ -6,17 +6,11 @@
  */
 
 import { defineResource } from '@classytic/arc';
-import { QueryParser } from '@classytic/mongokit';
+import { denyAll, requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { closeFiscalPeriod, reopenFiscalPeriod } from '@classytic/ledger';
+import { QueryParser } from '@classytic/mongokit';
 import { createAdapter } from '#shared/adapter.js';
-import { roles, requireAuth, denyAll } from '@classytic/arc/permissions';
-import {
-  bdPack,
-  Account,
-  JournalEntry,
-  FiscalPeriod,
-  fiscalPeriodRepository,
-} from '../accounting.engine.js';
+import { Account, bdPack, FiscalPeriod, fiscalPeriodRepository, JournalEntry } from '../accounting.engine.js';
 
 const queryParser = new QueryParser({ maxLimit: 100 });
 
@@ -34,18 +28,18 @@ const fiscalPeriodResource = defineResource({
   permissions: {
     list: requireAuth(),
     get: requireAuth(),
-    create: roles('admin'),
-    update: roles('admin'),
+    create: requireRoles('admin'),
+    update: requireRoles('admin'),
     delete: denyAll(),
   },
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'PATCH' as const,
       path: '/:id/close',
       summary: 'Close a fiscal period',
-      permissions: roles('admin'),
-      wrapHandler: false,
+      permissions: requireRoles('admin'),
+      raw: true,
       handler: async (req: any, reply: any) => {
         const userId = req.scope?.userId || req.user?.id;
         const result = await closeFiscalPeriod(
@@ -64,8 +58,8 @@ const fiscalPeriodResource = defineResource({
       method: 'PATCH' as const,
       path: '/:id/reopen',
       summary: 'Reopen a closed fiscal period',
-      permissions: roles('admin'),
-      wrapHandler: false,
+      permissions: requireRoles('admin'),
+      raw: true,
       handler: async (req: any, reply: any) => {
         const userId = req.scope?.userId || req.user?.id;
         const result = await reopenFiscalPeriod(

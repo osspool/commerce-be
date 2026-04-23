@@ -4,7 +4,10 @@
  * Validates environment variables at startup to fail fast with clear errors.
  * Prevents runtime errors from missing or invalid configuration.
  */
+import { arcLog } from '@classytic/arc/logger';
 import type { FastifyInstance } from 'fastify';
+
+const log = arcLog('env-validation');
 
 interface EnvVarValidationRules {
   required?: boolean;
@@ -62,7 +65,7 @@ const validationRules: ValidationRulesConfig = {
     MONGO_URI: /^mongodb(\+srv)?:\/\/.+/,
     APP_URL: /^https?:\/\/.+/,
     FRONTEND_URL: /^https?:\/\/.+/,
-    CORS_ORIGIN: /^https?:\/\/.+(,https?:\/\/.+)*$/, // Comma-separated URLs
+    CORS_ORIGIN: /^(\*|https?:\/\/.+(,https?:\/\/.+)*)$/, // `*` or comma-separated URLs
   },
 
   // Security checks
@@ -191,20 +194,19 @@ export function validateEnvironment(options: ValidationOptions = {}): Validation
     }
   }
 
-  // Log results
   if (!silent) {
     if (errors.length > 0) {
-      console.error('\n❌ Environment Validation FAILED:');
-      for (const err of errors) console.error(`  - ${err}`);
+      log.error('Environment validation FAILED:');
+      for (const err of errors) log.error(`  - ${err}`);
     }
 
     if (warnings.length > 0) {
-      console.warn('\n⚠️  Environment Warnings:');
-      for (const warn of warnings) console.warn(`  - ${warn}`);
+      log.warn('Environment warnings:');
+      for (const warn of warnings) log.warn(`  - ${warn}`);
     }
 
     if (errors.length === 0 && warnings.length === 0) {
-      console.log('✅ Environment validation passed');
+      log.info('Environment validation passed');
     }
   }
 

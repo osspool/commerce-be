@@ -10,8 +10,8 @@
 
 import { defineResource } from '@classytic/arc';
 import { allowPublic } from '@classytic/arc/permissions';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getFeatureManifest } from '#config/features.js';
-import type { FastifyRequest, FastifyReply } from 'fastify';
 
 const featuresResource = defineResource({
   name: 'features',
@@ -19,12 +19,12 @@ const featuresResource = defineResource({
   prefix: '/features',
   disableDefaultRoutes: true,
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/',
       permissions: allowPublic(),
-      wrapHandler: false,
+      raw: true,
       summary: 'Get feature license manifest',
       description: 'Returns enabled modules with tier levels and capabilities.',
       handler: async (_req: FastifyRequest, reply: FastifyReply) => {

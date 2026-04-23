@@ -16,12 +16,14 @@
  * The storefront reads product.quantity directly (zero latency).
  * Flow quant remains the source of truth for all inventory operations.
  */
-import mongoose from 'mongoose';
+
 import { FlowEvents } from '@classytic/flow';
+import mongoose from 'mongoose';
 import { subscribe } from '#lib/events/arcEvents.js';
-import branchRepository from '#resources/commerce/branch/branch.repository.js';
 import logger from '#lib/utils/logger.js';
-import { getFlowEngineOrNull, buildFlowContext, skuRefFromProduct, DEFAULT_LOCATION } from './flow/index.js';
+import branchRepository from '#resources/commerce/branch/branch.repository.js';
+import { buildFlowContext, DEFAULT_LOCATION, skuRefFromProduct } from './flow/context-helpers.js';
+import { getFlowEngineOrNull } from './flow/flow-engine.js';
 import posLookupService from './flow/pos-lookup.service.js';
 
 interface ProductCreatedPayload {
@@ -169,56 +171,63 @@ export function registerInventoryEventHandlers(options: { force?: boolean } = {}
  *
  * This is a fire-and-forget cache update — failures don't affect inventory operations.
  */
-async function syncProductQuantityFromQuant(skuRef: string, organizationId: string): Promise<void> {
+async function syncProductQuantityFromQuant(skuRef: string, _organizationId: string): Promise<void> {
   const flow = getFlowEngineOrNull();
   if (!flow) return;
 
-  const Product = mongoose.models.Product;
-  if (!Product) return;
+  const { ensureCatalogEngine } = await import('#resources/catalog/catalog.engine.js');
+  const catalog = await ensureCatalogEngine();
+  const ctx = { actorId: 'stock-sync', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
+  const flowCtx = buildFlowContext(_organizationId);
 
-  const ctx = buildFlowContext(organizationId);
-
-  // Get current on-hand from Flow (source of truth)
-  const avail = await flow.services.quant.getAvailability({ skuRef, locationId: DEFAULT_LOCATION }, ctx);
+  const avail = await flow.services.quant.getAvailability({ skuRef, locationId: DEFAULT_LOCATION }, flowCtx);
   const onHand = avail.quantityOnHand;
 
-  // Try variant SKU first
-  const variantProduct = await Product.findOne({ 'variants.sku': skuRef, deletedAt: null }, '_id variants.sku').lean();
-
-  if (variantProduct) {
-    // Update variant quantity in stockProjection
-    await Product.updateOne(
-      { _id: variantProduct._id, 'stockProjection.variants.sku': skuRef },
-      { $set: { 'stockProjection.variants.$.quantity': onHand, 'stockProjection.syncedAt': new Date() } },
+  // Try variant SKU first — miss returns null (don't throw)
+  const product = await catalog.repositories.product.getByQuery(
+    { 'variants.sku': skuRef },
+    { ...ctx, throwOnNotFound: false },
+  );
+  if (product) {
+    // Rebuild stock projection from all variant quantities. Fan out the
+    // availability reads in parallel (Promise.all) — previously this was
+    // a serial `for...of` that did N round-trips per MOVE_DONE event for
+    // a product with N variants. A 10-variant product receipt fired 10
+    // events × 11 reads each = 110 sequential queries; under burst load
+    // (bulk import) this saturated the event loop. Iterations are
+    // independent so parallelism is safe.
+    const variants = (product.variants ?? []) as Array<{ sku: string }>;
+    const variantStocks = await Promise.all(
+      variants.map(async (v) => {
+        try {
+          const va = await flow.services.quant.getAvailability(
+            { skuRef: v.sku, locationId: DEFAULT_LOCATION },
+            flowCtx,
+          );
+          return { sku: v.sku, available: va.quantityOnHand };
+        } catch {
+          return { sku: v.sku, available: 0 };
+        }
+      }),
     );
+    const totalQty = variantStocks.reduce((sum, s) => sum + s.available, 0);
 
-    // If no matching variant entry in stockProjection, push one
-    const updated = await Product.findOne({ _id: variantProduct._id, 'stockProjection.variants.sku': skuRef }).lean();
-    if (!updated) {
-      await Product.updateOne(
-        { _id: variantProduct._id },
-        {
-          $push: { 'stockProjection.variants': { sku: skuRef, quantity: onHand } },
-          $set: { 'stockProjection.syncedAt': new Date() },
-        },
-      );
-    }
-
-    // Also update the top-level product.quantity to sum of all variant quantities
-    const freshProduct = (await Product.findById(variantProduct._id, 'stockProjection').lean()) as any;
-    const totalQty = (freshProduct?.stockProjection?.variants || []).reduce(
-      (sum: number, v: { quantity?: number }) => sum + (v.quantity || 0),
-      0,
+    await catalog.repositories.product.updateStockProjection(
+      String(product._id),
+      { totalAvailable: totalQty, variants: variantStocks },
+      ctx,
     );
-    await Product.updateOne({ _id: variantProduct._id }, { $set: { quantity: totalQty } });
-
-    logger.debug({ skuRef, productId: variantProduct._id, onHand, totalQty }, 'Synced variant product quantity');
+    logger.debug({ skuRef, productId: product._id, onHand, totalQty }, 'Synced variant stock projection');
     return;
   }
 
-  // Try product _id (simple product)
+  // Simple product
   if (mongoose.isValidObjectId(skuRef)) {
-    await Product.updateOne({ _id: skuRef, deletedAt: null }, { $set: { quantity: onHand } });
-    logger.debug({ skuRef, onHand }, 'Synced simple product quantity');
+    try {
+      await catalog.repositories.product.updateStockProjection(skuRef, { totalAvailable: onHand }, ctx);
+      logger.debug({ skuRef, onHand }, 'Synced simple product stock projection');
+    } catch {
+      // Product may not exist
+    }
   }
 }

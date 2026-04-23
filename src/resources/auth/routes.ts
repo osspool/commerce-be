@@ -7,10 +7,10 @@
  * - /members   - Branch member status management
  */
 
-import fp from 'fastify-plugin';
 import type { FastifyInstance } from 'fastify';
-import userResource from './user.resource.js';
+import fp from 'fastify-plugin';
 import memberResource from './member.resource.js';
+import userResource from './user.resource.js';
 
 async function authRoutes(fastify: FastifyInstance): Promise<void> {
   const userPlugin = userResource.toPlugin();

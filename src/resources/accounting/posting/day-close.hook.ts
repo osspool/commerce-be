@@ -19,13 +19,13 @@
 import type { FastifyInstance } from 'fastify';
 import { publish } from '#lib/events/arcEvents.js';
 import { bdYesterday } from '#lib/utils/bd-date.js';
+import logger from '#lib/utils/logger.js';
 import {
+  clearCloseTriggered,
   getLastClosedDate,
   hasCloseBeenTriggered,
   markCloseTriggered,
-  clearCloseTriggered,
 } from './day-close-state.service.js';
-import logger from '#lib/utils/logger.js';
 
 // Methods that can generate revenue / mutate ledger state. GET/HEAD/OPTIONS
 // never produce postings, so there's no value in evaluating the hook for them.
@@ -33,16 +33,7 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // Infra paths that should never trigger accounting work — health checks,
 // metrics scrapers, docs/openapi, and SSE keepalives hit these on a tight loop.
-const SKIP_PATH_PREFIXES = [
-  '/health',
-  '/ready',
-  '/live',
-  '/metrics',
-  '/docs',
-  '/api/v1/docs',
-  '/openapi',
-  '/sse',
-];
+const SKIP_PATH_PREFIXES = ['/health', '/ready', '/live', '/metrics', '/docs', '/api/v1/docs', '/openapi', '/sse'];
 
 export function registerDayCloseHook(fastify: FastifyInstance): void {
   fastify.addHook('onRequest', async (req) => {

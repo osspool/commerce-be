@@ -1,5 +1,6 @@
-import Review from './review.model.js';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+import type { CrudSchemas } from '@classytic/repo-core/schema';
+import Review from './review.model.js';
 
 interface FieldRule {
   systemManaged?: boolean;
@@ -27,7 +28,7 @@ interface SchemaOptions {
 /**
  * Review CRUD Schemas with Field Rules
  */
-const crudSchemas = buildCrudSchemasFromModel(Review, {
+const crudSchemas: CrudSchemas = buildCrudSchemasFromModel(Review, {
   strictAdditionalProperties: true,
   fieldRules: {
     user: { systemManaged: true },

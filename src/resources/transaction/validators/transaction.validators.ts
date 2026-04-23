@@ -5,8 +5,8 @@
  * Manual transaction creation is blocked
  */
 
-import createError from 'http-errors';
 import { blockIf } from '@classytic/mongokit';
+import createError from 'http-errors';
 import { validateTransactionUpdate } from '../transaction.helpers.js';
 
 interface ValidatorContext {

@@ -1,7 +1,7 @@
-import type { ClientSession } from 'mongoose';
 import { toSmallestUnit } from '@classytic/revenue';
+import type { ClientSession } from 'mongoose';
+import { getTransactionModel } from '#shared/revenue/engine.js';
 import { PAYMENT_METHOD_VALUES } from '#shared/revenue/enums.js';
-import Transaction from '../transaction.model.js';
 
 interface PaymentDetails {
   trxId?: string;
@@ -111,9 +111,9 @@ export async function createVerifiedOperationalExpenseTransaction(params: Operat
   };
 
   if (session) {
-    const [transaction] = await Transaction.create([transactionPayload], { session });
+    const [transaction] = await getTransactionModel().create([transactionPayload], { session });
     return transaction;
   }
 
-  return Transaction.create(transactionPayload);
+  return getTransactionModel().create(transactionPayload);
 }

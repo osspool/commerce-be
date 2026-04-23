@@ -1,5 +1,10 @@
-import mongoose, { Schema, type HydratedDocument, type Model, type UpdateQuery } from 'mongoose';
 import slugPlugin from '@classytic/mongoose-slug-plugin';
+import mongoose, { type HydratedDocument, type Model, Schema, type UpdateQuery } from 'mongoose';
+import {
+  CASH_MOVEMENT_REASON_CODES,
+  SHIFT_PAYMENT_METHODS,
+  type ShiftPolicy,
+} from '#resources/sales/pos/shift.constants.js';
 
 /**
  * Branch Model
@@ -20,12 +25,69 @@ export interface IBranchAddress {
   country?: string;
 }
 
+/**
+ * Bangladesh VAT business-type regimes recognized by NBR.
+ * Mirrors the `BusinessType` union exported from `@classytic/bd-tax`.
+ * Each branch picks one — drives filing form, input-credit eligibility,
+ * VDS withholding obligation, bonded-warehouse facility, and which GL
+ * accounts the posting contracts target.
+ */
+export type BusinessType =
+  | 'SME_TOT'
+  | 'STANDARD_VAT'
+  | 'IMPORTER'
+  | 'RMG_EXPORTER'
+  | 'IT_SERVICES'
+  | 'SERVICE_PROVIDER'
+  | 'COTTAGE_EXEMPT';
+
+/**
+ * Special-economic-zone status — drives utility-VAT rebate eligibility
+ * (SRO-186/2023 for SEZ/BHTC) and bonded-warehouse entitlement (RMG UD/UP).
+ */
+export type SezStatus = 'NONE' | 'SEZ' | 'BHTC' | 'BONDED_WAREHOUSE';
+
 export interface IBranch {
   slug?: string;
   code: string;
   name: string;
+  /**
+   * Per-branch POS shift policy. Resolves in this order for any given shift:
+   *   shift.policySnapshot → branch.shiftPolicy → platform.defaultShiftPolicy → code defaults
+   * Snapshotted onto each shift at open, so mid-shift policy changes never
+   * break reconciliation math.
+   */
+  shiftPolicy?: Partial<ShiftPolicy>;
+  /**
+   * Branch **identity** — what kind of physical thing the branch is. One
+   * value, mutually exclusive, describes the form-factor:
+   *   - `store` / `outlet` / `franchise`: POS-capable physical retail
+   *   - `warehouse`: stocking location (HO, distribution center)
+   *
+   * Deliberately scalar, not an array. For overlapping responsibilities
+   * (a store that ALSO fulfills web orders) use the capability flags
+   * below — identity stays fixed, capabilities compose.
+   *
+   * There is no `ecommerce` type. Web fulfillment is a capability
+   * (`fulfillsEcommerce`), not an identity, because every web fulfillment
+   * branch is ALSO one of the physical form-factors. Tagging a branch as
+   * `type: 'ecommerce'` was the old model — replaced by the clean
+   * identity-vs-capability split.
+   */
   type: 'store' | 'warehouse' | 'outlet' | 'franchise';
   role: 'head_office' | 'sub_branch';
+  /**
+   * **Capability**: when `true`, this branch is the fulfillment target
+   * for e-commerce / marketplace orders placed without an
+   * `x-organization-id` header (public storefront customers don't know
+   * about branches). Resolved by
+   * `#resources/sales/orders/ecom-branch.ts#getEcomBranchId`.
+   *
+   * Exactly one active branch should have this set at a time. Not
+   * enforced with a DB constraint (would deadlock flag swaps between
+   * branches) — the resolver picks the first match defensively.
+   */
+  fulfillsEcommerce?: boolean;
   address?: IBranchAddress;
   phone?: string;
   email?: string;
@@ -33,6 +95,23 @@ export interface IBranch {
   isDefault: boolean;
   isActive: boolean;
   notes?: string;
+  /**
+   * NBR VAT regime this branch operates under. Drives filing form,
+   * input-credit eligibility, VDS withholding obligation, and which GL
+   * accounts posting contracts target. Default: 'STANDARD_VAT'.
+   */
+  businessType?: BusinessType;
+  /**
+   * Bonded warehouse licence / Utilization Declaration (UD) number.
+   * Populated for RMG export factories and bonded importers. Required
+   * for bonded-warehouse posting flows.
+   */
+  bondedWarehouseLicense?: string;
+  /**
+   * Special-economic-zone designation. Drives utility-VAT rebate
+   * eligibility (SEZ/BHTC units get 80% rebate via SRO-186/2023).
+   */
+  sezStatus?: SezStatus;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -62,7 +141,8 @@ const branchSchema = new Schema<IBranch>(
       trim: true,
     },
 
-    // Branch type
+    // Branch identity — one of the four physical form-factors.
+    // Capabilities (e.g. `fulfillsEcommerce`) live on separate fields.
     type: {
       type: String,
       enum: ['store', 'warehouse', 'outlet', 'franchise'],
@@ -76,6 +156,16 @@ const branchSchema = new Schema<IBranch>(
       type: String,
       enum: ['head_office', 'sub_branch'],
       default: 'sub_branch',
+      index: true,
+    },
+
+    // E-commerce fulfillment capability. Decoupled from `type` so a
+    // physical `store` can double as the web channel's fulfillment center
+    // without losing its primary identity. Resolved by
+    // `#resources/sales/orders/ecom-branch.ts#getEcomBranchId`.
+    fulfillsEcommerce: {
+      type: Boolean,
+      default: false,
       index: true,
     },
 
@@ -115,6 +205,71 @@ const branchSchema = new Schema<IBranch>(
 
     // Metadata
     notes: String,
+
+    // ─── Bangladesh VAT / NBR fields ────────────────────────────────
+    // NBR VAT regime — picks filing form and posting rules. Defaults to
+    // STANDARD_VAT (the common case for a retail chain). Onboarding flow
+    // can set SME_TOT, RMG_EXPORTER, IT_SERVICES, etc. based on branch use.
+    businessType: {
+      type: String,
+      enum: [
+        'SME_TOT',
+        'STANDARD_VAT',
+        'IMPORTER',
+        'RMG_EXPORTER',
+        'IT_SERVICES',
+        'SERVICE_PROVIDER',
+        'COTTAGE_EXEMPT',
+      ],
+      default: 'STANDARD_VAT',
+      index: true,
+    },
+    // Bonded-warehouse licence / UD number for RMG + bonded importers.
+    bondedWarehouseLicense: {
+      type: String,
+      trim: true,
+    },
+    // SEZ / BHTC status for utility-VAT rebate calculations.
+    sezStatus: {
+      type: String,
+      enum: ['NONE', 'SEZ', 'BHTC', 'BONDED_WAREHOUSE'],
+      default: 'NONE',
+    },
+
+    // ─── POS Shift Policy (per-branch overrides) ────────────────────
+    // Any field left unset falls back to platform.defaultShiftPolicy → code default.
+    shiftPolicy: {
+      type: new Schema(
+        {
+          requiredOpeningFloat: { type: Number, default: null, min: 0 },
+          enforceBusinessHours: { type: Boolean, default: null },
+
+          blindCloseRequired: { type: Boolean, default: null },
+          varianceThresholdAbs: { type: Number, default: null, min: 0 },
+          varianceThresholdPct: { type: Number, default: null, min: 0, max: 100 },
+          managerOverrideRequired: { type: Boolean, default: null },
+
+          autoCloseEnabled: { type: Boolean, default: null },
+          // HH:mm 24h, e.g. "04:00" for a 4am late-night cutoff.
+          autoCloseTime: {
+            type: String,
+            default: null,
+            validate: {
+              validator: (v: string | null) => v === null || /^([01]\d|2[0-3]):[0-5]\d$/.test(v),
+              message: 'autoCloseTime must be HH:mm (24-hour)',
+            },
+          },
+          autoCloseTimezone: { type: String, default: null },
+
+          allowHandover: { type: Boolean, default: null },
+          requireReasonCode: { type: Boolean, default: null },
+          allowedReasonCodes: [{ type: String, enum: CASH_MOVEMENT_REASON_CODES }],
+          allowedPaymentMethods: [{ type: String, enum: SHIFT_PAYMENT_METHODS }],
+        },
+        { _id: false },
+      ),
+      default: undefined,
+    },
   },
   { timestamps: true },
 );

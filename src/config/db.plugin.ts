@@ -3,12 +3,13 @@
  *
  * Thin wrapper around `connectDatabase()` that decorates Fastify with mongoose
  * and registers cleanup hooks. The actual connection logic lives in db.connect.ts
- * so it can also be called from app.ts BEFORE loadResources() runs (engines need
- * a connected mongoose to create their owned models).
+ * so it can also be called from app.ts BEFORE Arc resource discovery runs
+ * (engines need a connected mongoose to create their owned models).
  */
+
+import type { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import mongoose from 'mongoose';
-import type { FastifyInstance } from 'fastify';
 import { connectDatabase } from './db.connect.js';
 
 declare module 'fastify' {

@@ -1,5 +1,6 @@
-﻿import Archive from './archive.model.js';
-import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+﻿import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+import type { CrudSchemas } from '@classytic/repo-core/schema';
+import Archive from './archive.model.js';
 
 /**
  * Archive CRUD Schemas with Field Rules
@@ -34,7 +35,7 @@ export const archiveSchemaOptions = {
   },
 };
 
-export const archiveSchemas = crudSchemas;
+export const archiveSchemas: CrudSchemas = crudSchemas;
 export default archiveSchemas;
 
 export const archiveRunQuery = {

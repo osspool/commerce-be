@@ -5,5 +5,5 @@
  * Internals live in `config/permissions/*` for cleaner organization.
  */
 
-export { default } from './permissions/index.js';
 export type { AllPermissions } from './permissions/index.js';
+export { default } from './permissions/index.js';

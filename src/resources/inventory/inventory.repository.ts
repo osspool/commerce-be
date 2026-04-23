@@ -1,11 +1,17 @@
 /**
  * Inventory Repository Shim
  *
- * Legacy API bridge: provides getBatchBranchStock via Flow engine.
- * Used by pos.utils.ts for POS product enrichment.
+ * Thin bridge: exposes `getBatchBranchStock` over @classytic/flow's quant
+ * repository. Called by pos.utils.ts during product-list enrichment and by
+ * any admin surface that needs "products with branch stock" in bulk.
+ *
+ * Errors surface via `logger.error` — silent failure was hiding real Flow
+ * mis-bootstraps that showed up as "everything out of stock" in the UI.
  */
 
-import { getFlowEngine, buildFlowContext, DEFAULT_LOCATION } from './flow/index.js';
+import logger from '#lib/utils/logger.js';
+import { buildFlowContext, DEFAULT_LOCATION } from './flow/context-helpers.js';
+import { getFlowEngine } from './flow/flow-engine.js';
 
 interface StockEntry {
   quantity: number;
@@ -18,19 +24,31 @@ interface GetBatchOptions {
   includeInactive?: boolean;
 }
 
+interface ProductVariantMap {
+  productId: string;
+  variantSkus: string[];
+}
+
 /**
  * Get stock for a batch of products at a specific branch.
- * Returns Map<`${productId}_${variantSku}`, StockEntry>
+ * Returns Map<`${productId}_${variantSku|null}`, StockEntry>
  *
- * Single batch query instead of N per-product queries.
- * Quants are indexed by skuRef which maps to either productId (simple)
- * or variantSku (variant). The caller (enrichWithBranchStock) looks up
- * keys as `${productId}_${variantSku}` or `${productId}_null`.
+ * Requires `products` array so we know which variant SKU belongs to which
+ * product. Without this, shared SKUs across products cause stock bleed.
+ *
+ * ### Query shape
+ * Single `findMany({ locationId, skuRef: { $in: [...pids, ...variantSkus] } })`.
+ * Bounded to the batch's skuRefs — O(page-size) not O(catalog-size).
+ * Planner uses Flow's compound index
+ * `{ skuRef: 1, locationId: 1, inDate: 1, _id: 1 }` (see
+ * `packages/flow/src/models/stock-quant.model.ts`) — `$in` on the leading
+ * key resolves to IN-bounds scans, not a collscan.
  */
 async function getBatchBranchStock(
   productIds: unknown[],
   branchId: string,
   _options: GetBatchOptions = {},
+  products?: ProductVariantMap[],
 ): Promise<Map<string, StockEntry>> {
   const result = new Map<string, StockEntry>();
   if (!productIds?.length) return result;
@@ -42,8 +60,22 @@ async function getBatchBranchStock(
     const pids = productIds.map(String);
     const pidSet = new Set(pids);
 
-    // Single query: all quants at this location (instead of N queries)
-    const allQuants = await flow.repositories.quant.findMany({ locationId }, ctx);
+    // Build the exact set of skuRefs this batch cares about.
+    // Simple products: skuRef === productId. Variant products: one skuRef
+    // per variant SKU. De-dup (some catalogs reuse SKUs across product
+    // types) and pass as an $in bound so the quant scan is bounded to
+    // this page, not the whole location.
+    const skuRefs = new Set<string>(pids);
+    if (products?.length) {
+      for (const { variantSkus } of products) {
+        for (const sku of variantSkus) skuRefs.add(sku);
+      }
+    }
+
+    const allQuants = await flow.repositories.quant.findMany(
+      { locationId, skuRef: { $in: [...skuRefs] } },
+      ctx,
+    );
 
     // Build skuRef → quantity map from quants
     const skuQuantMap = new Map<string, { qty: number; unitCost?: number }>();
@@ -59,15 +91,8 @@ async function getBatchBranchStock(
       }
     }
 
-    // Map quants back to product keys
-    // For simple products: skuRef === productId → key `${pid}_null`
-    // For variants: skuRef === variantSku → key `${pid}_${variantSku}`
-    // Since we don't know which variant belongs to which product here,
-    // store ALL skuRef entries keyed by every productId. The caller
-    // (enrichWithBranchStock) only looks up keys it knows about from
-    // the product's own variant list, so extra keys are harmless.
+    // Simple products: skuRef === productId → key `${pid}_null`
     for (const pid of pids) {
-      // Check simple product match (skuRef === productId)
       const simpleEntry = skuQuantMap.get(pid);
       if (simpleEntry) {
         result.set(`${pid}_null`, {
@@ -78,19 +103,33 @@ async function getBatchBranchStock(
       }
     }
 
-    // Map all non-productId skuRefs as potential variant entries for each product
-    for (const [skuRef, entry] of skuQuantMap) {
-      if (pidSet.has(skuRef)) continue; // Already handled as simple product
-
-      // This skuRef is a variant SKU — create entries for all products
-      // (caller only looks up variants it knows about, extras are ignored)
-      for (const pid of pids) {
-        result.set(`${pid}_${skuRef}`, {
-          quantity: entry.qty,
-          costPrice: entry.unitCost,
-          isActive: true,
-        });
+    // Variant products: use product→variant mapping to build correct keys.
+    // Each variant SKU is keyed ONLY under its owning product — never cross-mapped.
+    if (products?.length) {
+      for (const { productId, variantSkus } of products) {
+        if (!pidSet.has(productId)) continue;
+        for (const sku of variantSkus) {
+          const entry = skuQuantMap.get(sku);
+          if (entry) {
+            result.set(`${productId}_${sku}`, {
+              quantity: entry.qty,
+              costPrice: entry.unitCost,
+              isActive: true,
+            });
+          }
+        }
       }
+    } else {
+      // Under the new scoped query, `skuRefs` only includes productIds when
+      // no `products` map is supplied — variant quants are never fetched.
+      // The legacy "single-product fallback" that mapped every leftover
+      // quant under the one product is gone; it relied on an unscoped
+      // full-location dump. Callers needing variant stock MUST pass
+      // `products` (see `catalog.engine.createInventoryBridge`).
+      logger.warn(
+        { branchId, productCount: pids.length },
+        '[inventory.repository] getBatchBranchStock called without productVariantMap — variant stock not queried. Pass `products` to include variants.',
+      );
     }
 
     // Ensure every product has at least a zero entry
@@ -99,8 +138,19 @@ async function getBatchBranchStock(
         result.set(`${pid}_null`, { quantity: 0, isActive: true });
       }
     }
-  } catch {
-    // If flow engine isn't initialized, return empty map
+  } catch (err) {
+    // Do NOT swallow — an empty stock map silently renders as "all out of
+    // stock" in the UI, which is indistinguishable from a real zero-stock
+    // branch. Log loudly so operators see Flow misconfiguration.
+    logger.error(
+      {
+        err: (err as Error).message,
+        stack: (err as Error).stack,
+        branchId,
+        productCount: productIds.length,
+      },
+      '[inventory.repository] getBatchBranchStock failed — stock will render as 0',
+    );
   }
 
   return result;

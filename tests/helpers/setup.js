@@ -184,6 +184,10 @@ export async function removeMember(app, token, memberIdOrEmail) {
 export async function setupTestOrg() {
   const mongod = await MongoMemoryServer.create();
   const uri = mongod.getUri();
+  // Disconnect from per-suite-mongo if active, then connect to our own instance
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
   await mongoose.connect(uri);
 
   // Set env vars BEFORE importing auth modules

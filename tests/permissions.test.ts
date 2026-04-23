@@ -23,14 +23,21 @@ import { roles, groups } from '#config/permissions/roles.js';
 // Helpers — build mock PermissionContext objects
 // ---------------------------------------------------------------------------
 
-type PermCtx = { user: { id: string; roles: string[] } | null; [k: string]: unknown };
+type PermCtx = {
+  user: { id: string; role: string[] } | null;
+  request: { scope?: unknown };
+  [k: string]: unknown;
+};
 
 function unauthCtx(): PermCtx {
-  return { user: null };
+  return { user: null, request: {} };
 }
 
 function authCtx(userRoles: string | string[] = 'user'): PermCtx {
-  return { user: { id: 'u_1', roles: Array.isArray(userRoles) ? userRoles : [userRoles] } };
+  return {
+    user: { id: 'u_1', role: Array.isArray(userRoles) ? userRoles : [userRoles] },
+    request: {},
+  };
 }
 
 /** Normalize a check result to { granted, reason? } */
@@ -292,6 +299,103 @@ describe('Resource policies — user', () => {
   it('grants superadmin create', () => {
     const result = normalize(perms.create(authCtx('superadmin')));
     expect(result.granted).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// arc 2.7.1 hardening — platform-only checks must NOT match org-role 'admin'
+//
+// arc 2.7.1 changed `requireRoles()` default to includeOrgRoles:true. Our
+// shared/permissions.ts wraps platform checks with includeOrgRoles:false so
+// a user whose ONLY admin role lives on org membership (not user.role)
+// cannot satisfy a platform-admin gate. These tests pin that contract — if
+// someone removes the {includeOrgRoles:false} flag, this test fails loud.
+// ---------------------------------------------------------------------------
+
+describe('Platform-only role hardening (includeOrgRoles:false)', () => {
+  /** Build a member-scope context with NO platform role but org-role 'admin' */
+  function memberOrgAdminCtx() {
+    return {
+      user: { id: 'u_1', role: ['user'] }, // platform: just 'user'
+      request: {
+        scope: {
+          kind: 'member' as const,
+          userId: 'u_1',
+          organizationId: 'org_1',
+          userRoles: ['user'],
+          orgRoles: ['admin'], // org-level admin only
+        },
+      },
+    };
+  }
+
+  it('platformAdminOnly denies a member whose admin role is org-only', () => {
+    const perms = getResourcePermissions('product');
+    const result = normalize(perms.create(memberOrgAdminCtx() as never));
+    expect(result.granted).toBe(false);
+  });
+
+  it('superadminOnly denies a member whose superadmin role is org-only', () => {
+    const perms = getResourcePermissions('user');
+    const ctx = memberOrgAdminCtx();
+    ctx.request.scope.orgRoles = ['superadmin'];
+    const result = normalize(perms.create(ctx as never));
+    expect(result.granted).toBe(false);
+  });
+
+  it('still grants when admin role is on the platform user (user.role)', () => {
+    const perms = getResourcePermissions('product');
+    const result = normalize(perms.create(authCtx('admin')));
+    expect(result.granted).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// requireOrgMembership tightening — accounting & analytics
+// ---------------------------------------------------------------------------
+
+describe('Branch-scoped reads require org membership', () => {
+  /** authenticated but no x-organization-id → kind:'authenticated' */
+  function authNoOrgCtx() {
+    return {
+      user: { id: 'u_1', role: ['user'] },
+      request: { scope: { kind: 'authenticated' as const, userId: 'u_1', userRoles: ['user'] } },
+    };
+  }
+
+  /** authenticated AND a member of an org → kind:'member' */
+  function memberCtx() {
+    return {
+      user: { id: 'u_1', role: ['user'] },
+      request: {
+        scope: {
+          kind: 'member' as const,
+          userId: 'u_1',
+          organizationId: 'branch_1',
+          userRoles: ['user'],
+          orgRoles: ['cashier'],
+        },
+      },
+    };
+  }
+
+  it('journalEntry.list denies plain authenticated (no branch context)', () => {
+    const perms = getResourcePermissions('journalEntry');
+    const result = normalize(perms.list(authNoOrgCtx() as never));
+    expect(result.granted).toBe(false);
+    expect(result.reason).toMatch(/[Oo]rganization/);
+  });
+
+  it('journalEntry.list grants a branch member', () => {
+    const perms = getResourcePermissions('journalEntry');
+    const result = normalize(perms.list(memberCtx() as never));
+    expect(result.granted).toBe(true);
+  });
+
+  it('journalEntry.list denies an unauthenticated request', () => {
+    const perms = getResourcePermissions('journalEntry');
+    const result = normalize(perms.list(unauthCtx()));
+    expect(result.granted).toBe(false);
   });
 });
 

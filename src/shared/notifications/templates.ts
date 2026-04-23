@@ -30,7 +30,7 @@ export const templates = {
   },
 
   invitation: {
-    subject: '${platformName} — You\'ve been invited to ${orgName}',
+    subject: "${platformName} — You've been invited to ${orgName}",
     html: wrap(`
       <h2>Branch Invitation</h2>
       <p>\${inviterName} invited you to join <strong>\${orgName}</strong> as <strong>\${roles}</strong>.</p>
@@ -71,6 +71,83 @@ export const templates = {
       <p style="text-align: center; margin: 32px 0;">
         <a href="\${loginUrl}" style="${BUTTON_STYLE}">Sign In</a>
       </p>
+    `),
+  },
+
+  // ── Invoice / Accounting ────────────────────────────────────────────────────
+
+  'invoice:sent': {
+    subject: '${platformName} — Invoice ${invoiceNumber}',
+    html: wrap(`
+      <h2>Invoice \${invoiceNumber}</h2>
+      <p>Hi \${recipientName},</p>
+      <p>Please find your invoice details below.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        <tr><td style="${MUTED_STYLE}">Invoice No.</td><td style="text-align:right;font-weight:600;">\${invoiceNumber}</td></tr>
+        <tr><td style="${MUTED_STYLE}">Date</td><td style="text-align:right;">\${invoiceDate}</td></tr>
+        <tr><td style="${MUTED_STYLE}">Due Date</td><td style="text-align:right;">\${dueDate}</td></tr>
+        <tr style="border-top:1px solid #eee;"><td style="${MUTED_STYLE};padding-top:8px;">Amount Due</td><td style="text-align:right;padding-top:8px;font-size:18px;font-weight:700;">\${currency} \${amountDue}</td></tr>
+      </table>
+      \${message}
+      <p style="text-align: center; margin: 32px 0;">
+        <a href="\${invoiceUrl}" style="${BUTTON_STYLE}">View Invoice</a>
+      </p>
+      <p style="${MUTED_STYLE}">Payment is due by \${dueDate}. Please contact us if you have any questions.</p>
+    `),
+  },
+
+  'invoice:reminder.sent': {
+    subject: '${platformName} — Payment Reminder: Invoice ${invoiceNumber}',
+    html: wrap(`
+      <h2>Payment Reminder</h2>
+      <p>Hi \${recipientName},</p>
+      <p>This is a friendly reminder that invoice <strong>\${invoiceNumber}</strong> has an outstanding balance.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        <tr><td style="${MUTED_STYLE}">Invoice No.</td><td style="text-align:right;font-weight:600;">\${invoiceNumber}</td></tr>
+        <tr><td style="${MUTED_STYLE}">Due Date</td><td style="text-align:right;">\${dueDate}</td></tr>
+        <tr style="border-top:1px solid #eee;"><td style="${MUTED_STYLE};padding-top:8px;">Outstanding</td><td style="text-align:right;padding-top:8px;font-size:18px;font-weight:700;color:#dc2626;">\${currency} \${amountDue}</td></tr>
+      </table>
+      <p style="text-align: center; margin: 32px 0;">
+        <a href="\${invoiceUrl}" style="${BUTTON_STYLE}">View & Pay Invoice</a>
+      </p>
+      <p style="${MUTED_STYLE}">If you've already made this payment, please disregard this reminder.</p>
+    `),
+  },
+
+  'invoice:paid': {
+    subject: '${platformName} — Payment Received for Invoice ${invoiceNumber}',
+    html: wrap(`
+      <h2>Payment Received</h2>
+      <p>Hi \${recipientName},</p>
+      <p>We've received your payment for invoice <strong>\${invoiceNumber}</strong>.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        <tr><td style="${MUTED_STYLE}">Invoice No.</td><td style="text-align:right;font-weight:600;">\${invoiceNumber}</td></tr>
+        <tr><td style="${MUTED_STYLE}">Amount Paid</td><td style="text-align:right;font-weight:600;color:#16a34a;">\${currency} \${amountPaid}</td></tr>
+        <tr><td style="${MUTED_STYLE}">Remaining</td><td style="text-align:right;">\${currency} \${amountDue}</td></tr>
+      </table>
+      <p style="text-align: center; margin: 32px 0;">
+        <a href="\${invoiceUrl}" style="${BUTTON_STYLE}">View Invoice</a>
+      </p>
+      <p style="${MUTED_STYLE}">Thank you for your payment!</p>
+    `),
+  },
+
+  'invoice:quote.sent': {
+    subject: '${platformName} — Quote ${invoiceNumber}',
+    html: wrap(`
+      <h2>Quote \${invoiceNumber}</h2>
+      <p>Hi \${recipientName},</p>
+      <p>We've prepared a quote for you. Please review the details below.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        <tr><td style="${MUTED_STYLE}">Quote No.</td><td style="text-align:right;font-weight:600;">\${invoiceNumber}</td></tr>
+        <tr><td style="${MUTED_STYLE}">Date</td><td style="text-align:right;">\${invoiceDate}</td></tr>
+        <tr><td style="${MUTED_STYLE}">Valid Until</td><td style="text-align:right;">\${expiryDate}</td></tr>
+        <tr style="border-top:1px solid #eee;"><td style="${MUTED_STYLE};padding-top:8px;">Total</td><td style="text-align:right;padding-top:8px;font-size:18px;font-weight:700;">\${currency} \${totalAmount}</td></tr>
+      </table>
+      <p style="text-align: center; margin: 32px 0;">
+        <a href="\${invoiceUrl}" style="${BUTTON_STYLE}">View Quote</a>
+      </p>
+      <p style="${MUTED_STYLE}">This quote is valid until \${expiryDate}. Contact us if you have any questions.</p>
     `),
   },
 };

@@ -1,6 +1,7 @@
-import { allowPublic, requireAuth, requireRoles } from '@classytic/arc/permissions';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { groups } from './roles.js';
+import type { PermissionCheck } from '@classytic/arc';
+import { requireOrgRole } from '@classytic/arc/permissions';
+import { orgGroups } from '#config/permissions/roles.js';
+import { allowPublic, anyOf, platformAdminOnly, requireAuth, requireOrgMembership } from '#shared/permissions.js';
 
 export interface CrudPermissions {
   list: PermissionCheck;
@@ -38,7 +39,12 @@ export interface BranchPermissions extends CrudPermissions {
 }
 
 export interface PosPermissions {
+  /** Default for all POS routes — org member of the active branch. */
   access: PermissionCheck;
+  /** Can open/pause/resume/close/cash-in/cash-out (the cashier-level verbs). */
+  cashierAction: PermissionCheck;
+  /** Can reconcile blind-closed shifts and approve variance overrides. */
+  managerAction: PermissionCheck;
 }
 
 export interface OrderActionPermissions {
@@ -56,44 +62,44 @@ export interface OrderActionPermissions {
 export const products: ProductPermissions = {
   list: allowPublic(),
   get: allowPublic(),
-  create: requireRoles(groups.platformAdmin),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
-  deleted: requireRoles(groups.platformAdmin),
-  restore: requireRoles(groups.platformAdmin),
-  syncStock: requireRoles(groups.platformAdmin),
+  create: platformAdminOnly(),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
+  deleted: platformAdminOnly(),
+  restore: platformAdminOnly(),
+  syncStock: platformAdminOnly(),
 };
 
 export const categories: CategoryPermissions = {
   list: allowPublic(),
   get: allowPublic(),
-  create: requireRoles(groups.platformAdmin),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
-  syncProductCounts: requireRoles(groups.platformAdmin),
+  create: platformAdminOnly(),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
+  syncProductCounts: platformAdminOnly(),
 };
 
 export const sizeGuides: CrudPermissions = {
   list: allowPublic(),
   get: allowPublic(),
-  create: requireRoles(groups.platformAdmin),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
+  create: platformAdminOnly(),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
 };
 
 export const orders: CrudPermissions = {
   list: requireAuth(),
   get: requireAuth(),
   create: requireAuth(),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
 };
 
 export const cart: CartPermissions = {
   access: requireAuth(),
-  listAll: requireRoles(groups.platformAdmin),
-  abandoned: requireRoles(groups.platformAdmin),
-  getUserCart: requireRoles(groups.platformAdmin),
+  listAll: platformAdminOnly(),
+  abandoned: platformAdminOnly(),
+  getUserCart: platformAdminOnly(),
 };
 
 export const reviews: ReviewPermissions = {
@@ -101,33 +107,68 @@ export const reviews: ReviewPermissions = {
   get: allowPublic(),
   create: requireAuth(),
   update: requireAuth(),
-  delete: requireRoles(groups.platformAdmin),
+  delete: platformAdminOnly(),
   getMyReview: requireAuth(),
 };
 
 export const branches: BranchPermissions = {
   list: requireAuth(),
   get: requireAuth(),
-  create: requireRoles(groups.platformAdmin),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
+  create: platformAdminOnly(),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
   getByCode: requireAuth(),
   getDefault: requireAuth(),
-  setDefault: requireRoles(groups.platformAdmin),
+  setDefault: platformAdminOnly(),
 };
 
 export const pos: PosPermissions = {
-  access: requireAuth(),
+  // POS is branch-scoped — cashier must be a member of the active branch.
+  access: requireOrgMembership(),
+  // Cashier-level actions — anyone in the POS roster.
+  cashierAction: requireOrgRole(...orgGroups.posCashier),
+  // Manager-level actions — reconcile + approve variance.
+  managerAction: requireOrgRole(...orgGroups.posManager),
+};
+
+// Branch-owned order operations. A branch manager running a store has to
+// confirm / cancel / refund / hold / fulfill orders placed at their branch
+// without escalating to head office. The handlers themselves enforce
+// `organizationId` scoping (see order.resource.ts POST /:id/action), so
+// widening the role gate here cannot leak to other branches.
+const branchOrderOps: PermissionCheck = anyOf(
+  platformAdminOnly(),
+  requireOrgRole(...orgGroups.storeStaff),
+  requireOrgRole(...orgGroups.warehouseStaff),
+);
+
+// Quotations are branch-scoped B2B sales documents — a rep at a branch drafts
+// a quote, edits lines/notes before sending, then drives the FSM (send →
+// viewed → accepted → converted). `orgScoped` preset filters the adapter by
+// organizationId, so widening update/delete to branch staff cannot leak
+// across branches. Delete stays admin-only because quotations carry audit
+// weight once they've been sent to a customer.
+export const quotations: CrudPermissions = {
+  list: requireAuth(),
+  get: requireAuth(),
+  create: requireAuth(),
+  update: branchOrderOps,
+  delete: platformAdminOnly(),
 };
 
 export const orderActions: OrderActionPermissions = {
   my: requireAuth(),
   cancel: requireAuth(),
   cancelRequest: requireAuth(),
-  updateStatus: requireRoles(groups.platformAdmin),
-  fulfill: requireRoles(groups.platformAdmin),
-  refund: requireRoles(groups.platformAdmin),
-  shippingAdmin: requireRoles(groups.platformAdmin),
+  // POST /orders/:id/action (confirm, cancel, hold, refund) + PATCH
+  // /orders/:id/payment-state + quotation/order-change FSM transitions.
+  updateStatus: branchOrderOps,
+  // Fulfillment FSM transitions (pick → pack → ship → delivered).
+  fulfill: branchOrderOps,
+  // Explicit refund-only gate (currently dormant — route code uses
+  // updateStatus for the `refund` action).
+  refund: branchOrderOps,
+  shippingAdmin: platformAdminOnly(),
   shippingGet: requireAuth(),
   guestCheckout: allowPublic(),
 };
@@ -137,6 +178,7 @@ export interface CommercePermissions {
   categories: CategoryPermissions;
   sizeGuides: CrudPermissions;
   orders: CrudPermissions;
+  quotations: CrudPermissions;
   cart: CartPermissions;
   reviews: ReviewPermissions;
   branches: BranchPermissions;
@@ -149,6 +191,7 @@ const commerce: CommercePermissions = {
   categories,
   sizeGuides,
   orders,
+  quotations,
   cart,
   reviews,
   branches,

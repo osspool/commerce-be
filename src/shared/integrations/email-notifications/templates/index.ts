@@ -7,6 +7,10 @@
  * - payment.refunded -> Refund processed (admin + customer)
  */
 
+import { arcLog } from '@classytic/arc/logger';
+
+const log = arcLog('email-templates');
+
 interface TemplateResult {
   subject: string;
   html: string;
@@ -348,7 +352,7 @@ const templates: Record<string, TemplateFunction> = {
 export function renderTemplate(templateName: string, data: Record<string, unknown>): TemplateResult {
   const template = templates[templateName];
   if (!template) {
-    console.warn(`[Templates] Template not found: ${templateName}`);
+    log.warn(`Template not found: ${templateName}`);
     // Return generic fallback
     return {
       subject: `Notification: ${templateName}`,

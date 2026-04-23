@@ -1,64 +1,108 @@
 /**
  * Budget Action Registry — Stripe-style state transitions
  *
- * Registered via createActionRouter → POST /accounting/budgets/:id/action
- * Body: { action: "submit" | "approve" | "reject" | "close", reason?: string }
+ * Workflow: draft ─submit─> submitted ─approve─> approved ─close─> closed
+ *                                      ─reject─> rejected ─submit─> submitted
  *
- * Uses Arc's unified action endpoint pattern (same as inventory transfers/purchases).
+ * Registered via Arc 2.8 declarative `actions` on budget.resource.ts →
+ * POST /accounting/budgets/:id/action  body: { action: "submit" | "approve" | "reject" | "close", reason? }
  */
 
-import type { FastifyRequest } from 'fastify';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { requireRoles } from '#shared/permissions.js';
+import type { RequestWithExtras } from '@classytic/arc/types';
+import mongoose from 'mongoose';
 import { groups } from '#config/permissions/roles.js';
-import { submitBudget, approveBudget, rejectBudget, closeBudget } from './budget.service.js';
+import { requireRoles } from '#shared/permissions.js';
+import { Budget } from '../accounting.engine.js';
 
-interface ActionRequest extends FastifyRequest {
-  user: { _id?: string; id?: string };
-  scope: FastifyRequest['scope'] & { organizationId?: string; userId?: string };
-}
+type ActionRequest = RequestWithExtras & {
+  scope: RequestWithExtras['scope'] & { organizationId?: string; userId?: string };
+};
 
-function getIds(req: ActionRequest) {
+function getIds(req: ActionRequest): { orgId: string; userId: string | null } {
   const orgId = req.scope?.organizationId;
-  const userId = req.scope?.userId || req.user?._id || req.user?.id || null;
+  const userId = (req.scope?.userId || req.user?._id || req.user?.id || null) as string | null;
   if (!orgId) throw Object.assign(new Error('Organization context required'), { statusCode: 400 });
   return { orgId, userId };
 }
 
-export const budgetActionConfig = {
-  name: 'budgets',
-  tag: 'Accounting - Budgets',
-  prefix: '/accounting/budgets',
+async function loadBudget(id: string, orgId: string) {
+  const budget = await Budget.findOne({ _id: id, organizationId: orgId });
+  if (!budget) throw Object.assign(new Error('Budget not found'), { statusCode: 404 });
+  return budget;
+}
 
-  actions: {
-    submit: async (id: string, _data: Record<string, unknown>, req: ActionRequest) => {
+function assertStatus(budget: { status: string }, allowed: string[], action: string): void {
+  if (!allowed.includes(budget.status)) {
+    throw Object.assign(
+      new Error(`Cannot ${action} budget in "${budget.status}" status. Must be ${allowed.join(' or ')}.`),
+      { statusCode: 400 },
+    );
+  }
+}
+
+function toObjectId(userId: string | null): mongoose.Types.ObjectId | null {
+  return userId ? new mongoose.Types.ObjectId(userId) : null;
+}
+
+export const budgetActions = {
+  submit: async (id: string, _data: Record<string, unknown>, req: ActionRequest) => {
+    const { orgId, userId } = getIds(req);
+    const budget = await loadBudget(id, orgId);
+    assertStatus(budget, ['draft', 'rejected'], 'submit');
+
+    budget.status = 'submitted';
+    budget.submittedBy = toObjectId(userId);
+    budget.submittedAt = new Date();
+    budget.rejectedBy = null;
+    budget.rejectedAt = null;
+    budget.rejectionReason = null;
+    await budget.save();
+    return budget;
+  },
+
+  approve: async (id: string, _data: Record<string, unknown>, req: ActionRequest) => {
+    const { orgId, userId } = getIds(req);
+    const budget = await loadBudget(id, orgId);
+    assertStatus(budget, ['submitted'], 'approve');
+
+    budget.status = 'approved';
+    budget.approvedBy = toObjectId(userId);
+    budget.approvedAt = new Date();
+    await budget.save();
+    return budget;
+  },
+
+  reject: {
+    handler: async (id: string, data: Record<string, unknown>, req: ActionRequest) => {
       const { orgId, userId } = getIds(req);
-      return submitBudget(id, orgId, userId);
+      const budget = await loadBudget(id, orgId);
+      assertStatus(budget, ['submitted'], 'reject');
+
+      budget.status = 'rejected';
+      budget.rejectedBy = toObjectId(userId);
+      budget.rejectedAt = new Date();
+      budget.rejectionReason = (data.reason as string | undefined) || '';
+      await budget.save();
+      return budget;
     },
-    approve: async (id: string, _data: Record<string, unknown>, req: ActionRequest) => {
-      const { orgId, userId } = getIds(req);
-      return approveBudget(id, orgId, userId);
-    },
-    reject: async (id: string, data: Record<string, unknown>, req: ActionRequest) => {
-      const { orgId, userId } = getIds(req);
-      return rejectBudget(id, orgId, userId, data.reason as string | undefined);
-    },
-    close: async (id: string, _data: Record<string, unknown>, req: ActionRequest) => {
-      const { orgId } = getIds(req);
-      return closeBudget(id, orgId);
+    schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: 'Reason for rejection' },
+      },
+      required: [],
     },
   },
 
-  actionPermissions: {
-    submit: requireRoles(groups.platformAdmin),
-    approve: requireRoles(groups.platformAdmin),
-    reject: requireRoles(groups.platformAdmin),
-    close: requireRoles(groups.platformAdmin),
-  } as Record<string, PermissionCheck>,
+  close: async (id: string, _data: Record<string, unknown>, req: ActionRequest) => {
+    const { orgId } = getIds(req);
+    const budget = await loadBudget(id, orgId);
+    assertStatus(budget, ['approved'], 'close');
 
-  actionSchemas: {
-    reject: {
-      reason: { type: 'string', description: 'Reason for rejection' },
-    },
+    budget.status = 'closed';
+    await budget.save();
+    return budget;
   },
 };
+
+export const budgetActionPermissions = requireRoles(groups.platformAdmin);

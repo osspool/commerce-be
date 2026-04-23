@@ -4,11 +4,10 @@
  */
 import './config/env-loader.js';
 import closeWithGrace from 'close-with-grace';
-import config from './config/index.js';
+import type { FastifyInstance } from 'fastify';
 import logger from '#lib/utils/logger.js';
 import { createApplication } from './app.js';
-
-import type { FastifyInstance } from 'fastify';
+import config from './config/index.js';
 
 let server: FastifyInstance | undefined;
 

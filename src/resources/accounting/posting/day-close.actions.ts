@@ -19,10 +19,9 @@
  *     a branch was offline / nobody pressed the button. Max 90 days per call.
  */
 
-import type { FastifyRequest } from 'fastify';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { roles } from '@classytic/arc/permissions';
+import { requireRoles } from '@classytic/arc/permissions';
 import { getOrgId, getUserId } from '@classytic/arc/scope';
+import type { RequestWithExtras } from '@classytic/arc/types';
 import mongoose from 'mongoose';
 import { publish } from '#lib/events/arcEvents.js';
 import { bdToday, bdYesterday, toBdDateStr } from '#lib/utils/bd-date.js';
@@ -30,11 +29,7 @@ import { JournalEntry, journalEntryRepository } from '../accounting.engine.js';
 import { postDailyPosSales } from './aggregation/daily-sales.service.js';
 import { DayCloseState } from './day-close-state.model.js';
 
-type ActionRequest = FastifyRequest & {
-  user?: { _id?: string; id?: string };
-};
-
-function requireBranchContext(req: ActionRequest): { orgId: string; actorId: string | undefined } {
+function requireBranchContext(req: RequestWithExtras): { orgId: string; actorId: string | undefined } {
   const orgId = getOrgId(req.scope);
   if (!orgId) {
     throw Object.assign(new Error('Organization context required (x-organization-id header)'), {
@@ -42,7 +37,7 @@ function requireBranchContext(req: ActionRequest): { orgId: string; actorId: str
       code: 'NO_BRANCH_CONTEXT',
     });
   }
-  const actorId = getUserId(req.scope) ?? req.user?._id ?? req.user?.id ?? undefined;
+  const actorId = (getUserId(req.scope) ?? req.user?._id ?? req.user?.id ?? undefined) as string | undefined;
   return { orgId, actorId };
 }
 
@@ -52,7 +47,7 @@ function isValidBdDate(d: unknown): d is string {
 
 // ─── close ──────────────────────────────────────────────────────────────────
 
-async function closeDay(_id: string, data: Record<string, unknown>, req: ActionRequest) {
+async function closeDay(_id: string, data: Record<string, unknown>, req: RequestWithExtras) {
   const { orgId, actorId } = requireBranchContext(req);
   const date = isValidBdDate(data.date) ? data.date : bdYesterday();
 
@@ -78,7 +73,7 @@ async function closeDay(_id: string, data: Record<string, unknown>, req: ActionR
 
 // ─── reopen ─────────────────────────────────────────────────────────────────
 
-async function reopenDay(_id: string, data: Record<string, unknown>, req: ActionRequest) {
+async function reopenDay(_id: string, data: Record<string, unknown>, req: RequestWithExtras) {
   const { orgId, actorId } = requireBranchContext(req);
 
   const date = data.date;
@@ -124,15 +119,11 @@ async function reopenDay(_id: string, data: Record<string, unknown>, req: Action
   // the open period. Period-lock guard fires on the reversal entry's date, so
   // if today is somehow locked, this will 409.
   const reversalDate = new Date(`${bdToday()}T12:00:00Z`);
-  const reversed = await journalEntryRepository.reverse(
-    (original as { _id: mongoose.Types.ObjectId })._id,
-    orgId,
-    {
-      reversalDate,
-      // ledger requireActor — must use a real ObjectId, not undefined
-      actorId: actorId ?? '000000000000000000000001',
-    },
-  );
+  const reversed = await journalEntryRepository.reverse((original as { _id: mongoose.Types.ObjectId })._id, orgId, {
+    reversalDate,
+    // ledger requireActor — must use a real ObjectId, not undefined
+    actorId: actorId ?? '000000000000000000000001',
+  });
 
   // Rewind day-close-state by one day so the next close can re-enter this date.
   // We don't try to compute "the previous closed date" precisely — the next close
@@ -163,10 +154,8 @@ async function reopenDay(_id: string, data: Record<string, unknown>, req: Action
   // extract the new entry id whether the response is the entry itself or
   // a wrapper { reversal, original }.
   const reversedRecord = reversed as unknown as Record<string, unknown> | null;
-  const reversalEntry =
-    (reversedRecord?.reversal as Record<string, unknown> | undefined) ?? reversedRecord;
-  const reversalEntryId =
-    (reversalEntry?._id as { toString?: () => string } | undefined)?.toString?.() ?? null;
+  const reversalEntry = (reversedRecord?.reversal as Record<string, unknown> | undefined) ?? reversedRecord;
+  const reversalEntryId = (reversalEntry?._id as { toString?: () => string } | undefined)?.toString?.() ?? null;
 
   return {
     reopened: true,
@@ -180,16 +169,16 @@ async function reopenDay(_id: string, data: Record<string, unknown>, req: Action
 
 // ─── backfill ───────────────────────────────────────────────────────────────
 
-async function backfillDays(_id: string, data: Record<string, unknown>, req: ActionRequest) {
+async function backfillDays(_id: string, data: Record<string, unknown>, req: RequestWithExtras) {
   const { orgId, actorId } = requireBranchContext(req);
   const startDate = data.startDate;
   const endDate = data.endDate;
 
   if (!isValidBdDate(startDate) || !isValidBdDate(endDate)) {
-    throw Object.assign(
-      new Error('`startDate` and `endDate` are required (YYYY-MM-DD)'),
-      { statusCode: 400, code: 'INVALID_DATE_RANGE' },
-    );
+    throw Object.assign(new Error('`startDate` and `endDate` are required (YYYY-MM-DD)'), {
+      statusCode: 400,
+      code: 'INVALID_DATE_RANGE',
+    });
   }
 
   const start = new Date(`${startDate}T00:00:00Z`);
@@ -228,67 +217,59 @@ async function backfillDays(_id: string, data: Record<string, unknown>, req: Act
   };
 }
 
-// ─── Action router config ───────────────────────────────────────────────────
+// ─── Arc 2.8 declarative actions ────────────────────────────────────────────
 
-export const dayCloseActionConfig = {
-  name: 'day-close',
-  tag: 'Accounting - Day Close',
-  prefix: '/accounting/posting/day',
-
-  actions: {
-    close: closeDay,
-    reopen: reopenDay,
-    backfill: backfillDays,
-  },
-
-  actionPermissions: {
-    close: roles('admin', 'finance_admin'),
-    // Reopen is stricter — only finance_admin. High-stakes audit event.
-    reopen: roles('finance_admin'),
-    backfill: roles('admin', 'finance_admin'),
-  } as Record<string, PermissionCheck>,
-
-  actionSchemas: {
-    close: {
-      date: {
-        type: 'string',
-        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-        description: 'BD local date (YYYY-MM-DD), defaults to yesterday',
+/**
+ * Arc 2.8 declarative actions — imported by posting.resource.ts.
+ * Close/backfill use actionPermissions fallback (admin, finance_admin).
+ * Reopen is stricter — finance_admin only (high-stakes audit event).
+ */
+export const dayCloseActions = {
+  close: {
+    handler: closeDay,
+    schema: {
+      type: 'object',
+      properties: {
+        date: {
+          type: 'string',
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          description: 'BD local date (YYYY-MM-DD), defaults to yesterday',
+        },
       },
-    },
-    reopen: {
-      date: {
-        type: 'string',
-        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-        description: 'BD local date of the closed day to reopen',
-      },
-      reason: {
-        type: 'string',
-        minLength: 3,
-        description: 'Why this day is being reopened (audit trail)',
-      },
-    },
-    backfill: {
-      startDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-      endDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      required: [],
     },
   },
-
-  /** Surface domain errors with the right status codes. */
-  onError: (error: Error, action: string, _id: string) => {
-    const code = (error as { code?: string }).code;
-    const status = (error as { statusCode?: number }).statusCode;
-
-    // Period-lock errors from the engine layer (e.g. reopen tries to land
-    // its reversal in a locked day).
-    if (code === 'PERIOD_LOCKED' || code === 'FISCAL_ERROR' || code === 'FISCAL_PERIOD_CLOSED') {
-      return { statusCode: 409, error: error.message, code };
-    }
-
-    return {
-      statusCode: status ?? 400,
-      error: error.message,
-      code: code ?? `DAY_CLOSE_${action.toUpperCase()}_FAILED`,
-    };
+  reopen: {
+    handler: reopenDay,
+    permissions: requireRoles('finance_admin'),
+    // Handler owns validation — throws with codes INVALID_DATE /
+    // REASON_REQUIRED. Arc schema `required: []` so the handler path fires
+    // (instead of AJV emitting a generic VALIDATION_ERROR).
+    schema: {
+      type: 'object',
+      properties: {
+        date: {
+          type: 'string',
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          description: 'BD local date of the closed day to reopen',
+        },
+        reason: {
+          type: 'string',
+          description: 'Why this day is being reopened (audit trail, min 3 chars)',
+        },
+      },
+      required: [],
+    },
+  },
+  backfill: {
+    handler: backfillDays,
+    schema: {
+      type: 'object',
+      properties: {
+        startDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+        endDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      },
+      required: ['startDate', 'endDate'],
+    },
   },
 };

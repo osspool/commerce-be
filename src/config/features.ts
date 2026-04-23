@@ -132,6 +132,12 @@ export const FEATURE_CATALOG: FeatureDefinition[] = [
   },
   { id: 'cms', name: 'CMS', description: 'Content pages', defaultTier: 'standard' },
   { id: 'media', name: 'Media Library', description: 'Image and asset management', defaultTier: 'standard' },
+  {
+    id: 'promotions',
+    name: 'Promotions',
+    description: 'Discounts, vouchers, programs, BOGO rules',
+    defaultTier: 'standard',
+  },
   { id: 'logistics', name: 'Logistics', description: 'Shipping providers, delivery zones', defaultTier: 'standard' },
   { id: 'analytics', name: 'Analytics', description: 'Dashboard analytics, reports', defaultTier: 'standard' },
   { id: 'export', name: 'Data Export', description: 'CSV, Excel export', defaultTier: 'standard' },

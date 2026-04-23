@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
-import { createFlowEngine, type FlowEngine } from '@classytic/flow';
+import { createFlowEngine, ensureFlowReady, type FlowEngine } from '@classytic/flow';
 import type { FlowContext } from '@classytic/flow';
 
 let replSet: any;
@@ -48,7 +48,10 @@ beforeAll(async () => {
     },
   }});
 
-  for (const model of Object.values(flow.models) as any[]) await model.createCollection();
+  // Drain collection + index builds before any transactional service
+  // call. Without this the first `stockevents` insert inside a
+  // transaction trips on a "catalog changes" error.
+  await ensureFlowReady(flow);
 }, 60_000);
 
 afterAll(async () => {
@@ -58,11 +61,12 @@ afterAll(async () => {
 
 async function bootstrapBranch(orgId: string) {
   const uid = () => Math.random().toString(36).slice(2, 8);
-  let node = await flow.repositories.node.findDefault({ organizationId: orgId, actorId: 'system' });
+  let node = await flow.repositories.node.getByQuery({ isDefault: true }, { organizationId: orgId, throwOnNotFound: false, lean: true });
   if (!node) {
-    node = await flow.repositories.node.create({
-      organizationId: orgId, code: 'DEFAULT', name: 'Default', type: 'warehouse', status: 'active', isDefault: true,
-    });
+    node = await flow.repositories.node.create(
+      { organizationId: orgId, code: 'DEFAULT', name: 'Default', type: 'warehouse', status: 'active', isDefault: true } as Record<string, unknown>,
+      { organizationId: orgId },
+    );
   }
   const nodeId = String(node._id);
 
@@ -75,13 +79,19 @@ async function bootstrapBranch(orgId: string) {
 
   const result: Record<string, string> = {};
   for (const def of locDefs) {
-    let loc = await flow.repositories.location.findByCode(def.code, nodeId, { organizationId: orgId, actorId: 'system' });
+    let loc = await flow.repositories.location.getByQuery(
+      { code: def.code, nodeId },
+      { organizationId: orgId, throwOnNotFound: false },
+    );
     if (!loc) {
-      loc = await flow.repositories.location.create({
-        organizationId: orgId, nodeId, code: def.code, name: def.name,
-        type: def.type, status: 'active', allowNegativeStock: def.neg,
-        allowReservations: def.code === 'stock', barcode: `BC-${uid()}`,
-      });
+      loc = await flow.repositories.location.create(
+        {
+          organizationId: orgId, nodeId, code: def.code, name: def.name,
+          type: def.type, status: 'active', allowNegativeStock: def.neg,
+          allowReservations: def.code === 'stock', barcode: `BC-${uid()}`,
+        },
+        { organizationId: orgId },
+      );
     }
     result[def.code] = String(loc._id);
   }
@@ -398,10 +408,11 @@ describe('9. Move Audit Trail', () => {
     await flow.services.moveGroup.executeAction(g._id, 'confirm', {}, ctx());
     await flow.services.moveGroup.executeAction(g._id, 'receive', {}, ctx());
 
-    // Query moves
-    const moves = await flow.repositories.move.findMany(
+    // Query moves via the inherited mongokit findAll (no proxy methods on
+    // Flow repos — use `findAll(filter, { organizationId, lean })`).
+    const moves = await flow.repositories.move.findAll(
       { skuRef: sku },
-      ctx(),
+      { organizationId: ctx().organizationId, lean: true },
     );
 
     expect(moves.length).toBe(1);

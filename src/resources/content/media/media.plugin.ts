@@ -1,108 +1,35 @@
 /**
- * Media Plugin — Engine init plugin — resources auto-discovered by loadResources()
+ * Media Plugin — registers the v3 media-kit engine as an Arc resource.
  *
- * Initializes @classytic/media-kit - handles processing, variants, storage, validation.
- * Routes use createCrudRouter for Arc OpenAPI generation.
+ * The engine itself lives in `./media.engine.ts` (lazy singleton). This
+ * plugin boots it once per app and registers the routes.
  */
 
-import fp from 'fastify-plugin';
-import mongoose from 'mongoose';
-import { createMedia } from '@classytic/media-kit';
-import type {
-  MediaKitConfig,
-  SizeVariant,
-  AspectRatioPreset,
-  AltGenerationConfig,
-  FolderConfig,
-  ProcessingConfig,
-} from '@classytic/media-kit';
-import { cachePlugin, createMemoryCache } from '@classytic/mongokit';
-import { S3Provider } from '@classytic/media-kit/providers/s3';
-import config from '#config/index.js';
 import { defineResource } from '@classytic/arc';
-import type { AdditionalRoute } from '@classytic/arc';
-import { createAdapter } from '#shared/adapter.js';
+import type { RouteDefinition } from '@classytic/arc/types';
+import type { Repository } from '@classytic/mongokit';
+import fp from 'fastify-plugin';
 import permissions from '#config/permissions.js';
+import { createAdapter } from '#shared/adapter.js';
+import { SIZE_VARIANTS } from './media.config.js';
 import MediaController from './media.controller.js';
-import MediaService from './media.service.js';
+import { ensureMediaEngine, getMediaEngine } from './media.engine.js';
 import { mediaSchemas } from './media.schemas.js';
-import { ASPECT_RATIO_PRESETS, FOLDER_CONTENT_TYPE_MAP, IMAGE_SETTINGS, SIZE_VARIANTS } from './media.config.js';
-
-let mediaInstance: ReturnType<typeof createMedia> | null = null;
 
 async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
-  // 1. Create storage provider
-  const provider = new S3Provider({
-    bucket: config.storage.s3.bucket!,
-    region: config.aws.region!,
-    credentials: {
-      accessKeyId: config.aws.accessKeyId!,
-      secretAccessKey: config.aws.secretAccessKey!,
-    },
-    publicUrl: config.storage.s3.publicUrl!,
-    acl: undefined, // Disable ACL for public bucket with bucket policies
-  });
-
-  // 2. Create media-kit (handles EVERYTHING)
-  mediaInstance = createMedia({
-    driver: provider,
-    fileTypes: {
-      allowed: IMAGE_SETTINGS.allowedMimeTypes,
-      maxSize: IMAGE_SETTINGS.maxSize,
-    },
-    folders: {
-      defaultFolder: 'general',
-      contentTypeMap: FOLDER_CONTENT_TYPE_MAP,
-    } satisfies FolderConfig,
-    processing: {
-      enabled: true,
-      maxWidth: IMAGE_SETTINGS.defaultMaxWidth,
-      quality: IMAGE_SETTINGS.quality,
-      format: IMAGE_SETTINGS.format as ProcessingConfig['format'],
-      aspectRatios: ASPECT_RATIO_PRESETS as Record<string, AspectRatioPreset>,
-      sizes: SIZE_VARIANTS as SizeVariant[],
-      generateAlt: IMAGE_SETTINGS.generateAlt as AltGenerationConfig,
-      thumbhash: true,
-      dominantColor: true,
-      smartSkip: true,
-    },
-    deduplication: {
-      enabled: true,
-      returnExisting: true,
-      algorithm: 'sha256',
-    },
-    // Mongokit cache plugin (in-memory by default)
-    plugins: [
-      cachePlugin({
-        adapter: createMemoryCache(),
-        ttl: 60, // list/query cache TTL (seconds)
-        byIdTtl: 300, // single document TTL
-        debug: fastify.log?.level === 'debug',
-      }),
-    ],
-    logger: fastify.log,
-  } satisfies MediaKitConfig);
-
-  // 3. Create model & init
-  const Media = mongoose.models.Media || mongoose.model('Media', mediaInstance.schema);
-  mediaInstance.init(Media);
-
-  // 4. Decorate fastify
-  fastify.decorate('media', mediaInstance);
-  fastify.decorate('Media', Media);
+  const engine = await ensureMediaEngine();
+  const Media = engine.models.Media;
+  const repo = engine.repositories.media;
 
   fastify.log.info(
     {
-      provider: 's3',
-      variants: SIZE_VARIANTS.map((v: Record<string, unknown>) => v.name),
+      provider: engine.driver.name,
+      variants: SIZE_VARIANTS.map((v) => v.name),
     },
-    'Media system ready',
+    'Media system ready (v3)',
   );
 
-  // 5. Register routes under /media (prefixed by /api/v1 upstream)
-  // mediaInstance satisfies MediaKit interface expected by MediaService
-  const mediaService = new MediaService(mediaInstance as unknown as ConstructorParameters<typeof MediaService>[0]);
-  const controller = new MediaController(mediaService);
+  const controller = new MediaController(repo);
 
   const mediaResource = defineResource({
     name: 'media',
@@ -110,23 +37,28 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
     tag: 'Media',
     prefix: '/media',
 
-    adapter: createAdapter(Media, mediaService as unknown as import('@classytic/mongokit').Repository),
+    adapter: createAdapter(Media, repo as unknown as Repository),
     controller,
-    customSchemas: mediaSchemas,
+    // CRUD route schemas — Arc auto-converts Zod via z.toJSONSchema().
+    // Arc's CrudSchemas type is JSON-Schema-shaped, but the runtime
+    // converter detects Zod (`_zod` marker) and converts it transparently.
+    customSchemas: {
+      list: { querystring: mediaSchemas.list.querystring as unknown as Record<string, unknown> },
+      update: { body: mediaSchemas.update.body as unknown as Record<string, unknown> },
+    },
     permissions: {
       list: permissions.media.list,
       get: permissions.media.get,
       update: permissions.media.update,
       delete: permissions.media.delete,
     },
-    additionalRoutes: [
-      // Folders
+    routes: [
       {
         method: 'GET',
         path: '/folders',
         handler: controller.getFolders.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
+        raw: true,
         summary: 'Get allowed base folders',
       },
       {
@@ -134,16 +66,16 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
         path: '/folders/tree',
         handler: controller.getFolderTree.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Get folder tree for explorer UI',
+        raw: true,
+        summary: 'Get folder tree',
       },
       {
         method: 'GET',
         path: '/folders/:folder/stats',
         handler: controller.getFolderStats.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Get folder statistics',
+        raw: true,
+        summary: 'Get folder stats',
         schema: mediaSchemas.folderParam,
       },
       {
@@ -151,7 +83,7 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
         path: '/folders/:folder/breadcrumb',
         handler: controller.getBreadcrumb.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
+        raw: true,
         summary: 'Get folder breadcrumb',
         schema: mediaSchemas.folderParam,
       },
@@ -160,8 +92,8 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
         path: '/folders/:folder/subfolders',
         handler: controller.getSubfolders.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Get subfolders of a folder',
+        raw: true,
+        summary: 'Get subfolders',
         schema: mediaSchemas.folderParam,
       },
       {
@@ -169,8 +101,8 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
         path: '/folders/:folder',
         handler: controller.renameFolder.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Rename a folder',
+        raw: true,
+        summary: 'Rename folder',
         schema: mediaSchemas.renameFolder,
       },
       {
@@ -178,39 +110,33 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
         path: '/folders/:folder',
         handler: controller.deleteFolder.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Delete all files in folder',
+        raw: true,
+        summary: 'Delete folder',
         schema: mediaSchemas.folderParam,
       },
-
-      // Upload (multipart)
       {
         method: 'POST',
         path: '/upload',
         handler: controller.upload.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
+        raw: true,
         summary: 'Upload single file',
-        description: 'Multipart: file (required), folder, alt, title, contentType, skipProcessing',
       },
       {
         method: 'POST',
         path: '/upload-multiple',
         handler: controller.uploadMultiple.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
+        raw: true,
         summary: 'Upload multiple files (max 20)',
-        description: 'Multipart: files[] (required), folder, contentType, skipProcessing',
       },
-
-      // Presigned uploads (client-side direct-to-S3)
       {
         method: 'POST',
         path: '/presigned-upload',
         handler: controller.getPresignedUploadUrl.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Get presigned URL for direct S3 upload',
+        raw: true,
+        summary: 'Presigned upload URL',
         schema: mediaSchemas.presignedUpload,
       },
       {
@@ -218,18 +144,16 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
         path: '/presigned-upload/confirm',
         handler: controller.confirmPresignedUpload.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Confirm a presigned upload after client finishes',
+        raw: true,
+        summary: 'Confirm presigned upload',
         schema: mediaSchemas.confirmUpload,
       },
-
-      // Bulk operations
       {
         method: 'POST',
         path: '/bulk-delete',
         handler: controller.bulkDeleteMedia.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
+        raw: true,
         summary: 'Delete multiple files',
         schema: mediaSchemas.bulkDelete,
       },
@@ -238,19 +162,17 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
         path: '/move',
         handler: controller.moveToFolder.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
+        raw: true,
         summary: 'Move files to folder',
         schema: mediaSchemas.move,
       },
-
-      // Tags
       {
         method: 'POST',
         path: '/:id/tags',
         handler: controller.addTags.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Add tags to a media item',
+        raw: true,
+        summary: 'Add tags',
         schema: mediaSchemas.addTags,
       },
       {
@@ -258,20 +180,17 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
         path: '/:id/tags',
         handler: controller.removeTags.bind(controller),
         permissions: permissions.media.manage,
-        wrapHandler: false,
-        summary: 'Remove tags from a media item',
+        raw: true,
+        summary: 'Remove tags',
         schema: mediaSchemas.removeTags,
       },
-    ] as AdditionalRoute[],
+    ] as RouteDefinition[],
   });
 
   await fastify.register(mediaResource.toPlugin());
 }
 
-export function getMedia() {
-  if (!mediaInstance) throw new Error('Media not initialized');
-  return mediaInstance;
-}
+export { getMediaEngine };
 
 export default fp(mediaPlugin, {
   name: 'media',

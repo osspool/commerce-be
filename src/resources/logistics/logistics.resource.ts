@@ -1,23 +1,7 @@
 import { defineResource } from '@classytic/arc';
-import logisticsController from './logistics.controller.js';
-import { logisticsActions } from '#shared/permissions.js';
-import {
-  getDivisionsSchema,
-  getDistrictsSchema,
-  getAreasSchema,
-  searchAreasSchema,
-  getZonesSchema,
-  estimateChargeSchema,
-  calculateChargeSchema,
-  getConfigSchema,
-  trackShipmentSchema,
-  cancelShipmentSchema,
-  getPickupStoresSchema,
-  circuitStatusSchema,
-  resetCircuitSchema,
-  webhookSchema,
-} from './logistics.schemas.js';
 import { allowPublic } from '@classytic/arc/permissions';
+import { logisticsActions } from '#shared/permissions.js';
+import logisticsController from './logistics.controller.js';
 
 const ctrl = logisticsController as Record<string, any>;
 
@@ -27,34 +11,44 @@ const logisticsResource = defineResource({
   tag: 'Logistics',
   prefix: '/logistics',
 
+  // No own model — this resource wraps the carrier registry + bd-areas
+  // dataset. Routes are all custom (search, charge, webhook, csv).
   disableDefaultRoutes: true,
 
-  additionalRoutes: [
+  routes: [
+    // ── Config ──
+    {
+      method: 'GET',
+      path: '/config',
+      summary: 'Get logistics configuration (read-only)',
+      permissions: logisticsActions.admin,
+      raw: true,
+      handler: ctrl.getConfig,
+    },
+
+    // ── Unified bd-areas dataset (RedX-aligned) ──
     {
       method: 'GET',
       path: '/locations/divisions',
-      summary: 'Get all divisions (8 divisions of Bangladesh)',
+      summary: 'List all 8 BD divisions',
       permissions: logisticsActions.public,
-      wrapHandler: false,
-      schema: getDivisionsSchema,
+      raw: true,
       handler: ctrl.getDivisions,
     },
     {
       method: 'GET',
       path: '/locations/divisions/:division/districts',
-      summary: 'Get districts by division',
+      summary: 'List districts in a division',
       permissions: logisticsActions.public,
-      wrapHandler: false,
-      schema: getDistrictsSchema,
+      raw: true,
       handler: ctrl.getDistricts,
     },
     {
       method: 'GET',
       path: '/locations/areas',
-      summary: 'Get all delivery areas',
+      summary: 'List all delivery areas (filterable by zoneId / district)',
       permissions: logisticsActions.public,
-      wrapHandler: false,
-      schema: getAreasSchema,
+      raw: true,
       handler: ctrl.getAreas,
     },
     {
@@ -62,103 +56,122 @@ const logisticsResource = defineResource({
       path: '/locations/areas/search',
       summary: 'Search areas by name or post code',
       permissions: logisticsActions.public,
-      wrapHandler: false,
-      schema: searchAreasSchema,
+      raw: true,
       handler: ctrl.searchAreas,
     },
     {
       method: 'GET',
-      path: '/locations/zones',
-      summary: 'Get delivery zones with pricing info',
+      path: '/locations/areas/by-postcode',
+      summary: 'List areas matching a postal code',
       permissions: logisticsActions.public,
-      wrapHandler: false,
-      schema: getZonesSchema,
+      raw: true,
+      handler: ctrl.getAreasByPostCode,
+    },
+    {
+      method: 'GET',
+      path: '/locations/zones',
+      summary: 'Get internal delivery zones with pricing tiers',
+      permissions: logisticsActions.public,
+      raw: true,
       handler: ctrl.getDeliveryZones,
     },
     {
       method: 'GET',
       path: '/locations/estimate',
-      summary: 'Estimate delivery charge (static calculation)',
+      summary: 'Static charge estimate for an area + amount',
       permissions: logisticsActions.public,
-      wrapHandler: false,
-      schema: estimateChargeSchema,
+      raw: true,
       handler: ctrl.estimateCharge,
     },
+
+    // ── Pathao native taxonomy (cities + zones) ──
     {
       method: 'GET',
-      path: '/charge',
-      summary: 'Calculate charge via provider API',
-      description: 'Fetches real-time pricing from the shipping provider',
+      path: '/locations/pathao/cities',
+      summary: 'List Pathao cities (canonical names + IDs)',
       permissions: logisticsActions.public,
-      wrapHandler: false,
-      schema: calculateChargeSchema,
-      handler: ctrl.calculateCharge,
+      raw: true,
+      handler: ctrl.getPathaoCities,
     },
     {
       method: 'GET',
-      path: '/config',
-      summary: 'Get logistics configuration (read-only from .env)',
-      description: 'Configuration is managed via environment variables. Restart server after changes to .env file.',
-      permissions: logisticsActions.admin,
-      wrapHandler: false,
-      schema: getConfigSchema,
-      handler: ctrl.getConfig,
+      path: '/locations/pathao/cities/:cityId/zones',
+      summary: 'List Pathao zones inside a city',
+      permissions: logisticsActions.public,
+      raw: true,
+      handler: ctrl.getPathaoZones,
+    },
+    {
+      method: 'GET',
+      path: '/locations/pathao/search',
+      summary: 'Search Pathao zones across cities by name',
+      permissions: logisticsActions.public,
+      raw: true,
+      handler: ctrl.searchPathaoZones,
+    },
+
+    // ── Quote / shipment lifecycle ──
+    {
+      method: 'POST',
+      path: '/quote',
+      summary: 'Get rate quotes from a carrier',
+      permissions: logisticsActions.manage,
+      raw: true,
+      handler: ctrl.quoteShipment,
+    },
+    {
+      method: 'POST',
+      path: '/shipments',
+      summary: 'Create a carrier shipment for a fulfillment',
+      permissions: logisticsActions.manage,
+      raw: true,
+      handler: ctrl.createShipment,
     },
     {
       method: 'GET',
       path: '/shipments/:id/track',
-      summary: 'Track shipment via provider API',
-      description: 'Fetches live tracking info from the shipping provider. Use order ID or tracking number.',
+      summary: 'Track a shipment by carrier tracking number',
       permissions: logisticsActions.manage,
-      wrapHandler: false,
-      schema: trackShipmentSchema,
+      raw: true,
       handler: ctrl.trackShipment,
     },
     {
       method: 'POST',
       path: '/shipments/:id/cancel',
-      summary: 'Cancel shipment via provider API',
-      description: 'Cancels the shipment in the provider system. Use order ID or tracking number.',
+      summary: 'Cancel a shipment via the carrier',
       permissions: logisticsActions.manage,
-      wrapHandler: false,
-      schema: cancelShipmentSchema,
+      raw: true,
       handler: ctrl.cancelShipment,
     },
+
+    // ── Carrier-side queries ──
     {
       method: 'GET',
       path: '/pickup-stores',
-      summary: 'Get pickup stores from provider',
+      summary: 'List pickup stores from a carrier',
       permissions: logisticsActions.manage,
-      wrapHandler: false,
-      schema: getPickupStoresSchema,
+      raw: true,
       handler: ctrl.getPickupStores,
     },
+
+    // ── Bulk export (Pathao CSV) ──
     {
       method: 'GET',
-      path: '/health/circuit-status',
-      summary: 'Get circuit breaker status for all providers',
-      permissions: logisticsActions.admin,
-      wrapHandler: false,
-      schema: circuitStatusSchema,
-      handler: ctrl.getCircuitStatus,
+      path: '/export/pathao-csv',
+      summary: 'Stream a Pathao bulk-upload CSV for filtered orders',
+      description: 'Same query semantics as GET /orders. Caps at 500 rows per call. Upload at merchant.pathao.com.',
+      permissions: logisticsActions.manage,
+      raw: true,
+      handler: ctrl.exportPathaoCsv,
     },
-    {
-      method: 'POST',
-      path: '/health/circuit-reset/:provider',
-      summary: 'Reset circuit breaker for a provider',
-      permissions: logisticsActions.admin,
-      wrapHandler: false,
-      schema: resetCircuitSchema,
-      handler: ctrl.resetProviderCircuit,
-    },
+
+    // ── Webhooks ──
     {
       method: 'POST',
       path: '/webhooks/:provider',
-      summary: 'Handle logistics provider webhook',
-      description: 'Receives status updates from shipping providers (RedX, Steadfast, etc.)',
+      summary: 'Carrier webhook ingestion (RedX / Pathao / Steadfast)',
       permissions: allowPublic(),
-      wrapHandler: false,
-      schema: webhookSchema,
+      raw: true,
       handler: ctrl.handleWebhook,
     },
   ],

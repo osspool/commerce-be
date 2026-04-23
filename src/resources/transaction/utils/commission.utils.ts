@@ -4,7 +4,7 @@
  */
 
 import type { ClientSession } from 'mongoose';
-import Transaction from '../transaction.model.js';
+import { getTransactionModel } from '#shared/revenue/engine.js';
 
 interface CommissionBreakdown {
   grossAmount: number;
@@ -79,15 +79,17 @@ export function buildCommissionObject(
  * Mark commission as due (after customer payment verified)
  */
 export async function markCommissionDue(transactionId: string, session: ClientSession | null = null) {
-  return Transaction.findByIdAndUpdate(
-    transactionId,
-    {
-      $set: {
-        'commission.status': 'due',
+  return getTransactionModel()
+    .findByIdAndUpdate(
+      transactionId,
+      {
+        $set: {
+          'commission.status': 'due',
+        },
       },
-    },
-    { returnDocument: 'after', session },
-  ).exec();
+      { returnDocument: 'after', session },
+    )
+    .exec();
 }
 
 /**
@@ -99,34 +101,38 @@ export async function markCommissionPaid(
   notes = '',
   session: ClientSession | null = null,
 ) {
-  return Transaction.findByIdAndUpdate(
-    transactionId,
-    {
-      $set: {
-        'commission.status': 'paid',
-        'commission.paidDate': new Date(),
-        'commission.paidBy': paidBy,
-        'commission.notes': notes,
+  return getTransactionModel()
+    .findByIdAndUpdate(
+      transactionId,
+      {
+        $set: {
+          'commission.status': 'paid',
+          'commission.paidDate': new Date(),
+          'commission.paidBy': paidBy,
+          'commission.notes': notes,
+        },
       },
-    },
-    { returnDocument: 'after', session },
-  ).exec();
+      { returnDocument: 'after', session },
+    )
+    .exec();
 }
 
 /**
  * Waive commission (platform decides not to charge)
  */
 export async function waiveCommission(transactionId: string, reason = '', session: ClientSession | null = null) {
-  return Transaction.findByIdAndUpdate(
-    transactionId,
-    {
-      $set: {
-        'commission.status': 'waived',
-        'commission.notes': reason,
+  return getTransactionModel()
+    .findByIdAndUpdate(
+      transactionId,
+      {
+        $set: {
+          'commission.status': 'waived',
+          'commission.notes': reason,
+        },
       },
-    },
-    { returnDocument: 'after', session },
-  ).exec();
+      { returnDocument: 'after', session },
+    )
+    .exec();
 }
 
 /**
@@ -143,7 +149,8 @@ export async function getDueCommissions(organizationId: string, options: GetDueO
     query['commission.dueDate'] = { $lt: new Date() };
   }
 
-  return Transaction.find(query)
+  return getTransactionModel()
+    .find(query)
     .sort({ 'commission.dueDate': 1 })
     .select('amount commission category sourceModel sourceId date')
     .limit(options.limit || 100)
@@ -156,23 +163,25 @@ export async function getDueCommissions(organizationId: string, options: GetDueO
  * Returns gross, gateway fees, and net amounts
  */
 export async function getCommissionSummary(organizationId: string): Promise<CommissionSummary> {
-  const result = await Transaction.aggregate([
-    {
-      $match: {
-        organizationId,
-        'commission.grossAmount': { $exists: true, $gt: 0 },
+  const result = await getTransactionModel()
+    .aggregate([
+      {
+        $match: {
+          organizationId,
+          'commission.grossAmount': { $exists: true, $gt: 0 },
+        },
       },
-    },
-    {
-      $group: {
-        _id: '$commission.status',
-        grossAmount: { $sum: '$commission.grossAmount' },
-        gatewayFees: { $sum: '$commission.gatewayFeeAmount' },
-        netAmount: { $sum: '$commission.netAmount' },
-        count: { $sum: 1 },
+      {
+        $group: {
+          _id: '$commission.status',
+          grossAmount: { $sum: '$commission.grossAmount' },
+          gatewayFees: { $sum: '$commission.gatewayFeeAmount' },
+          netAmount: { $sum: '$commission.netAmount' },
+          count: { $sum: 1 },
+        },
       },
-    },
-  ]).exec();
+    ])
+    .exec();
 
   // Convert to object with breakdown
   const summary: CommissionSummary = {

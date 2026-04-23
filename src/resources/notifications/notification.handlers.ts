@@ -9,9 +9,9 @@
  */
 
 import { subscribe } from '#lib/events/arcEvents.js';
+import logger from '#lib/utils/logger.js';
 import { dispatchNotification } from './notification.dispatch.js';
 import { NOTIFICATION_TRIGGERS } from './notification.triggers.js';
-import logger from '#lib/utils/logger.js';
 
 interface DomainEvent<T = unknown> {
   payload?: T;
@@ -41,16 +41,10 @@ export function registerNotificationEventHandlers(options: { force?: boolean } =
           priority: trigger.priority,
         });
       } catch (error) {
-        logger.error(
-          { event: trigger.event, error: (error as Error).message },
-          'Notification trigger failed',
-        );
+        logger.error({ event: trigger.event, error: (error as Error).message }, 'Notification trigger failed');
       }
     });
   }
 
-  logger.info(
-    { triggers: NOTIFICATION_TRIGGERS.length },
-    'Notification event handlers registered',
-  );
+  logger.info({ triggers: NOTIFICATION_TRIGGERS.length }, 'Notification event handlers registered');
 }

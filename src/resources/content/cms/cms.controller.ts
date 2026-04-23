@@ -1,5 +1,5 @@
 import { BaseController } from '@classytic/arc';
-import type { FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import CMSRepository from './cms.repository.js';
 import { cmsSchemaOptions } from './cms.schemas.js';
 

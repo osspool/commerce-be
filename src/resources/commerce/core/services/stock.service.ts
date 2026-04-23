@@ -4,30 +4,22 @@
  * - validate: checks Flow StockQuant availability
  * - reserve/commit/release: uses Flow's ReservationService
  * - decrement/restore: delegates to stockTransactionService (Flow MoveGroups)
- * - cleanup: uses Flow's cleanupExpired
  */
 
 import crypto from 'node:crypto';
 import type { FlowContext } from '@classytic/flow';
-import {
-  stockTransactionService,
-  getFlowEngine,
-  getFlowEngineOrNull,
-  buildFlowContext,
-  skuRefFromProduct,
-  DEFAULT_LOCATION,
-} from '#resources/inventory/index.js';
-import branchRepository from '../../branch/branch.repository.js';
 import logger from '#lib/utils/logger.js';
+import { buildFlowContext, DEFAULT_LOCATION, skuRefFromProduct } from '#resources/inventory/flow/context-helpers.js';
+import { getFlowEngine, getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';
+import stockTransactionService from '#resources/inventory/services/stock-transaction.service.js';
+import type {
+  StockMutationResult,
+  StockOperationItem,
+  StockReference,
+} from '#resources/inventory/types/stock-operations.js';
+import branchRepository from '../../branch/branch.repository.js';
 
 const RESERVATION_TTL_MINUTES = 15;
-
-interface StockItem {
-  productId: string;
-  variantSku?: string | null;
-  quantity: number;
-  productName?: string;
-}
 
 interface NormalizedItem {
   productId: string;
@@ -62,18 +54,8 @@ interface ReserveResult {
   flowReservationIds: string[];
 }
 
-interface CommitResult {
-  success: boolean;
-  decrementedItems: unknown[];
-}
-
 interface DecrementOptions {
   skipValidation?: boolean;
-}
-
-interface AuditReference {
-  model: string;
-  id?: string;
 }
 
 export class StockValidationError extends Error {
@@ -108,7 +90,7 @@ class StockReservationError extends Error {
 }
 
 class StockService {
-  private _normalizeItems(items: StockItem[]): NormalizedItem[] {
+  private _normalizeItems(items: StockOperationItem[]): NormalizedItem[] {
     return (items || [])
       .filter(Boolean)
       .map((i) => ({
@@ -124,7 +106,11 @@ class StockService {
   // Stock Validation (via Flow)
   // ===========================================================================
 
-  async validate(items: StockItem[], branchId?: string, options: ValidateOptions = {}): Promise<ValidationResult> {
+  async validate(
+    items: StockOperationItem[],
+    branchId?: string,
+    options: ValidateOptions = {},
+  ): Promise<ValidationResult> {
     const { throwOnFailure = true } = options;
     if (!items?.length) return { valid: true, unavailable: [] };
 
@@ -173,7 +159,7 @@ class StockService {
 
   async reserve(
     reservationId: string | null,
-    items: StockItem[],
+    items: StockOperationItem[],
     branchId?: string,
     ttlMinutes: number = RESERVATION_TTL_MINUTES,
   ): Promise<ReserveResult> {
@@ -214,7 +200,6 @@ class StockService {
         flowReservationIds: flowReservations.map((r) => r._id),
       };
     } catch (error: unknown) {
-      // Release any reservations that were created before the failure
       for (const r of flowReservations) {
         await flow.services.reservation.release(r._id, ctx).catch(() => {});
       }
@@ -232,14 +217,16 @@ class StockService {
     if (!flow) return false;
 
     try {
-      // Find all Flow reservations for this cart/checkout ID
       const branches = await branchRepository.getActiveBranches();
       for (const branch of branches) {
         const ctx = buildFlowContext(String(branch._id));
-        const reservations = await flow.repositories.reservation.findByOwner('cart', reservationId, ctx);
+        const reservations = await flow.repositories.reservation.findAll(
+          { ownerType: 'cart', ownerId: reservationId },
+          { organizationId: ctx.organizationId, lean: true },
+        );
         for (const r of reservations) {
           if (r.status === 'active' || r.status === 'partially_consumed') {
-            await flow.services.reservation.release(r._id, ctx);
+            await flow.services.reservation.release(String(r._id), ctx);
           }
         }
       }
@@ -252,26 +239,35 @@ class StockService {
     }
   }
 
+  /**
+   * Consume reservation and decrement stock via Flow MoveGroups.
+   * Returns moveGroupIds for order→WMS traceability.
+   */
   async commitReservation(
     reservationId: string | null,
-    reference: AuditReference,
+    reference: StockReference,
     actorId: string,
-  ): Promise<CommitResult> {
+    branchId?: string,
+  ): Promise<StockMutationResult> {
     if (!reservationId) throw new StockReservationError('Reservation ID required', reservationId);
 
     const flow = getFlowEngine();
 
-    // Find the branch that has this reservation
-    const branches = await branchRepository.getActiveBranches();
+    // When branchId is known (from order), query only that branch. Otherwise scan all.
+    const branches = branchId ? [{ _id: branchId }] : await branchRepository.getActiveBranches();
+
     const allReservations: Array<{
-      reservation: { _id: string; status: string; skuRef: string; quantity: number };
+      reservation: { _id: unknown; status: string; skuRef: string; quantity: number };
       ctx: FlowContext;
       branchId: string;
     }> = [];
 
     for (const branch of branches) {
       const ctx = buildFlowContext(String(branch._id), actorId);
-      const reservations = await flow.repositories.reservation.findByOwner('cart', reservationId, ctx);
+      const reservations = await flow.repositories.reservation.findAll(
+        { ownerType: 'cart', ownerId: reservationId },
+        { organizationId: ctx.organizationId, lean: true },
+      );
       for (const r of reservations) {
         allReservations.push({ reservation: r, ctx, branchId: String(branch._id) });
       }
@@ -281,15 +277,14 @@ class StockService {
       throw new StockReservationError('Reservation not found', reservationId);
     }
 
-    const decrementedItems: unknown[] = [];
+    const moveGroupIds: string[] = [];
+    const items: Array<{ productId: string; variantSku?: string; quantity: number }> = [];
 
     for (const { reservation, ctx } of allReservations) {
       if (reservation.status !== 'active') continue;
 
-      // Consume the reservation
-      await flow.services.reservation.consume(reservation._id, reservation.quantity, ctx);
+      await flow.services.reservation.consume(String(reservation._id), reservation.quantity, ctx);
 
-      // Decrement stock (reserve already holds it, now actually move it out)
       const result = await stockTransactionService.decrementBatch(
         [{ productId: reservation.skuRef, quantity: reservation.quantity }],
         ctx.organizationId,
@@ -298,12 +293,13 @@ class StockService {
       );
 
       if (result.success) {
-        decrementedItems.push(...result.decrementedItems);
+        moveGroupIds.push(...result.moveGroupIds);
+        items.push(...result.items);
       }
     }
 
-    logger.info({ reservationId, items: decrementedItems.length }, 'Reservation committed via Flow');
-    return { success: true, decrementedItems };
+    logger.info({ reservationId, moveGroupIds, items: items.length }, 'Reservation committed via Flow');
+    return { success: true, moveGroupIds, items };
   }
 
   async getReservation(reservationId: string | null): Promise<unknown> {
@@ -314,23 +310,26 @@ class StockService {
     const branches = await branchRepository.getActiveBranches();
     for (const branch of branches) {
       const ctx = buildFlowContext(String(branch._id));
-      const reservations = await flow.repositories.reservation.findByOwner('cart', reservationId, ctx);
+      const reservations = await flow.repositories.reservation.findAll(
+        { ownerType: 'cart', ownerId: reservationId },
+        { organizationId: ctx.organizationId, lean: true },
+      );
       if (reservations.length) return reservations[0];
     }
     return null;
   }
 
   // ===========================================================================
-  // Stock Operations (via stockTransactionService → Flow MoveGroups)
+  // Stock Operations (via stockTransactionService -> Flow MoveGroups)
   // ===========================================================================
 
   async decrement(
-    items: StockItem[],
+    items: StockOperationItem[],
     branchId: string,
-    reference: AuditReference,
+    reference: StockReference,
     actorId: string,
     options: DecrementOptions = {},
-  ): Promise<unknown> {
+  ): Promise<StockMutationResult> {
     if (!options.skipValidation) {
       await this.validate(items, branchId);
     }
@@ -338,23 +337,14 @@ class StockService {
     return stockTransactionService.decrementBatch(mapped, branchId, reference, actorId);
   }
 
-  async restore(items: StockItem[], branchId: string, reference: AuditReference, actorId: string): Promise<unknown> {
+  async restore(
+    items: StockOperationItem[],
+    branchId: string,
+    reference: StockReference,
+    actorId: string,
+  ): Promise<StockMutationResult> {
     const mapped = items.map((i) => ({ ...i, variantSku: i.variantSku ?? undefined }));
     return stockTransactionService.restoreBatch(mapped, branchId, reference, actorId);
-  }
-
-  async getActiveReservations(): Promise<unknown[]> {
-    const flow = getFlowEngineOrNull();
-    if (!flow) return [];
-
-    const branches = await branchRepository.getActiveBranches();
-    const all: unknown[] = [];
-    for (const branch of branches) {
-      const ctx = buildFlowContext(String(branch._id));
-      const reservations = await flow.repositories.reservation.findByOwner('cart', '', ctx);
-      all.push(...reservations.filter((r: { status: string }) => r.status === 'active'));
-    }
-    return all;
   }
 }
 

@@ -1,10 +1,11 @@
-import CMS from './cms.model.js';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+import type { CrudSchemas } from '@classytic/repo-core/schema';
+import CMS from './cms.model.js';
 
 /**
  * CMS CRUD Schemas with Field Rules
  */
-const crudSchemas = buildCrudSchemasFromModel(CMS, {
+const crudSchemas: CrudSchemas = buildCrudSchemasFromModel(CMS, {
   strictAdditionalProperties: false, // Allow flexible content field
   fieldRules: {
     publishedAt: { systemManaged: true },

@@ -101,10 +101,10 @@ beforeAll(async () => {
 
   // Create a test customer
   const Customer = mongoose.models.Customer;
+  const phone = `017${Date.now().toString().slice(-8)}`;
   const customer = await Customer.create({
-    name: 'Arc Route Customer',
-    phone: `017${Date.now().toString().slice(-8)}`,
-    email: `arc-route-${Date.now()}@test.bd`,
+    name: { given: 'Arc Route', family: 'Customer' },
+    contact: { phone, email: `arc-route-${Date.now()}@test.bd` },
     isActive: true,
     stats: {
       orders: { total: 0, completed: 0, cancelled: 0, refunded: 0 },
@@ -238,19 +238,26 @@ describe('Loyalty Arc Routes', () => {
       ruleId = res.json().data._id;
     });
 
-    it('GET /loyalty/earning-rules — lists', async () => {
+    it('GET /loyalty/earning-rules — lists (Arc adapter pagination shape)', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/v1/loyalty/earning-rules',
         headers: headers(),
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.docs.length).toBeGreaterThan(0);
+      // Arc adapter returns mongokit's OffsetPaginationResult — `data` is the
+      // array of docs in Arc's standard envelope, with pagination meta alongside.
+      const body = res.json();
+      const docs = (body.data?.docs ?? body.data ?? body.docs) as unknown[];
+      expect(Array.isArray(docs)).toBe(true);
+      expect((docs as unknown[]).length).toBeGreaterThan(0);
     });
 
-    it('PUT + deactivate lifecycle', async () => {
+    it('PATCH + deactivate via action (modern Arc adapter)', async () => {
+      // Arc auto-CRUD adapter exposes PATCH for partial updates (modern REST
+      // semantics) — old PUT behavior was raw-handler legacy.
       let res = await app.inject({
-        method: 'PUT',
+        method: 'PATCH',
         url: `/api/v1/loyalty/earning-rules/${ruleId}`,
         headers: headers(),
         payload: { name: 'Updated Rule' },
@@ -258,10 +265,12 @@ describe('Loyalty Arc Routes', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().data.name).toBe('Updated Rule');
 
+      // Stripe-style action: POST /:id/action { action: "deactivate" }
       res = await app.inject({
         method: 'POST',
-        url: `/api/v1/loyalty/earning-rules/${ruleId}/deactivate`,
+        url: `/api/v1/loyalty/earning-rules/${ruleId}/action`,
         headers: headers(),
+        payload: { action: 'deactivate' },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().data.status).toBe('paused');
@@ -291,7 +300,7 @@ describe('Loyalty Arc Routes', () => {
       tierId = res.json().data._id;
     });
 
-    it('GET + PUT + DELETE lifecycle', async () => {
+    it('GET + PATCH + DELETE lifecycle (Arc adapter)', async () => {
       let res = await app.inject({
         method: 'GET',
         url: '/api/v1/loyalty/tiers',
@@ -299,8 +308,9 @@ describe('Loyalty Arc Routes', () => {
       });
       expect(res.statusCode).toBe(200);
 
+      // PATCH replaces legacy PUT — Arc adapter exposes PATCH for partial updates.
       res = await app.inject({
-        method: 'PUT',
+        method: 'PATCH',
         url: `/api/v1/loyalty/tiers/${tierId}`,
         headers: headers(),
         payload: { color: '#FFD700' },

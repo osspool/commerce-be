@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
-import { createFlowEngine, type FlowEngine } from '@classytic/flow';
+import { createFlowEngine, ensureFlowReady, type FlowEngine } from '@classytic/flow';
 import type { FlowContext } from '@classytic/flow';
 
 let replSet: any;
@@ -50,7 +50,8 @@ beforeAll(async () => {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } });
   await mongoose.connect(replSet.getUri());
   flow = createFlowEngine({ mongoose: mongoose.connection, mode: 'standard', catalog: catalogBridge });
-  for (const model of Object.values(flow.models) as any[]) await model.createCollection();
+  // Drain collection + index builds before transactions run.
+  await ensureFlowReady(flow);
 }, 60_000);
 
 afterAll(async () => {
@@ -60,11 +61,12 @@ afterAll(async () => {
 
 async function bootstrapBranch(orgId: string) {
   const uid = () => Math.random().toString(36).slice(2, 8);
-  let node = await flow.repositories.node.findDefault({ organizationId: orgId, actorId: 'system' });
+  let node = await flow.repositories.node.getByQuery({ isDefault: true }, { organizationId: orgId, throwOnNotFound: false, lean: true });
   if (!node) {
-    node = await flow.repositories.node.create({
-      organizationId: orgId, code: 'DEFAULT', name: 'Default', type: 'warehouse', status: 'active', isDefault: true,
-    });
+    node = await flow.repositories.node.create(
+      { organizationId: orgId, code: 'DEFAULT', name: 'Default', type: 'warehouse', status: 'active', isDefault: true } as Record<string, unknown>,
+      { organizationId: orgId },
+    );
   }
   const nodeId = String(node._id);
   const defs = [
@@ -76,13 +78,19 @@ async function bootstrapBranch(orgId: string) {
   ];
   const result: Record<string, string> = {};
   for (const def of defs) {
-    let loc = await flow.repositories.location.findByCode(def.code, nodeId, { organizationId: orgId, actorId: 'system' });
+    let loc = await flow.repositories.location.getByQuery(
+      { code: def.code, nodeId },
+      { organizationId: orgId, throwOnNotFound: false },
+    );
     if (!loc) {
-      loc = await flow.repositories.location.create({
-        organizationId: orgId, nodeId, code: def.code, name: def.name,
-        type: def.type, status: 'active', allowNegativeStock: def.neg,
-        allowReservations: def.code === 'stock', barcode: `BC-${uid()}`,
-      });
+      loc = await flow.repositories.location.create(
+        {
+          organizationId: orgId, nodeId, code: def.code, name: def.name,
+          type: def.type, status: 'active', allowNegativeStock: def.neg,
+          allowReservations: def.code === 'stock', barcode: `BC-${uid()}`,
+        },
+        { organizationId: orgId },
+      );
     }
     result[def.code] = String(loc._id);
   }
@@ -205,11 +213,11 @@ describe('3. Supplier Procurement', () => {
     expect((await getStock(HEAD_OFFICE, sku2)).quantityOnHand).toBe(300);
 
     // Verify group status
-    const group = await flow.services.moveGroup.getById(receipt._id, ctx());
+    const group = await flow.repositories.moveGroup.getByQuery({ _id: receipt._id }, { organizationId: ctx().organizationId, throwOnNotFound: false, lean: true });
     expect(group!.status).toBe('done');
 
     // Verify 2 moves created
-    const moves = await flow.repositories.move.findMany({ moveGroupId: receipt._id }, ctx());
+    const moves = await flow.repositories.move.findAll({ moveGroupId: receipt._id }, { organizationId: ctx().organizationId, lean: true });
     expect(moves.length).toBe(2);
     expect(moves.every(m => m.status === 'done')).toBe(true);
   });
@@ -452,15 +460,15 @@ describe('10. Full Procurement Cycle', () => {
     }, ctx());
 
     // Status transitions: draft → confirmed → done
-    let group = await flow.services.moveGroup.getById(po._id, ctx());
+    let group = await flow.repositories.moveGroup.getByQuery({ _id: po._id }, { organizationId: ctx().organizationId, throwOnNotFound: false, lean: true });
     expect(group!.status).toBe('draft');
 
     await flow.services.moveGroup.executeAction(po._id, 'confirm', {}, ctx());
-    group = await flow.services.moveGroup.getById(po._id, ctx());
+    group = await flow.repositories.moveGroup.getByQuery({ _id: po._id }, { organizationId: ctx().organizationId, throwOnNotFound: false, lean: true });
     expect(group!.status).toBe('confirmed');
 
     await flow.services.moveGroup.executeAction(po._id, 'receive', {}, ctx());
-    group = await flow.services.moveGroup.getById(po._id, ctx());
+    group = await flow.repositories.moveGroup.getByQuery({ _id: po._id }, { organizationId: ctx().organizationId, throwOnNotFound: false, lean: true });
     expect(group!.status).toBe('done');
 
     // Verify stock

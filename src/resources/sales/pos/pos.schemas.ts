@@ -18,8 +18,7 @@ export const posProductsSchema = {
       inStockOnly: { type: 'boolean', description: 'Only products with stock > 0' },
       lowStockOnly: { type: 'boolean', description: 'Only products at/below reorder point' },
       page: { type: 'number', description: 'Page number (offset pagination, default: 1)' },
-      after: { type: 'string', description: 'Cursor for next page (keyset, alternative to page)' },
-      limit: { type: 'number', description: 'Items per page (default: 15, max: 100)' },
+      limit: { type: 'number', description: 'Items per page (default: 20, max: 100)' },
       sort: { type: 'string', description: 'Sort: name, -createdAt, basePrice' },
     },
   },
@@ -134,44 +133,12 @@ export const receiptSchema = {
   },
 } as const;
 
-// ============================================
-// STOCK ADJUSTMENT SCHEMA
-// ============================================
-
-export const adjustStockSchema = {
-  body: {
-    type: 'object',
-    properties: {
-      productId: { type: 'string', description: 'Product ID (for single adjustment)' },
-      variantSku: { type: 'string', description: 'Variant SKU (optional)' },
-      quantity: { type: 'number', description: 'Quantity (for single adjustment)' },
-      mode: { type: 'string', enum: ['set', 'add', 'remove'], default: 'set' },
-      adjustments: {
-        type: 'array',
-        description: 'Bulk adjustments (use instead of single fields)',
-        items: {
-          type: 'object',
-          properties: {
-            productId: { type: 'string' },
-            variantSku: { type: 'string' },
-            quantity: { type: 'number' },
-            mode: { type: 'string', enum: ['set', 'add', 'remove'], default: 'set' },
-            reason: { type: 'string' },
-          },
-          required: ['productId', 'quantity'],
-        },
-        maxItems: 500,
-      },
-      branchId: { anyOf: [{ type: 'string' }, { type: 'object' }], description: 'Branch ID (uses default if omitted)' },
-      reason: { type: 'string', description: 'Reason for adjustment' },
-    },
-  },
-} as const;
+// Note: stock-adjustment schemas live in the inventory module — POS never
+// adjusts stock directly. (See inventory-management.plugin.ts.)
 
 export default {
   posProductsSchema,
   lookupSchema,
   createOrderSchema,
   receiptSchema,
-  adjustStockSchema,
 };

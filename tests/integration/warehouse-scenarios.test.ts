@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
-import { createFlowEngine, type FlowEngine } from '@classytic/flow';
+import { createFlowEngine, type FlowEngine, ensureFlowReady } from '@classytic/flow';
 import { WaveEngine } from '@classytic/flow/routing';
 import type { FlowContext } from '@classytic/flow';
 import type { Location } from '@classytic/flow/domain';
@@ -48,7 +48,7 @@ beforeAll(async () => {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } });
   await mongoose.connect(replSet.getUri());
   flow = createFlowEngine({ mongoose: mongoose.connection, mode: 'standard', catalog: catalogBridge });
-  for (const model of Object.values(flow.models) as any[]) await model.createCollection();
+  await ensureFlowReady(flow);
 }, 60_000);
 
 afterAll(async () => {
@@ -62,10 +62,10 @@ beforeEach(async () => {
   const uid = () => Math.random().toString(36).slice(2, 8);
 
   // Create warehouse node
-  const node = await flow.repositories.node.create({
-    organizationId: ORG, code: 'WH-MAIN', name: 'Main Warehouse',
-    type: 'warehouse', status: 'active', isDefault: true,
-  });
+  const node = await flow.repositories.node.create(
+    { organizationId: ORG, code: 'WH-MAIN', name: 'Main Warehouse', type: 'warehouse', status: 'active', isDefault: true } as Record<string, unknown>,
+    { organizationId: ORG },
+  );
   nodeId = node._id.toString();
 
   // Create zone A: 2 aisles × 3 bays = 6 storage locations with coordinates
@@ -73,26 +73,35 @@ beforeEach(async () => {
   for (let aisle = 1; aisle <= 2; aisle++) {
     for (let bay = 1; bay <= 3; bay++) {
       const code = `A-${aisle}-${bay}`;
-      const loc = await flow.repositories.location.create({
-        organizationId: ORG, nodeId, code, name: `Zone A Aisle ${aisle} Bay ${bay}`,
-        type: 'storage', status: 'active', barcode: `BC-${uid()}`,
-        coordinates: { zone: 'A', aisle, bay, level: 1, bin: 'A' },
-      });
+      const loc = await flow.repositories.location.create(
+        {
+          organizationId: ORG, nodeId, code, name: `Zone A Aisle ${aisle} Bay ${bay}`,
+          type: 'storage', status: 'active', barcode: `BC-${uid()}`,
+          coordinates: { zone: 'A', aisle, bay, level: 1, bin: 'A' },
+        } as Record<string, unknown>,
+        { organizationId: ORG },
+      );
       zoneALocs.push(loc._id.toString());
     }
   }
 
   // Virtual locations
-  const vendor = await flow.repositories.location.create({
-    organizationId: ORG, nodeId, code: 'VENDOR', name: 'Vendor',
-    type: 'vendor', status: 'active', allowNegativeStock: true, barcode: `BC-${uid()}`,
-  });
+  const vendor = await flow.repositories.location.create(
+    {
+      organizationId: ORG, nodeId, code: 'VENDOR', name: 'Vendor',
+      type: 'vendor', status: 'active', allowNegativeStock: true, barcode: `BC-${uid()}`,
+    } as Record<string, unknown>,
+    { organizationId: ORG },
+  );
   vendorLocId = vendor._id.toString();
 
-  const customer = await flow.repositories.location.create({
-    organizationId: ORG, nodeId, code: 'CUSTOMER', name: 'Customer',
-    type: 'customer', status: 'active', allowNegativeStock: true, barcode: `BC-${uid()}`,
-  });
+  const customer = await flow.repositories.location.create(
+    {
+      organizationId: ORG, nodeId, code: 'CUSTOMER', name: 'Customer',
+      type: 'customer', status: 'active', allowNegativeStock: true, barcode: `BC-${uid()}`,
+    } as Record<string, unknown>,
+    { organizationId: ORG },
+  );
   customerLocId = customer._id.toString();
 });
 
@@ -100,7 +109,7 @@ beforeEach(async () => {
 
 describe('Scenario 1: Warehouse Setup', () => {
   it('should create node with locations and return grouped layout', async () => {
-    const locations = await flow.repositories.location.findByNode(nodeId, ctx());
+    const locations = await flow.repositories.location.findAll({ nodeId }, { organizationId: ctx().organizationId, sort: { sortOrder: 1 } });
     // 6 storage + vendor + customer = 8
     expect(locations.length).toBe(8);
 
@@ -114,7 +123,10 @@ describe('Scenario 1: Warehouse Setup', () => {
   });
 
   it('should build location tree from hierarchy', async () => {
-    const tree = await flow.repositories.location.getTree(nodeId, ctx());
+    const tree = await flow.repositories.location.findAll(
+      { nodeId },
+      { organizationId: ctx().organizationId, sort: { sortOrder: 1 } },
+    );
     expect(tree.length).toBeGreaterThanOrEqual(6);
   });
 });
@@ -142,7 +154,7 @@ describe('Scenario 2: Inbound Receipt to Specific Location', () => {
     expect(avail.quantityAvailable).toBe(200);
 
     // Verify group is done
-    const updated = await flow.services.moveGroup.getById(group._id, ctx());
+    const updated = await flow.repositories.moveGroup.getByQuery({ _id: group._id }, { organizationId: ctx().organizationId, throwOnNotFound: false, lean: true });
     expect(updated!.status).toBe('done');
   });
 });
@@ -289,7 +301,7 @@ describe('Scenario 6: Wave Pick Path Optimization', () => {
 
     // Build location map from the stored string IDs
     // We need to fetch each location and map by the string ID we stored
-    const allLocs = await flow.repositories.location.findByNode(nodeId, ctx());
+    const allLocs = await flow.repositories.location.findAll({ nodeId }, { organizationId: ctx().organizationId, sort: { sortOrder: 1 } });
     const locationMap = new Map<string, any>();
     for (const loc of allLocs) {
       const id = String(loc._id);
@@ -362,15 +374,15 @@ describe('Scenario 8: Plan-Based Warehouse Limits', () => {
     // Node already exists from beforeEach
     expect(flow.services.mode).toBe('standard');
 
-    const existing = await flow.repositories.node.list(ctx());
+    const existing = await flow.repositories.node.findAll({}, { organizationId: ctx().organizationId, lean: true });
     expect(existing.length).toBe(1);
 
     // Creating second node should work at repository level (no plan check there)
     // Plan check is in the HTTP handler, not the repository — so this tests the data layer
-    const second = await flow.repositories.node.create({
-      organizationId: ORG, code: 'WH-2', name: 'Second Warehouse',
-      type: 'warehouse', status: 'active',
-    });
+    const second = await flow.repositories.node.create(
+      { organizationId: ORG, code: 'WH-2', name: 'Second Warehouse', type: 'warehouse', status: 'active' } as Record<string, unknown>,
+      { organizationId: ORG },
+    );
     expect(second._id).toBeDefined();
 
     // The HTTP layer (Arc resource) would reject this — tested in warehouse-e2e.test.ts

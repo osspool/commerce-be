@@ -1,6 +1,6 @@
 import { BaseController } from '@classytic/arc';
-import sizeGuideRepository from './size-guide.repository.js';
 import type { ISizeGuide } from './size-guide.model.js';
+import sizeGuideRepository from './size-guide.repository.js';
 
 /**
  * Size Guide Controller

@@ -1,11 +1,10 @@
 import { defineResource } from '@classytic/arc';
-import { requireAuth } from '@classytic/arc/permissions';
 import type { PermissionCheck } from '@classytic/arc/permissions';
-import platformConfigController from './platform.controller.js';
-import { platformActions } from '#shared/permissions.js';
-import { roles } from '#config/permissions/roles.js';
+import { requireAuth } from '@classytic/arc/permissions';
 import permissions from '#config/permissions/index.js';
-import { policies } from '#shared/permissions.js';
+import { roles } from '#config/permissions/roles.js';
+import { platformActions, policies } from '#shared/permissions.js';
+import platformConfigController from './platform.controller.js';
 
 // ─── Permission Matrix Introspection ────────────────────────────────────────
 
@@ -73,14 +72,14 @@ const platformResource = defineResource({
 
   disableDefaultRoutes: true,
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/config',
       summary: 'Get platform configuration',
       description: 'Returns full config or selected fields via ?select=field1,field2',
       permissions: platformActions.getConfig,
-      wrapHandler: false,
+      raw: true,
       handler: platformConfigController.getConfig.bind(platformConfigController) as any,
     },
     {
@@ -88,16 +87,17 @@ const platformResource = defineResource({
       path: '/config',
       summary: 'Update platform configuration',
       permissions: platformActions.updateConfig,
-      wrapHandler: false,
+      raw: true,
       handler: platformConfigController.updateConfig.bind(platformConfigController),
     },
     {
       method: 'GET',
       path: '/permissions/matrix',
       summary: 'Get permission matrix for all roles and modules',
-      description: 'Returns the full RBAC matrix introspected from the backend permission config. Single source of truth for frontend permission UIs.',
+      description:
+        'Returns the full RBAC matrix introspected from the backend permission config. Single source of truth for frontend permission UIs.',
       permissions: requireAuth(),
-      wrapHandler: false,
+      raw: true,
       handler: async (_req: any, reply: any) => {
         if (!cachedMatrix) cachedMatrix = buildPermissionMatrix();
         return reply.send({ success: true, data: cachedMatrix });

@@ -1,4 +1,4 @@
-import mongoose, { Schema, type HydratedDocument } from 'mongoose';
+import mongoose, { type HydratedDocument, Schema } from 'mongoose';
 
 export interface ICMSMetadata {
   title?: string;

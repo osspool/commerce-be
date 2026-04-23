@@ -1,15 +1,15 @@
 import {
   BaseController,
-  type RequestWithExtras,
-  type IRequestContext,
   type IControllerResponse,
+  type IRequestContext,
+  type RequestWithExtras,
   type RouteSchemaOptions,
 } from '@classytic/arc';
 import type { FastifyReply } from 'fastify';
-import reviewRepository from './review.repository.js';
-import type { IReview } from './review.model.js';
-import { reviewSchemaOptions } from './review.schemas.js';
 import { BadRequestError } from '#shared/utils/errors.js';
+import type { IReview } from './review.model.js';
+import reviewRepository from './review.repository.js';
+import { reviewSchemaOptions } from './review.schemas.js';
 
 interface GetMyReviewRequest extends RequestWithExtras {
   params: { productId: string };
@@ -26,7 +26,9 @@ interface GetMyReviewRequest extends RequestWithExtras {
  */
 class ReviewController extends BaseController<IReview> {
   constructor() {
-    super(reviewRepository, { schemaOptions: reviewSchemaOptions as unknown as RouteSchemaOptions });
+    super(reviewRepository, {
+      schemaOptions: reviewSchemaOptions as unknown as RouteSchemaOptions,
+    });
     this.getMyReview = this.getMyReview.bind(this);
   }
 

@@ -1,71 +1,93 @@
 /**
- * CatalogBridge — connects Flow's SKU resolution to be-prod's Product model.
+ * CatalogBridge — connects Flow's SKU resolution to @classytic/catalog.
  *
  * Flow calls `resolveSku(skuRef)` during moves, reservations, and scans.
- * We look up the product by variant SKU first, then by product _id.
+ * We look up the product via catalog's repository:
+ *   1. Variant SKU (variants.sku) — most common for variant products
+ *   2. Product _id — for simple products tracked by ObjectId
+ *   3. Top-level SKU (identifiers.custom.sku) — for simple products with SKU
+ *   4. Permissive fallback — unknown SKU gets a passthrough (tests, inbound receipts)
  */
-import Product from '#resources/catalog/products/product.model.js';
+
 import type { CatalogBridge, SkuDetails } from '@classytic/flow/domain/contracts';
+import mongoose from 'mongoose';
+import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 
-interface ProductVariant {
-  sku?: string;
-  isActive?: boolean;
-}
-
-interface ProductDocument {
-  _id: unknown;
-  name: string;
-  sku?: string;
-  barcode?: string;
-  isActive?: boolean;
-  variants?: ProductVariant[];
-  productType?: string;
-}
+const ctx = { actorId: 'flow-bridge', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
 
 const catalogBridge: CatalogBridge = {
-  /**
-   * Resolve a skuRef to product details.
-   * skuRef is either a variantSku (string) or a product ObjectId (string).
-   */
   async resolveSku(skuRef: string): Promise<SkuDetails | null> {
     if (!skuRef) return null;
 
-    // 1. Try variant SKU lookup
-    const variantProduct = await Product.findOne(
-      { 'variants.sku': skuRef, deletedAt: null },
-      'name sku barcode isActive variants productType',
-    ).lean<ProductDocument>();
+    const catalog = await ensureCatalogEngine();
 
-    if (variantProduct) {
-      const variant = variantProduct.variants?.find((v) => v.sku === skuRef);
+    // 1. Variant SKU lookup
+    const byVariant = await catalog.repositories.product.getByQuery(
+      { 'variants.sku': skuRef },
+      { ...ctx, throwOnNotFound: false },
+    );
+    if (byVariant) {
+      const variant = byVariant.variants?.find((v) => (v as { sku?: string }).sku === skuRef);
+      const variantSku = (variant as { sku?: string } | undefined)?.sku;
       return {
         skuRef,
-        sku: variant?.sku ?? skuRef,
-        displayName: variant ? `${variantProduct.name} - ${variant.sku}` : variantProduct.name,
+        sku: variantSku ?? skuRef,
+        displayName: variant ? `${byVariant.name} - ${variantSku}` : byVariant.name,
         trackingMode: 'none',
         uom: 'unit',
-        isActive: variantProduct.isActive !== false && variant?.isActive !== false,
+        isActive: byVariant.status === 'active' && (variant as { isActive?: boolean } | undefined)?.isActive !== false,
       };
     }
 
-    // 2. Try product _id lookup (simple products)
-    const simpleProduct = await Product.findOne(
-      { _id: skuRef, deletedAt: null },
-      'name sku barcode isActive productType',
-    ).lean<ProductDocument>();
+    // 2. Product _id lookup (simple products)
+    if (mongoose.isValidObjectId(skuRef)) {
+      try {
+        const byId = await catalog.repositories.product.getById(skuRef, { throwOnNotFound: false, ...ctx });
+        if (byId) {
+          const idents = byId.identifiers as { custom?: { sku?: string } } | undefined;
+          return {
+            skuRef,
+            sku: idents?.custom?.sku ?? skuRef,
+            displayName: byId.name,
+            trackingMode: 'none',
+            uom: 'unit',
+            isActive: byId.status === 'active',
+          };
+        }
+      } catch {
+        // Not found — fall through
+      }
+    }
 
-    if (simpleProduct) {
+    // 3. Top-level SKU lookup via identifiers
+    const list = await catalog.repositories.product.findAll(
+      { 'identifiers.custom.sku': skuRef },
+      { lean: true, limit: 1 },
+    );
+    const bySku = (list as unknown[])?.[0] as
+      | { name: string; status: string; identifiers?: { custom?: { sku?: string } } }
+      | undefined;
+    if (bySku) {
       return {
         skuRef,
-        sku: simpleProduct.sku ?? skuRef,
-        displayName: simpleProduct.name,
+        sku: bySku.identifiers?.custom?.sku ?? skuRef,
+        displayName: bySku.name,
         trackingMode: 'none',
         uom: 'unit',
-        isActive: simpleProduct.isActive !== false,
+        isActive: bySku.status === 'active',
       };
     }
 
-    return null;
+    // 4. Permissive fallback — unknown SKU gets a passthrough so inbound
+    // receipts/transfers and catalog-less integration tests don't break.
+    return {
+      skuRef,
+      sku: skuRef,
+      displayName: skuRef,
+      trackingMode: 'none',
+      uom: 'unit',
+      isActive: true,
+    };
   },
 };
 

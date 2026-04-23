@@ -37,12 +37,11 @@ function ctxWithBranch(branchCode: string, actorId = 'cashier-001') {
   return { actorId, branchCode };
 }
 
-async function createCustomer(name = 'Test Customer') {
+async function createCustomer(givenName = 'Test') {
   const phone = `017${Date.now().toString().slice(-8)}`;
   return Customer.create({
-    name,
-    phone,
-    email: `${phone}@test.bd`,
+    name: { given: givenName, family: 'Customer' },
+    contact: { phone, email: `${phone}@test.bd` },
     isActive: true,
     stats: {
       orders: { total: 0, completed: 0, cancelled: 0, refunded: 0 },
@@ -146,7 +145,7 @@ describe('Branch-Aware Enrollment', () => {
       ctxWithBranch('SYL'),
     );
 
-    const found = await engine.services.member.getByCardId(member.cardId!, ctx());
+    const found = await engine.repositories.member.getByQuery({ cardId: member.cardId! }, { throwOnNotFound: false });
     expect(found).not.toBeNull();
     expect(found!.externalId).toBe(customer._id.toString());
   });
@@ -162,7 +161,7 @@ describe('Cross-Branch Point Operations', () => {
     const member = await bridge.enrollCustomer(customer._id.toString(), ctxWithBranch('DHK'));
 
     // Earn at Dhaka
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id,
       points: 1000,
       description: 'Order at Dhaka Flagship',
@@ -173,14 +172,14 @@ describe('Cross-Branch Point Operations', () => {
     }, ctx());
 
     // Redeem at Chittagong
-    const validation = await engine.services.redemption.validate({
+    const validation = await engine.repositories.redemption.validate({
       memberId: member._id,
       pointsToRedeem: 500,
       orderTotal: 3000,
     }, ctx());
     expect(validation.valid).toBe(true);
 
-    const reservation = await engine.services.redemption.reserve({
+    const reservation = await engine.repositories.redemption.reserve({
       memberId: member._id,
       pointsToRedeem: 500,
       orderTotal: 3000,
@@ -188,10 +187,10 @@ describe('Cross-Branch Point Operations', () => {
       ownerId: 'ctg_order_001',
     }, ctx());
 
-    await engine.services.redemption.confirm(reservation._id, ctx());
+    await engine.repositories.redemption.confirm(reservation._id, ctx());
 
     // Earn on the Chittagong order too
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id,
       points: 250,
       description: 'Order at Chittagong Outlet',
@@ -202,17 +201,17 @@ describe('Cross-Branch Point Operations', () => {
     }, ctx());
 
     // Final balance: 1000 - 500 + 250 = 750 current, 1250 lifetime, 500 redeemed
-    const bal = await engine.services.member.getBalance(member._id, ctx());
-    expect(bal.current).toBe(750);
-    expect(bal.lifetime).toBe(1250);
-    expect(bal.redeemed).toBe(500);
+    const m = await engine.repositories.member.getById(member._id, { throwOnNotFound: false });
+    expect(m!.balance.current).toBe(750);
+    expect(m!.balance.lifetime).toBe(1250);
+    expect(m!.balance.redeemed).toBe(500);
   });
 
   it('transaction metadata carries branch attribution for analytics', async () => {
     const customer = await createCustomer('Anik');
     const member = await bridge.enrollCustomer(customer._id.toString(), ctxWithBranch('DHK'));
 
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id,
       points: 500,
       description: 'Sylhet order',
@@ -220,7 +219,12 @@ describe('Cross-Branch Point Operations', () => {
       metadata: { branchId: 'branch_syl', branchCode: 'SYL' },
     }, ctx());
 
-    const history = await engine.services.ledger.getHistory(member._id, { page: 1, limit: 10 }, ctx());
+    const history = await engine.repositories.pointTransaction.getAll({
+      filters: { memberId: member._id },
+      page: 1,
+      limit: 10,
+      sort: { createdAt: -1 },
+    });
     const tx = history.docs[0] as any;
     expect(tx.metadata?.branchId).toBe('branch_syl');
     expect(tx.metadata?.branchCode).toBe('SYL');
@@ -237,19 +241,19 @@ describe('Cancel/Refund Idempotency', () => {
     const member = await bridge.enrollCustomer(customer._id.toString(), ctxWithBranch('DHK'));
 
     // Earn + redeem
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id, points: 2000, description: 'order',
       idempotencyKey: 'order_earn:o1',
     }, ctx());
 
-    const res = await engine.services.redemption.reserve({
+    const res = await engine.repositories.redemption.reserve({
       memberId: member._id, pointsToRedeem: 500, orderTotal: 5000,
       ownerType: 'Order', ownerId: 'o1',
     }, ctx());
-    await engine.services.redemption.confirm(res._id, ctx());
+    await engine.repositories.redemption.confirm(res._id, ctx());
 
     // Cancel → restore points
-    const restoreCancel = await engine.services.ledger.adjustPoints({
+    const restoreCancel = await engine.repositories.pointTransaction.adjustPoints({
       memberId: member._id, points: 500,
       description: 'Order cancelled: o1', reason: 'cancel',
       idempotencyKey: 'order_redeem_restore_cancel:o1',
@@ -257,7 +261,7 @@ describe('Cancel/Refund Idempotency', () => {
     expect(restoreCancel.points).toBe(500);
 
     // Refund → same order — should be idempotent (different key, different operation)
-    const restoreRefund = await engine.services.ledger.adjustPoints({
+    const restoreRefund = await engine.repositories.pointTransaction.adjustPoints({
       memberId: member._id, points: 500,
       description: 'Order refunded: o1', reason: 'refund',
       idempotencyKey: 'order_redeem_restore_refund:o1',
@@ -266,7 +270,7 @@ describe('Cancel/Refund Idempotency', () => {
     expect(restoreRefund.points).toBe(500);
 
     // But repeating cancel restore → idempotent, returns same tx
-    const dupCancel = await engine.services.ledger.adjustPoints({
+    const dupCancel = await engine.repositories.pointTransaction.adjustPoints({
       memberId: member._id, points: 500,
       description: 'Order cancelled: o1', reason: 'cancel',
       idempotencyKey: 'order_redeem_restore_cancel:o1',
@@ -274,7 +278,7 @@ describe('Cancel/Refund Idempotency', () => {
     expect(String(dupCancel._id)).toBe(String(restoreCancel._id));
 
     // And repeating refund restore → idempotent too
-    const dupRefund = await engine.services.ledger.adjustPoints({
+    const dupRefund = await engine.repositories.pointTransaction.adjustPoints({
       memberId: member._id, points: 500,
       description: 'Order refunded: o1', reason: 'refund',
       idempotencyKey: 'order_redeem_restore_refund:o1',
@@ -289,30 +293,35 @@ describe('Cancel/Refund Idempotency', () => {
 
 describe('Earning Rules', () => {
   it('CRUD lifecycle: create → list → update → deactivate', async () => {
-    const rule = await engine.services.earning.createRule({
+    const rule = await engine.repositories.earningRule.create({
       name: 'Double Points Weekend',
       type: 'order',
       priority: 10,
       conditions: { minOrderAmount: 1000 },
       reward: { multiplier: 2 },
-    }, ctx());
+    });
 
     expect(rule.name).toBe('Double Points Weekend');
     expect(rule.status).toBe('active');
 
     // List
-    const list = await engine.services.earning.listRules({ page: 1, limit: 10 }, ctx());
+    const list = await engine.repositories.earningRule.getAll({
+      filters: {},
+      page: 1,
+      limit: 10,
+      sort: { priority: 1 },
+    });
     expect(list.docs.length).toBe(1);
 
     // Update
-    const updated = await engine.services.earning.updateRule(rule._id, {
+    const updated = await engine.repositories.earningRule.update(rule._id, {
       name: 'Triple Points Weekend',
       reward: { multiplier: 3 },
-    }, ctx());
+    });
     expect(updated.name).toBe('Triple Points Weekend');
 
     // Deactivate
-    const deactivated = await engine.services.earning.deactivateRule(rule._id, ctx());
+    const deactivated = await engine.repositories.earningRule.update(rule._id, { status: 'paused' });
     expect(deactivated.status).toBe('paused');
   });
 });
@@ -324,80 +333,81 @@ describe('Earning Rules', () => {
 describe('Tier Progression', () => {
   it('defines tiers → member earns enough → auto-upgrades', async () => {
     // Define company-wide tiers
-    await engine.services.tier.createTier({
+    await engine.repositories.tierDefinition.create({
       name: 'Bronze', rank: 1,
       qualificationCriteria: { minLifetimePoints: 0 },
       benefits: { pointsMultiplier: 1 },
       downgrade: { enabled: false, gracePeriodDays: 0 },
-    }, ctx());
-    await engine.services.tier.createTier({
+    });
+    await engine.repositories.tierDefinition.create({
       name: 'Silver', rank: 2,
       qualificationCriteria: { minLifetimePoints: 1000 },
       benefits: { pointsMultiplier: 1.5, discountPercent: 5 },
       downgrade: { enabled: true, gracePeriodDays: 30 },
-    }, ctx());
-    await engine.services.tier.createTier({
+    });
+    await engine.repositories.tierDefinition.create({
       name: 'Gold', rank: 3,
       qualificationCriteria: { minLifetimePoints: 5000 },
       benefits: { pointsMultiplier: 2, discountPercent: 10, freeShipping: true },
       downgrade: { enabled: true, gracePeriodDays: 60 },
-    }, ctx());
+    });
 
     // Enroll customer
     const customer = await createCustomer('VIP Rahim');
     const member = await bridge.enrollCustomer(customer._id.toString(), ctxWithBranch('DHK'));
 
     // Earn 1500 points across branches → should qualify for Silver
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id, points: 800, description: 'Dhaka order',
       metadata: { branchCode: 'DHK' },
     }, ctx());
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id, points: 700, description: 'Chittagong order',
       metadata: { branchCode: 'CTG' },
     }, ctx());
 
     // Evaluate → should upgrade to Silver
-    const eval1 = await engine.services.tier.evaluateMember(member._id, ctx());
+    const eval1 = await engine.repositories.tierDefinition.evaluateMember(member._id, ctx());
     expect(eval1.action).toBe('upgraded');
     expect(eval1.newTier).toBe('Silver');
 
     // Earn more → Gold
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id, points: 4000, description: 'Big Sylhet order',
       metadata: { branchCode: 'SYL' },
     }, ctx());
 
-    const eval2 = await engine.services.tier.evaluateMember(member._id, ctx());
+    const eval2 = await engine.repositories.tierDefinition.evaluateMember(member._id, ctx());
     expect(eval2.action).toBe('upgraded');
     expect(eval2.newTier).toBe('Gold');
 
-    // List tiers — company-wide
-    const tiers = await engine.services.tier.listTiers(ctx());
+    // List tiers — company-wide. PACKAGE_RULES §3: no proxy methods; use
+    // inherited mongokit `findAll` with an explicit sort.
+    const tiers = await engine.repositories.tierDefinition.findAll({}, { sort: { rank: 1 } });
     expect(tiers.length).toBe(3);
     expect(tiers[0].name).toBe('Bronze'); // sorted by rank
     expect(tiers[2].name).toBe('Gold');
   });
 
   it('tier override by admin → stays until cleared', async () => {
-    await engine.services.tier.createTier({
+    await engine.repositories.tierDefinition.create({
       name: 'Platinum', rank: 4,
       qualificationCriteria: { minLifetimePoints: 50000 },
       benefits: { pointsMultiplier: 3, discountPercent: 15, freeShipping: true },
-    }, ctx());
+    });
 
     const customer = await createCustomer('CEO Friend');
     const member = await bridge.enrollCustomer(customer._id.toString(), ctx());
 
     // Manual VIP override
-    await engine.services.tier.setOverride(member._id, 'Platinum', 'CEO request', ctx());
+    await engine.repositories.tierDefinition.setOverride(member._id, 'Platinum', 'CEO request', ctx());
 
-    const m = await engine.services.member.getById(member._id, ctx());
-    expect(m.tierOverride).toBe('Platinum');
-    expect(m.tierOverrideReason).toBe('CEO request');
+    const m = await engine.repositories.member.getById(member._id, { throwOnNotFound: false });
+    expect(m!.tierOverride).toBe('Platinum');
+    expect(m!.tierOverrideReason).toBe('CEO request');
 
     // Auto-evaluate should not override the manual setting
-    const evaluation = await engine.services.tier.evaluateMember(member._id, ctx());
+    const evaluation = await engine.repositories.tierDefinition.evaluateMember(member._id, ctx());
     expect(evaluation.action).toBe('unchanged');
   });
 });
@@ -413,7 +423,7 @@ describe('Referral Program', () => {
     const referrerMember = await bridge.enrollCustomer(referrer._id.toString(), ctxWithBranch('DHK'));
 
     // Generate referral code
-    const code = await engine.services.referral.generateCode(referrerMember._id, ctx());
+    const code = await engine.repositories.referral.generateCode(referrerMember._id, ctx());
     expect(code).toBeDefined();
     expect(code.length).toBe(8);
 
@@ -422,7 +432,7 @@ describe('Referral Program', () => {
     const refereeMember = await bridge.enrollCustomer(referee._id.toString(), ctxWithBranch('CTG'));
 
     // Apply referral (auto-approve since requireApproval: false)
-    const referral = await engine.services.referral.recordReferral({
+    const referral = await engine.repositories.referral.recordReferral({
       referralCode: code,
       refereeExternalId: referee._id.toString(),
       refereeExternalType: 'customer',
@@ -431,20 +441,20 @@ describe('Referral Program', () => {
     expect(referral.status).toBe('approved'); // auto-approved
 
     // Both should have been rewarded
-    const referrerBal = await engine.services.member.getBalance(referrerMember._id, ctx());
-    expect(referrerBal.current).toBe(200); // referrerRewardPoints
+    const referrerM = await engine.repositories.member.getById(referrerMember._id, { throwOnNotFound: false });
+    expect(referrerM!.balance.current).toBe(200); // referrerRewardPoints
 
-    const refereeBal = await engine.services.member.getBalance(refereeMember._id, ctx());
-    expect(refereeBal.current).toBe(100); // refereeRewardPoints
+    const refereeM = await engine.repositories.member.getById(refereeMember._id, { throwOnNotFound: false });
+    expect(refereeM!.balance.current).toBe(100); // refereeRewardPoints
   });
 
   it('prevents self-referral', async () => {
     const customer = await createCustomer('Self Referrer');
     const member = await bridge.enrollCustomer(customer._id.toString(), ctx());
-    const code = await engine.services.referral.generateCode(member._id, ctx());
+    const code = await engine.repositories.referral.generateCode(member._id, ctx());
 
     await expect(
-      engine.services.referral.recordReferral({
+      engine.repositories.referral.recordReferral({
         referralCode: code,
         refereeExternalId: customer._id.toString(),
         refereeExternalType: 'customer',
@@ -458,9 +468,9 @@ describe('Referral Program', () => {
     const rm = await bridge.enrollCustomer(referrer._id.toString(), ctx());
     await bridge.enrollCustomer(referee._id.toString(), ctx());
 
-    const code = await engine.services.referral.generateCode(rm._id, ctx());
+    const code = await engine.repositories.referral.generateCode(rm._id, ctx());
 
-    await engine.services.referral.recordReferral({
+    await engine.repositories.referral.recordReferral({
       referralCode: code,
       refereeExternalId: referee._id.toString(),
       refereeExternalType: 'customer',
@@ -468,7 +478,7 @@ describe('Referral Program', () => {
 
     // Second referral for same referee → duplicate
     await expect(
-      engine.services.referral.recordReferral({
+      engine.repositories.referral.recordReferral({
         referralCode: code,
         refereeExternalId: referee._id.toString(),
         refereeExternalType: 'customer',
@@ -486,7 +496,7 @@ describe('Projection Sync', () => {
     const customer = await createCustomer('Sync Test');
     const member = await bridge.enrollCustomer(customer._id.toString(), ctxWithBranch('DHK'));
 
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id, points: 750, description: 'test',
     }, ctx());
 
@@ -519,16 +529,16 @@ describe('Projection Sync', () => {
 describe('Full Multi-Branch Checkout', () => {
   it('customer journey: enroll at DHK → shop at CTG → redeem at SYL → tier up', async () => {
     // Setup tiers
-    await engine.services.tier.createTier({
+    await engine.repositories.tierDefinition.create({
       name: 'Bronze', rank: 1,
       qualificationCriteria: { minLifetimePoints: 0 },
       benefits: { pointsMultiplier: 1 },
-    }, ctx());
-    await engine.services.tier.createTier({
+    });
+    await engine.repositories.tierDefinition.create({
       name: 'Silver', rank: 2,
       qualificationCriteria: { minLifetimePoints: 500 },
       benefits: { pointsMultiplier: 1.5, discountPercent: 5 },
-    }, ctx());
+    });
 
     // Enroll at Dhaka
     const customer = await createCustomer('Journey Customer');
@@ -536,7 +546,7 @@ describe('Full Multi-Branch Checkout', () => {
     expect(member.cardId).toMatch(/^MBR-DHK-/);
 
     // Shop at Chittagong — earn 400 pts
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id, points: 400, description: 'CTG order #1',
       referenceType: 'order', referenceId: 'ctg_001',
       idempotencyKey: 'order_earn:ctg_001',
@@ -544,7 +554,7 @@ describe('Full Multi-Branch Checkout', () => {
     }, ctx());
 
     // Shop at Sylhet — earn 300 pts
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id, points: 300, description: 'SYL order #1',
       referenceType: 'order', referenceId: 'syl_001',
       idempotencyKey: 'order_earn:syl_001',
@@ -552,19 +562,19 @@ describe('Full Multi-Branch Checkout', () => {
     }, ctx());
 
     // Total: 700 lifetime → qualifies for Silver
-    const tierEval = await engine.services.tier.evaluateMember(member._id, ctx());
+    const tierEval = await engine.repositories.tierDefinition.evaluateMember(member._id, ctx());
     expect(tierEval.action).toBe('upgraded');
     expect(tierEval.newTier).toBe('Silver');
 
     // Redeem at Sylhet — 200 pts for discount
-    const reservation = await engine.services.redemption.reserve({
+    const reservation = await engine.repositories.redemption.reserve({
       memberId: member._id, pointsToRedeem: 200, orderTotal: 5000,
       ownerType: 'Order', ownerId: 'syl_002',
     }, ctx());
-    await engine.services.redemption.confirm(reservation._id, ctx());
+    await engine.repositories.redemption.confirm(reservation._id, ctx());
 
     // Earn on that order too
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id, points: 480, description: 'SYL order #2',
       referenceType: 'order', referenceId: 'syl_002',
       idempotencyKey: 'order_earn:syl_002',
@@ -572,11 +582,11 @@ describe('Full Multi-Branch Checkout', () => {
     }, ctx());
 
     // Final: current = 700 - 200 + 480 = 980, lifetime = 1180, redeemed = 200
-    const bal = await engine.services.member.getBalance(member._id, ctx());
-    expect(bal.current).toBe(980);
-    expect(bal.lifetime).toBe(1180);
-    expect(bal.redeemed).toBe(200);
-    expect(bal.tier).toBe('Silver');
+    const m = await engine.repositories.member.getById(member._id, { throwOnNotFound: false });
+    expect(m!.balance.current).toBe(980);
+    expect(m!.balance.lifetime).toBe(1180);
+    expect(m!.balance.redeemed).toBe(200);
+    expect(m!.tier).toBe('Silver');
 
     // Sync and verify projection
     await bridge.syncCustomerMembership(customer._id.toString());
@@ -587,7 +597,12 @@ describe('Full Multi-Branch Checkout', () => {
     expect(doc.membership.syncedAt).toBeDefined();
 
     // Full transaction history shows branch attribution
-    const history = await engine.services.ledger.getHistory(member._id, { page: 1, limit: 50 }, ctx());
+    const history = await engine.repositories.pointTransaction.getAll({
+      filters: { memberId: member._id },
+      page: 1,
+      limit: 50,
+      sort: { createdAt: -1 },
+    });
     const branchCodes = history.docs
       .map((tx: any) => tx.metadata?.branchCode)
       .filter(Boolean);

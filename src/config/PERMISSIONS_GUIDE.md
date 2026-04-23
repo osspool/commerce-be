@@ -67,7 +67,7 @@ const orderResource = defineResource({
   name: 'order',
   tag: 'Order',
   permissions: permissions.orders,
-  additionalRoutes: [
+  routes: [
     {
       method: 'POST',
       path: '/:orderId/renew',
@@ -81,13 +81,13 @@ const orderResource = defineResource({
 ### 3. Custom Routes (No Route Composers)
 
 ```javascript
-// Prefer defineResource + additionalRoutes for custom endpoints.
+// Prefer defineResource + routes for custom endpoints.
 // Keep handlers close to the resource for consistent docs + hooks.
 
 const orderResource = defineResource({
   name: 'order',
   tag: 'Order',
-  additionalRoutes: [
+  routes: [
     {
       method: 'POST',
       path: '/:orderId/renew',
@@ -277,5 +277,5 @@ landingPages: {
 
 See:
 - `config/permissions.js` - All permission definitions
-- `packages/arc/docs/core.md` - How CRUD + additionalRoutes work
+- `packages/arc/docs/core.md` - How CRUD + routes work
 - This guide - Architecture patterns

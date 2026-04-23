@@ -3,8 +3,8 @@
  *
  * Connects mongoose to MongoDB. Idempotent — returns immediately if already
  * connected (e.g. by tests via setup hook). Used by app.ts to ensure the DB
- * is ready BEFORE loadResources() runs, so engine-owned models are available
- * when resource files are imported.
+ * is ready BEFORE Arc resource discovery runs, so engine-owned models are
+ * available when resource files are imported.
  */
 
 import mongoose from 'mongoose';

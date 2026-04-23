@@ -4,9 +4,9 @@
  * Event definitions and handlers for the customer domain
  */
 
-import { publish } from '#lib/events/arcEvents.js';
-import { defineEvent } from '@classytic/arc/events';
 import type { EventDefinition } from '@classytic/arc';
+import { defineEvent } from '@classytic/arc/events';
+import { publish } from '#lib/events/arcEvents.js';
 import { eventRegistry } from '#shared/event-registry.js';
 
 // --- Payload Interfaces ---

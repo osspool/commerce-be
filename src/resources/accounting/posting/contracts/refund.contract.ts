@@ -5,10 +5,13 @@
  * Mirror of the sales contract — debits revenue/VAT, credits cash/bank.
  *
  * Debit:  4111 Domestic Sales Revenue (reducing revenue)
- * Debit:  2131 VAT Payable (reducing VAT liability, if applicable)
+ * Debit:  2132 VAT Output Payable (reducing VAT liability, if applicable)
  * Credit: 1111 Cash in Hand / 1112 Bank / 1122 Mobile Banking (returning money)
+ *
+ * VAT account code sourced from `@classytic/ledger-bd` via the tax submodule.
  */
 
+import { VAT_ACCOUNTS } from '../../tax/tax.accounts.js';
 import type { PostingInput, PostingItem } from '../posting.service.js';
 
 const PAYMENT_METHOD_ACCOUNTS: Record<string, string> = {
@@ -23,7 +26,7 @@ const PAYMENT_METHOD_ACCOUNTS: Record<string, string> = {
 };
 
 const SALES_REVENUE = '4111';
-const VAT_PAYABLE = '2131';
+const VAT_PAYABLE = VAT_ACCOUNTS.OUTPUT; // 2132 — VAT Output Payable (from ledger-bd)
 
 export interface RefundData {
   transactionId: string;
@@ -35,10 +38,7 @@ export interface RefundData {
   reason?: string;
 }
 
-export function refundToPosting(
-  data: RefundData,
-  options: { autoPost?: boolean } = {},
-): PostingInput {
+export function refundToPosting(data: RefundData, options: { autoPost?: boolean } = {}): PostingInput {
   const cashAccount = PAYMENT_METHOD_ACCOUNTS[data.method] || '1111';
   const netRefund = data.refundAmount - (data.tax || 0);
 

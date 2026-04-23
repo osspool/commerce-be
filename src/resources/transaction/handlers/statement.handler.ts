@@ -1,6 +1,6 @@
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import Transaction from '../transaction.model.js';
 import { stringify as csvStringify } from 'csv-stringify/sync';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { getTransactionModel } from '#shared/revenue/engine.js';
 
 interface AggregatedDoc {
   _id: unknown;
@@ -171,7 +171,7 @@ export async function getStatement(
     },
   ];
 
-  const docs = await Transaction.aggregate(pipeline);
+  const docs = await getTransactionModel().aggregate(pipeline);
   const rows = formatStatementRows(docs as AggregatedDoc[]);
 
   if (format === 'json') {

@@ -6,7 +6,17 @@
  * supplier, and stock-request models can generate document numbers without
  * depending on the deleted stock/models/ directory.
  */
+import { getNextSequence } from '@classytic/flow/models';
 import { getFlowEngine } from './flow-engine.js';
+
+/**
+ * Sentinel "cross-org" scope for document sequences that span all orgs
+ * (purchase invoices, transfers). Flow's Counter model stores
+ * `organizationId` as an ObjectId (via `injectTenantField`), so the zero
+ * ObjectId string casts cleanly and will never collide with a real
+ * Better Auth org id.
+ */
+const SYSTEM_ORG_SENTINEL = '000000000000000000000000';
 
 /**
  * InventoryCounter bridge — drop-in replacement for the deleted model.
@@ -24,13 +34,6 @@ export const InventoryCounter = {
   async nextSeq(prefix: string, scope: string): Promise<number> {
     const flow = getFlowEngine();
     const compoundPrefix = `${prefix}-${scope}`;
-    // Flow's counter is org-scoped — use a global org key for document numbering
-    // since these are cross-org business documents (purchase invoices, transfers, etc.)
-    const doc = await flow.models.Counter.findOneAndUpdate(
-      { organizationId: '__system__', prefix: compoundPrefix },
-      { $inc: { currentValue: 1 } },
-      { returnDocument: 'after', upsert: true },
-    );
-    return doc?.currentValue as number;
+    return getNextSequence(flow.models.Counter, SYSTEM_ORG_SENTINEL, compoundPrefix);
   },
 };

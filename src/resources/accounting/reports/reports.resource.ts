@@ -8,26 +8,29 @@
 import { defineResource } from '@classytic/arc';
 import { requireAuth } from '@classytic/arc/permissions';
 import config from '#config/index.js';
-import { dateQuerySchema, budgetVsActualQuerySchema } from './reports.utils.js';
 import {
-  getTrialBalance,
+  getApAging,
+  getArAging,
   getBalanceSheet,
-  getIncomeStatement,
+  getBudgetVsActual,
   getCashFlow,
   getGeneralLedger,
-  getBudgetVsActual,
+  getIncomeStatement,
+  getPartnerLedger,
+  getTrialBalance,
 } from './reports.handlers.js';
+import { budgetVsActualQuerySchema, dateQuerySchema } from './reports.utils.js';
 
 const authenticated = requireAuth();
 
-// biome-ignore lint/suspicious/noExplicitAny: Arc additionalRoute typing is loose
-const additionalRoutes: any[] = [
+// biome-ignore lint/suspicious/noExplicitAny: Arc route typing is loose
+const routes: any[] = [
   {
     method: 'GET',
     path: '/trial-balance',
     summary: 'Trial Balance report',
     permissions: authenticated,
-    wrapHandler: false,
+    raw: true,
     schema: { querystring: dateQuerySchema },
     handler: getTrialBalance,
   },
@@ -36,7 +39,7 @@ const additionalRoutes: any[] = [
     path: '/balance-sheet',
     summary: 'Balance Sheet report',
     permissions: authenticated,
-    wrapHandler: false,
+    raw: true,
     schema: { querystring: dateQuerySchema },
     handler: getBalanceSheet,
   },
@@ -45,7 +48,7 @@ const additionalRoutes: any[] = [
     path: '/income-statement',
     summary: 'Income Statement (Profit & Loss)',
     permissions: authenticated,
-    wrapHandler: false,
+    raw: true,
     schema: { querystring: dateQuerySchema },
     handler: getIncomeStatement,
   },
@@ -54,7 +57,7 @@ const additionalRoutes: any[] = [
     path: '/income',
     summary: 'Income Statement (alias)',
     permissions: authenticated,
-    wrapHandler: false,
+    raw: true,
     schema: { querystring: dateQuerySchema },
     handler: getIncomeStatement,
   },
@@ -63,7 +66,7 @@ const additionalRoutes: any[] = [
     path: '/general-ledger',
     summary: 'General Ledger report',
     permissions: authenticated,
-    wrapHandler: false,
+    raw: true,
     schema: { querystring: dateQuerySchema },
     handler: getGeneralLedger,
   },
@@ -72,19 +75,43 @@ const additionalRoutes: any[] = [
     path: '/cash-flow',
     summary: 'Cash Flow report',
     permissions: authenticated,
-    wrapHandler: false,
+    raw: true,
     schema: { querystring: dateQuerySchema },
     handler: getCashFlow,
+  },
+  {
+    method: 'GET',
+    path: '/ap-aging',
+    summary: 'Accounts Payable aging (subsidiary ledger)',
+    permissions: authenticated,
+    raw: true,
+    handler: getApAging,
+  },
+  {
+    method: 'GET',
+    path: '/ar-aging',
+    summary: 'Accounts Receivable aging (subsidiary ledger)',
+    permissions: authenticated,
+    raw: true,
+    handler: getArAging,
+  },
+  {
+    method: 'GET',
+    path: '/partner-ledger',
+    summary: 'Per-partner ledger / supplier or customer statement',
+    permissions: authenticated,
+    raw: true,
+    handler: getPartnerLedger,
   },
 ];
 
 if (config.accounting.mode !== 'simple') {
-  additionalRoutes.push({
+  routes.push({
     method: 'GET',
     path: '/budget-vs-actual',
     summary: 'Budget vs Actual report (enterprise)',
     permissions: authenticated,
-    wrapHandler: false,
+    raw: true,
     schema: { querystring: budgetVsActualQuerySchema },
     handler: getBudgetVsActual,
   });
@@ -96,7 +123,7 @@ const reportsResource = defineResource({
   tag: 'Accounting',
   prefix: '/accounting/reports',
   disableDefaultRoutes: true,
-  additionalRoutes,
+  routes,
 });
 
 export default reportsResource;

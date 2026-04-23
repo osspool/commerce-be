@@ -3,9 +3,12 @@
  * Extends @classytic/notifications base class
  */
 
+import { arcLog } from '@classytic/arc/logger';
+import type { ChannelConfig, NotificationPayload, SendResult } from '@classytic/notifications';
 import { BaseChannel } from '@classytic/notifications';
-import type { NotificationPayload, SendResult, ChannelConfig } from '@classytic/notifications';
 import { renderTemplate } from './templates/index.js';
+
+const log = arcLog('email-channel');
 
 interface EmailChannelConfig extends ChannelConfig {
   [key: string]: unknown;
@@ -17,7 +20,7 @@ interface EmailChannelConfig extends ChannelConfig {
  */
 async function sendEmail(opts: { to: string; subject: string; html: string; text: string }): Promise<void> {
   // In production, replace with actual email transport (nodemailer, SES, etc.)
-  console.log(`[EmailChannel] Sending email to ${opts.to}: ${opts.subject}`);
+  log.info(`Sending email to ${opts.to}: ${opts.subject}`);
 }
 
 export class EmailChannel extends BaseChannel {
@@ -43,11 +46,11 @@ export class EmailChannel extends BaseChannel {
         text,
       });
 
-      console.log(`[EmailChannel] Sent ${event} to ${recipient.email}`);
+      log.info(`Sent ${event} to ${recipient.email}`);
       return { status: 'sent' as const, channel: 'email' };
     } catch (error) {
       const err = error as Error;
-      console.error(`[EmailChannel] Failed to send ${event}:`, err.message);
+      log.error(`Failed to send ${event}:`, err.message);
       throw error;
     }
   }

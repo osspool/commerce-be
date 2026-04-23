@@ -10,6 +10,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 
 let mongoServer;
+const mongoStatePath = path.resolve(process.cwd(), 'tests/setup/.mongo-test-state.json');
 
 export async function setup() {
   // Load RedX sandbox credentials from `.env.dev` when available.
@@ -49,6 +50,8 @@ export async function setup() {
 
   console.log(`\n✓ MongoDB Memory Server started: ${uri}\n`);
 
+  fs.writeFileSync(mongoStatePath, JSON.stringify({ uri }), 'utf8');
+
   // Store URI in global for access by tests
   globalThis.__MONGO_URI__ = uri;
   globalThis.__MONGO_SERVER__ = mongoServer;
@@ -64,5 +67,9 @@ export async function teardown() {
   if (globalThis.__MONGO_SERVER__) {
     await globalThis.__MONGO_SERVER__.stop();
     console.log('\n✓ MongoDB Memory Server stopped\n');
+  }
+
+  if (fs.existsSync(mongoStatePath)) {
+    fs.unlinkSync(mongoStatePath);
   }
 }

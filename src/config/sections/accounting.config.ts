@@ -21,6 +21,17 @@ function parseMode(value: string | undefined): AccountingMode {
   return 'standard';
 }
 
+export interface ExtraTaxClassEntry {
+  code: string;
+  rate: {
+    rateCode: string;
+    rate: number;
+    inputCreditAllowed: boolean;
+    mushakGridOutput?: number;
+    meta?: Record<string, unknown>;
+  };
+}
+
 export interface AccountingConfigSection {
   accounting: {
     enabled: boolean;
@@ -31,6 +42,13 @@ export interface AccountingConfigSection {
     autoSeedAccounts: boolean;
     /** Auto-post journal entries from POS/orders (standard+ mode). */
     autoPost: boolean;
+    /**
+     * Additive tax classes merged on top of the country pack's seed at
+     * engine bootstrap. Populate when a deployment is granted a custom SRO
+     * exemption the published bd-vat doesn't yet recognize — a one-line
+     * entry here instead of patching the npm package.
+     */
+    extraTaxClasses: ExtraTaxClassEntry[];
   };
 }
 
@@ -40,6 +58,7 @@ const accounting: AccountingConfigSection['accounting'] = {
   fiscalYearStartMonth: parseInt(process.env.FISCAL_YEAR_START_MONTH || '7', 10),
   autoSeedAccounts: process.env.ACCOUNTING_AUTO_SEED !== 'false',
   autoPost: process.env.ACCOUNTING_AUTO_POST !== 'false',
+  extraTaxClasses: [],
 };
 
 const accountingConfig: AccountingConfigSection = { accounting };

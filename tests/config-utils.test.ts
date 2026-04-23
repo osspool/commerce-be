@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { configureArcLogger } from '@classytic/arc/logger';
 import { parseIntEnv, parseBoolean, parseDelimitedString, requiredEnv, warnIfMissing } from '../src/config/utils.js';
 
 describe('config/utils', () => {
@@ -120,29 +121,37 @@ describe('config/utils', () => {
 
   describe('warnIfMissing', () => {
     const originalEnv = process.env;
+    let warnings: unknown[][];
 
     beforeEach(() => {
       process.env = { ...originalEnv };
+      warnings = [];
+      configureArcLogger({
+        writer: {
+          debug: () => {},
+          info: () => {},
+          warn: (...args) => warnings.push(args),
+          error: () => {},
+        },
+      });
     });
 
     afterEach(() => {
       process.env = originalEnv;
+      configureArcLogger({});
     });
 
     it('logs warning when env var is missing', () => {
-      const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       delete process.env.MISSING_VAR;
       warnIfMissing('MISSING_VAR');
-      expect(spy).toHaveBeenCalledWith('MISSING_VAR is not set. Functionality related to this variable may not work.');
-      spy.mockRestore();
+      const joined = warnings.map((w) => w.join(' ')).join('\n');
+      expect(joined).toContain('MISSING_VAR is not set');
     });
 
     it('does not log when env var is set', () => {
-      const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       process.env.PRESENT_VAR = 'value';
       warnIfMissing('PRESENT_VAR');
-      expect(spy).not.toHaveBeenCalled();
-      spy.mockRestore();
+      expect(warnings).toHaveLength(0);
     });
   });
 });

@@ -199,7 +199,7 @@ describe('Scenario 2 — Full Accounting Cycle (seed → entry → post → repo
 
     cashId = accounts.find((a: any) => a.accountTypeCode === '1111')?._id;
     revenueId = accounts.find((a: any) => a.accountTypeCode === '4111')?._id;
-    vatPayableId = accounts.find((a: any) => a.accountTypeCode === '2131')?._id;
+    vatPayableId = accounts.find((a: any) => a.accountTypeCode === '2132')?._id;
   });
 
   it('Step 1: create a sales journal entry (BDT 1,000 + 15% VAT)', async () => {
@@ -394,7 +394,7 @@ describe('Scenario 4 — POS Day-Close Workflow', () => {
   it('simulate POS transactions then close day', async () => {
     // Insert mock POS transactions directly into the DB
     const db = mongoose.connection.db!;
-    const txnCollection = db.collection('transactions');
+    const txnCollection = db.collection('revenue_transactions');
 
     const testDate = '2026-04-01';
     const dateObj = new Date(`${testDate}T10:00:00.000+06:00`); // BD time 10 AM

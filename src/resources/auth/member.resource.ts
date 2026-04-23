@@ -6,11 +6,11 @@
  */
 
 import { defineResource } from '@classytic/arc';
-import type { RequestScope } from '@classytic/arc/scope';
-import mongoose from 'mongoose';
-import { getOrgId } from '@classytic/arc/scope';
 import { requireOrgRole } from '@classytic/arc/permissions';
-import type { FastifyRequest, FastifyReply } from 'fastify';
+import type { RequestScope } from '@classytic/arc/scope';
+import { getOrgId } from '@classytic/arc/scope';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import mongoose from 'mongoose';
 import { z } from 'zod';
 
 interface RequestWithScope extends FastifyRequest {
@@ -78,13 +78,13 @@ const memberResource = defineResource({
   prefix: '/members',
   disableDefaultRoutes: true,
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'PATCH',
       path: '/:memberId/status',
       handler: updateMemberStatus,
       permissions: requireOrgRole(['branch_manager']),
-      wrapHandler: false,
+      raw: true,
       summary: 'Update member status',
       description: 'Activate or deactivate a branch member.',
       schema: {

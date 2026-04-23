@@ -1,6 +1,7 @@
-import { Repository, validationChainPlugin, uniqueField, requireField } from '@classytic/mongokit';
+import { Repository, validationChainPlugin } from '@classytic/mongokit';
+import type { ContactInfo, PersonName } from '@classytic/primitives/person';
+import type { CustomerDocument, IAddress, ICustomer } from './customer.model.js';
 import Customer from './customer.model.js';
-import type { ICustomer, CustomerDocument, IAddress } from './customer.model.js';
 
 interface UserLike {
   _id?: string;
@@ -17,21 +18,73 @@ interface CustomerData {
 }
 
 /**
+ * Split a flat "Full Name" string into a structured `PersonName`.
+ *
+ * Callers at the auth / POS boundary pass flat names; storage is structured.
+ * Single-token names go in `given` with an empty `family` (many BD and
+ * single-name locales store a single name, which is valid).
+ */
+function nameFromString(flat: string | undefined, fallback: string): PersonName {
+  const source = (flat ?? '').trim() || fallback;
+  const parts = source.split(/\s+/);
+  if (parts.length <= 1) return { given: parts[0] ?? fallback, family: '' };
+  const family = parts.pop() ?? '';
+  return { given: parts.join(' '), family };
+}
+
+function contactFromPartials(email: string | undefined, phone: string | undefined): ContactInfo {
+  return {
+    ...(email ? { email } : {}),
+    ...(phone ? { phone } : {}),
+  };
+}
+
+/**
+ * Mongokit's built-in `requireField` / `uniqueField` do flat `data[field]`
+ * lookups — they can't navigate `name.given` style dotted paths. We use the
+ * same plugin shape but with custom traversal for the structured fields.
+ *
+ * Uniqueness for `contact.phone` is enforced at the DB level via the unique
+ * partial index on the schema; we don't duplicate that check here.
+ */
+function requireNestedFieldOnCreate(path: string): {
+  name: string;
+  operations: Array<'create'>;
+  validate: (ctx: { data?: Record<string, unknown> }) => void;
+} {
+  const segments = path.split('.');
+  return {
+    name: `require-${path}`,
+    operations: ['create'],
+    validate: (ctx) => {
+      let cur: unknown = ctx.data;
+      for (const seg of segments) {
+        if (cur && typeof cur === 'object' && seg in (cur as Record<string, unknown>)) {
+          cur = (cur as Record<string, unknown>)[seg];
+        } else {
+          cur = undefined;
+          break;
+        }
+      }
+      if (cur === undefined || cur === null || cur === '') {
+        throw Object.assign(new Error(`Field '${path}' is required`), { status: 400 });
+      }
+    },
+  };
+}
+
+/**
  * Customer Repository
  *
- * Simple and clean - no unnecessary plugins.
+ * Storage shape is structured (`name: PersonName`, `contact: ContactInfo`).
+ * Caller-facing methods still accept flat strings because that's what Better
+ * Auth + POS clients provide; translation happens inside the repository.
  */
 class CustomerRepository extends Repository<ICustomer> {
   constructor() {
     super(
       Customer,
-      [
-        validationChainPlugin([
-          requireField('name', ['create']),
-          requireField('phone', ['create']),
-          uniqueField('phone', 'Phone number already in use'),
-        ]),
-      ],
+      [validationChainPlugin([requireNestedFieldOnCreate('name.given'), requireNestedFieldOnCreate('contact.phone')])],
       {
         defaultLimit: 20,
         maxLimit: 100,
@@ -40,49 +93,57 @@ class CustomerRepository extends Repository<ICustomer> {
   }
 
   /**
-   * Link user to existing customer or create new
+   * Link a Better Auth user to an existing customer, or create a fresh one.
+   *
+   * Matching order:
+   *   1. Already linked (`userId` match)
+   *   2. Same phone number
+   *   3. Same email + guest record (no `userId`)
+   *   4. Fresh customer with placeholder phone
    */
   async linkOrCreateForUser(user: UserLike): Promise<ICustomer> {
     const userId = user._id || user.id;
     const email = user.email?.toLowerCase().trim();
     const phone = user.phone?.trim();
 
-    // Already linked?
     const existing = await this.Model.findOne({ userId });
     if (existing) {
       let updated = false;
-      if (user.name && user.name !== existing.name) {
-        existing.name = user.name;
-        updated = true;
-      }
-      if (email && email !== existing.email) {
-        existing.email = email;
-        updated = true;
-      }
-      if (phone && existing.phone !== phone) {
-        const phoneOwner = await this.Model.findOne({ phone, _id: { $ne: existing._id } }).lean();
-        if (!phoneOwner) {
-          existing.phone = phone;
+      if (user.name) {
+        const next = nameFromString(user.name, existing.name.given);
+        if (next.given !== existing.name.given || next.family !== existing.name.family) {
+          existing.name = next;
           updated = true;
         }
       }
-      if (updated) {
-        await existing.save();
+      if (email && email !== existing.contact?.email) {
+        existing.contact = { ...(existing.contact ?? {}), email };
+        updated = true;
       }
+      if (phone && phone !== existing.contact?.phone) {
+        const phoneOwner = await this.Model.findOne({
+          'contact.phone': phone,
+          _id: { $ne: existing._id },
+        }).lean();
+        if (!phoneOwner) {
+          existing.contact = { ...(existing.contact ?? {}), phone };
+          updated = true;
+        }
+      }
+      if (updated) await existing.save();
       return existing;
     }
 
-    // Customer exists by phone? (preferred primary identifier)
     if (phone) {
-      const byPhone = await this.Model.findOne({ phone });
+      const byPhone = await this.Model.findOne({ 'contact.phone': phone });
       if (byPhone) {
         if (!byPhone.userId || byPhone.userId.toString() === userId?.toString()) {
-          (byPhone as any).userId = userId;
-          if (user.name && user.name !== byPhone.name) {
-            byPhone.name = user.name;
+          (byPhone as unknown as { userId?: unknown }).userId = userId;
+          if (user.name) {
+            byPhone.name = nameFromString(user.name, byPhone.name.given);
           }
-          if (email && email !== byPhone.email) {
-            byPhone.email = email;
+          if (email && email !== byPhone.contact?.email) {
+            byPhone.contact = { ...(byPhone.contact ?? {}), email };
           }
           await byPhone.save();
         }
@@ -90,16 +151,20 @@ class CustomerRepository extends Repository<ICustomer> {
       }
     }
 
-    // Customer exists by email? (from guest checkout)
     if (email) {
-      const byEmail = await this.Model.findOne({ email, userId: null });
+      const byEmail = await this.Model.findOne({ 'contact.email': email, userId: null });
       if (byEmail) {
-        (byEmail as any).userId = userId;
-        byEmail.name = user.name || byEmail.name;
-        if (phone && (!byEmail.phone || byEmail.phone.startsWith('pending_'))) {
-          const phoneOwner = await this.Model.findOne({ phone, _id: { $ne: byEmail._id } }).lean();
+        (byEmail as unknown as { userId?: unknown }).userId = userId;
+        if (user.name) {
+          byEmail.name = nameFromString(user.name, byEmail.name.given);
+        }
+        if (phone && (!byEmail.contact?.phone || byEmail.contact.phone.startsWith('pending_'))) {
+          const phoneOwner = await this.Model.findOne({
+            'contact.phone': phone,
+            _id: { $ne: byEmail._id },
+          }).lean();
           if (!phoneOwner) {
-            byEmail.phone = phone;
+            byEmail.contact = { ...(byEmail.contact ?? {}), phone };
           }
         }
         await byEmail.save();
@@ -107,18 +172,14 @@ class CustomerRepository extends Repository<ICustomer> {
       }
     }
 
-    // Create new
     return this.create({
       userId,
-      name: user.name,
-      email,
-      phone: phone || `pending_${userId}`,
+      name: nameFromString(user.name, 'Unknown'),
+      contact: contactFromPartials(email, phone || `pending_${userId}`),
     });
   }
 
-  /**
-   * Find or create by phone (guest checkout)
-   */
+  /** Find or create a customer by phone (guest checkout / walk-in). */
   async findOrCreateByPhone({
     name,
     phone,
@@ -131,7 +192,13 @@ class CustomerRepository extends Repository<ICustomer> {
     if (!phone) throw new Error('Phone required');
     if (!name) throw new Error('Name required');
 
-    return (await this.getOrCreate({ phone }, { name, phone, email }))!;
+    return (await this.getOrCreate(
+      { 'contact.phone': phone },
+      {
+        name: nameFromString(name, 'Unknown'),
+        contact: contactFromPartials(email, phone),
+      },
+    ))!;
   }
 
   async getByUserId(userId: string): Promise<ICustomer | null> {
@@ -139,74 +206,61 @@ class CustomerRepository extends Repository<ICustomer> {
   }
 
   async getByPhone(phone: string): Promise<ICustomer> {
-    return (await this.getByQuery({ phone }))!;
+    return (await this.getByQuery({ 'contact.phone': phone }))!;
   }
 
   async getByEmail(email: string): Promise<ICustomer> {
-    return (await this.getByQuery({ email: email.toLowerCase().trim() }))!;
+    return (await this.getByQuery({ 'contact.email': email.toLowerCase().trim() }))!;
   }
 
-  // ============================================
-  // POS CUSTOMER RESOLUTION
-  // ============================================
+  // ─── POS customer resolution ──────────────────────────────────────────
 
   /**
-   * Resolve customer for POS checkout
-   *
-   * Quick lookup/create for POS transactions:
-   * - If customerId provided: fetch existing
-   * - If phone provided: find or create by phone
-   * - If neither: return null (guest/walk-in)
+   * Resolve a customer for POS checkout.
+   * - `customerId` set → fetch existing.
+   * - `phone` set → find-or-create.
+   * - neither → `null` (guest / walk-in).
    */
   async resolvePosCustomer(
     customerData: CustomerData = {},
     customerId: string | null = null,
   ): Promise<ICustomer | null> {
-    // Existing customer by ID
-    if (customerId) {
-      return this.getById(customerId);
-    }
+    if (customerId) return this.getById(customerId);
 
-    // Find or create by phone
     if (customerData?.phone) {
       const phone = customerData.phone.trim();
-      const existing = await this.Model.findOne({ phone }).lean();
+      const existing = await this.Model.findOne({ 'contact.phone': phone }).lean();
 
       if (existing) {
-        // Update name if provided and different
-        if (customerData.name && customerData.name !== existing.name) {
-          await this.Model.updateOne({ _id: existing._id }, { name: customerData.name });
-          existing.name = customerData.name;
+        if (customerData.name) {
+          const next = nameFromString(customerData.name, existing.name.given);
+          if (next.given !== existing.name.given || next.family !== existing.name.family) {
+            await this.Model.updateOne({ _id: existing._id }, { name: next });
+            existing.name = next;
+          }
         }
         return existing as CustomerDocument;
       }
 
-      // Create new customer
       return this.create({
-        phone,
-        name: customerData.name || 'Walk-in',
-        email: customerData.email || undefined,
+        name: nameFromString(customerData.name, 'Walk-in'),
+        contact: contactFromPartials(customerData.email, phone),
         tags: ['pos'],
       });
     }
 
-    // Guest checkout - no customer record
     return null;
   }
 
-  // ============================================
-  // ADDRESS OPERATIONS - Simple $push/$pull
-  // ============================================
+  // ─── Address operations ───────────────────────────────────────────────
 
   async addAddress(customerId: string, address: Partial<IAddress>): Promise<ICustomer> {
-    // First address is always default
     const customer = await this.Model.findById(customerId);
     if (!customer) throw new Error('Customer not found');
 
     if (!customer.addresses.length) {
       address.isDefault = true;
     } else if (address.isDefault) {
-      // Unset other defaults
       customer.addresses.forEach((a: IAddress) => (a.isDefault = false));
     }
 
@@ -251,14 +305,8 @@ class CustomerRepository extends Repository<ICustomer> {
     return customer;
   }
 
-  // ============================================
-  // MEMBERSHIP LOOKUP (thin field on Customer — synced from loyalty engine)
-  // ============================================
+  // ─── Membership card lookup (POS scanner) ─────────────────────────────
 
-  /**
-   * Lookup customer by membership card ID (for POS card scanner).
-   * Reads from the Customer.membership thin field which is synced from the loyalty engine.
-   */
   async lookupByCardId(cardId: string): Promise<ICustomer | null> {
     if (!cardId) return null;
     return this.Model.findOne({

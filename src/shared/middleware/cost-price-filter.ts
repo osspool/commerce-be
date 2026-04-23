@@ -4,7 +4,7 @@
  * Filters cost price from responses based on user role.
  * Reusable across product, inventory, and related modules.
  */
-import type { FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 
 interface UserWithRoles {
   role?: string[];

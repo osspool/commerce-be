@@ -8,8 +8,8 @@
  * - Cash flow summary
  */
 
-import Transaction from '../transaction.model.js';
 import { TRANSACTION_FLOW } from '@classytic/revenue/enums';
+import { getTransactionModel } from '#shared/revenue/engine.js';
 
 interface FinancialReportParams {
   startDate?: Date;
@@ -68,7 +68,7 @@ export async function getFinancialReport({ startDate, endDate }: FinancialReport
   }
 
   // Get all verified transactions in date range
-  const transactions = await Transaction.aggregate([
+  const transactions = await getTransactionModel().aggregate([
     {
       $match: {
         createdAt: { $gte: resolvedStartDate, $lte: resolvedEndDate },
@@ -159,7 +159,7 @@ export async function getCategoryBreakdown({ startDate, endDate, flow, limit = 1
     matchQuery.flow = flow;
   }
 
-  const breakdown = await Transaction.aggregate([
+  const breakdown = await getTransactionModel().aggregate([
     { $match: matchQuery },
     {
       $group: {
@@ -192,7 +192,7 @@ export async function getCashFlowTrend({ months = 6 }: CashFlowTrendParams) {
   const startDate = new Date();
   startDate.setMonth(startDate.getMonth() - months);
 
-  const trend = await Transaction.aggregate([
+  const trend = await getTransactionModel().aggregate([
     {
       $match: {
         createdAt: { $gte: startDate, $lte: endDate },

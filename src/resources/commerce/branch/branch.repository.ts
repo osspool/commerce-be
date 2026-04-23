@@ -1,6 +1,5 @@
-import { Repository, validationChainPlugin, requireField, uniqueField, cascadePlugin } from '@classytic/mongokit';
+import { Repository, requireField, uniqueField, validationChainPlugin } from '@classytic/mongokit';
 import mongoose from 'mongoose';
-import { emitBranchUpdated, emitBranchDeleted } from '#shared/events/branch.handlers.js';
 import type { IBranch } from './branch.model.js';
 
 /**
@@ -27,13 +26,6 @@ if (!mongoose.models.organization) {
 }
 const OrgModel = mongoose.models.organization;
 
-interface BranchUpdates {
-  code?: string;
-  name?: string;
-  role?: string;
-  [key: string]: unknown;
-}
-
 /**
  * Branch Repository
  *
@@ -50,12 +42,10 @@ class BranchRepository extends Repository<IBranchOrg> {
           requireField('name', ['create']),
           uniqueField('code', 'Branch code already exists'),
         ]),
-        cascadePlugin({
-          relations: [
-            { model: 'StockEntry', foreignKey: 'branch' },
-            { model: 'StockMovement', foreignKey: 'branch' },
-          ],
-        }),
+        // Note: StockEntry/StockMovement models were removed — stock is now
+        // managed by @classytic/flow (quants, moves, moveGroups). Flow data
+        // is scoped by organizationId (= branchId), not a FK cascade target.
+        // No cascade needed — Flow handles its own cleanup per org scope.
       ],
       {
         defaultLimit: 50,
@@ -84,27 +74,6 @@ class BranchRepository extends Repository<IBranchOrg> {
       // Map 'role' to 'branchRole' for BA org schema
       if (context.data.role && !context.data.branchRole) {
         context.data.branchRole = context.data.role;
-      }
-    });
-
-    // Emit branch updated event
-    this.on('after:update', ({ context, result }: { context: Record<string, any>; result: any }) => {
-      const { code, name, branchRole, role } = context.data || {};
-      const updates: BranchUpdates = {};
-      if (code !== undefined) updates.code = code;
-      if (name !== undefined) updates.name = name;
-      if (branchRole !== undefined) updates.role = branchRole;
-      if (role !== undefined && !branchRole) updates.role = role;
-
-      if (Object.keys(updates).length > 0 && result?._id) {
-        emitBranchUpdated(result._id.toString(), updates);
-      }
-    });
-
-    // Emit branch deleted event
-    this.on('after:delete', ({ context, result }: { context: Record<string, any>; result: any }) => {
-      if (result?._id) {
-        emitBranchDeleted(result._id.toString());
       }
     });
   }

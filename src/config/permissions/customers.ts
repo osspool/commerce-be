@@ -1,6 +1,5 @@
-import { allowPublic, requireAuth, requireRoles } from '@classytic/arc/permissions';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { groups } from './roles.js';
+import type { PermissionCheck } from '@classytic/arc';
+import { allowPublic, platformAdminOnly, requireAuth } from '#shared/permissions.js';
 
 export interface CustomerPermissions {
   list: PermissionCheck;
@@ -16,8 +15,8 @@ const customerPermissions: CustomerPermissions = {
   get: requireAuth(),
   create: allowPublic(),
   update: requireAuth(),
-  delete: requireRoles(groups.platformAdmin),
-  getMe: requireRoles(groups.platformAdmin),
+  delete: platformAdminOnly(),
+  getMe: platformAdminOnly(),
 };
 
 export default customerPermissions;

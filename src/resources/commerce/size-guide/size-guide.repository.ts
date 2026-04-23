@@ -1,7 +1,7 @@
-import { Repository, validationChainPlugin, requireField, uniqueField, cachePlugin } from '@classytic/mongokit';
-import SizeGuide from './size-guide.model.js';
-import type { ISizeGuide } from './size-guide.model.js';
+import { cachePlugin, Repository, requireField, uniqueField, validationChainPlugin } from '@classytic/mongokit';
 import { getSharedCacheAdapter } from '#shared/adapters/memoryCache.adapter.js';
+import type { ISizeGuide } from './size-guide.model.js';
+import SizeGuide from './size-guide.model.js';
 
 const sizeGuideCacheAdapter = getSharedCacheAdapter({ maxSize: 200 });
 

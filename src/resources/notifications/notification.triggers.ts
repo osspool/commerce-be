@@ -242,7 +242,7 @@ export const NOTIFICATION_TRIGGERS: NotificationTrigger[] = [
     template: {
       title: 'Purchase Received',
       message: 'Purchase {invoiceNumber} has been received',
-      link: '/dashboard/inventory/purchases',
+      link: '/dashboard/inventory/purchase-orders',
       entityType: 'purchase',
     },
     recipients: ['admin', 'branch_manager', 'inventory_staff'],

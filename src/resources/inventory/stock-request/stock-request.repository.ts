@@ -1,6 +1,6 @@
-import { Repository, validationChainPlugin, requireField } from '@classytic/mongokit';
-import StockRequest from './models/stock-request.model.js';
+import { Repository, requireField, validationChainPlugin } from '@classytic/mongokit';
 import type { IStockRequest } from './models/stock-request.model.js';
+import StockRequest from './models/stock-request.model.js';
 
 /**
  * Stock Request Repository

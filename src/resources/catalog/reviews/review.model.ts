@@ -1,5 +1,8 @@
-import mongoose, { Schema, type HydratedDocument, type Types } from 'mongoose';
-import Product from '#resources/catalog/products/product.model.js';
+import { arcLog } from '@classytic/arc/logger';
+import mongoose, { type HydratedDocument, Schema, type Types } from 'mongoose';
+import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
+
+const log = arcLog('review-model');
 
 // ============================================
 // SUB-DOCUMENT INTERFACES
@@ -110,19 +113,16 @@ reviewSchema.statics.calculateAverageRating = async function (productId: Types.O
   ]);
 
   try {
-    if (result.length > 0) {
-      await Product.findByIdAndUpdate(productId, {
-        averageRating: Math.round(result[0].averageRating * 10) / 10,
-        numReviews: result[0].numReviews,
-      });
-    } else {
-      await Product.findByIdAndUpdate(productId, {
-        averageRating: 0,
-        numReviews: 0,
-      });
-    }
+    const engine = await ensureCatalogEngine();
+    const ctx = { actorId: 'review-sync', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
+    const stats =
+      result.length > 0
+        ? { averageRating: Math.round(result[0].averageRating * 10) / 10, totalReviews: result[0].numReviews }
+        : { averageRating: 0, totalReviews: 0 };
+
+    await engine.repositories.product.updateReviewStats(String(productId), stats, ctx);
   } catch (error) {
-    console.error('Error calculating average rating:', error);
+    log.error('Error calculating average rating:', error);
   }
 };
 

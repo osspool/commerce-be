@@ -19,7 +19,7 @@ process.env.NODE_ENV = 'test';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
-import { createFlowEngine, FlowEvents } from '@classytic/flow';
+import { createFlowEngine, FlowEvents, ensureFlowReady } from '@classytic/flow';
 import type { FlowEngine, FlowContext } from '@classytic/flow';
 
 let replSet: MongoMemoryReplSet;
@@ -63,9 +63,7 @@ beforeAll(async () => {
     virtualLocations: { adjustment: 'adjustment' },
   });
 
-  for (const model of Object.values(flow.models) as any[]) {
-    await model.createCollection();
-  }
+  await ensureFlowReady(flow);
 }, 60_000);
 
 afterAll(async () => {
@@ -347,28 +345,36 @@ describe('be-prod ↔ Flow Integration', () => {
 
   describe('arc-event-adapter: all Flow events are forwarded', () => {
     it('FlowEvents has all 18 event types', () => {
+      // Flow's single-standard catalog covers reservation, move_group,
+      // move, move_line, transfer, procurement, count, lot, replenishment,
+      // package lifecycle (incl. transit handoff), quality, task, session,
+      // dock, manifest, RFID, offline sync, stock-low, landed cost, and
+      // adjustment. The exact count is allowed to grow as new events are
+      // added — assert a lower bound to keep this test future-proof.
       const events = Object.values(FlowEvents);
-      expect(events).toHaveLength(18);
+      expect(events.length).toBeGreaterThanOrEqual(40);
+      for (const name of events) {
+        expect(name).toMatch(/^flow\.\w+\.\w+$/);
+      }
     });
 
     it('event bus receives events for full adjustment lifecycle', async () => {
       const captured: string[] = [];
-      const handlers = new Map<string, (data: Record<string, unknown>) => Promise<void>>();
-
-      for (const eventName of Object.values(FlowEvents)) {
-        const handler = async () => { captured.push(eventName); };
-        handlers.set(eventName, handler);
-        flow.events.on(eventName, handler);
-      }
+      // New flow API: `events.subscribe(pattern, handler)` returns a
+      // subscription handle. Pattern `*` catches every event type. The
+      // handler receives a `FlowDomainEvent` envelope — read `.type` for
+      // the name.
+      const sub = await flow.events.subscribe!('*', async (event) => {
+        captured.push(event.type);
+      });
 
       await adjustStock(ORG_HEAD, 'EVENT-SKU', 0, 10);
 
-      // Cleanup handlers
-      for (const [event, handler] of handlers) {
-        flow.events.off(event, handler);
-      }
+      sub();
 
-      // Should have: MOVE_GROUP_CREATED, MOVE_GROUP_CONFIRMED, MOVE_DONE (×1), TRANSFER_RECEIVED
+      // Adjustment flow emits: MOVE_GROUP_CREATED → MOVE_GROUP_CONFIRMED
+      // → MOVE_DONE → TRANSFER_RECEIVED (the last one fires because
+      // adjustStock runs through a move group with auto-commit).
       expect(captured).toContain(FlowEvents.MOVE_GROUP_CREATED);
       expect(captured).toContain(FlowEvents.MOVE_GROUP_CONFIRMED);
       expect(captured).toContain(FlowEvents.MOVE_DONE);

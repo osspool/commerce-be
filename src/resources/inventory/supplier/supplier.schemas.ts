@@ -1,5 +1,5 @@
-import Supplier from './models/supplier.model.js';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+import Supplier from './models/supplier.model.js';
 
 const schemaParts = buildCrudSchemasFromModel(Supplier, {
   strictAdditionalProperties: true,

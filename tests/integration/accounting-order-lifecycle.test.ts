@@ -104,7 +104,7 @@ async function insertTransaction(overrides: Record<string, unknown> = {}) {
   };
 
   const doc = { ...defaults, ...overrides };
-  await db.collection('transactions').insertOne(doc);
+  await db.collection('revenue_transactions').insertOne(doc);
   return { txnId, orderId, doc };
 }
 
@@ -264,7 +264,7 @@ describe('Phase 1 — Chart of Accounts (BFRS Seed)', () => {
   });
 
   it('has VAT Payable (2131)', async () => {
-    const id = await getAccountId('2131');
+    const id = await getAccountId('2132');
     expect(id).toBeTruthy();
   });
 
@@ -302,7 +302,7 @@ describe('Phase 2 — Order Payment → SALES Entry', () => {
     accountIds['1112'] = await getAccountId('1112');
     accountIds['1122'] = await getAccountId('1122');
     accountIds['4111'] = await getAccountId('4111');
-    accountIds['2131'] = await getAccountId('2131');
+    accountIds['2132'] = await getAccountId('2132');
   });
 
   it('cash order with 15% VAT → 3-line SALES entry (debit 1111, credit 4111 + 2131)', async () => {
@@ -333,7 +333,7 @@ describe('Phase 2 — Order Payment → SALES Entry', () => {
     expect(revenueItem).toBeTruthy();
     expect(revenueItem.credit).toBe(127500); // 1500 - 225 = 1275 BDT net
 
-    const vatItem = entry!.journalItems.find((i: any) => i.account.toString() === accountIds['2131']);
+    const vatItem = entry!.journalItems.find((i: any) => i.account.toString() === accountIds['2132']);
     expect(vatItem).toBeTruthy();
     expect(vatItem.credit).toBe(22500); // 225 BDT VAT
 
@@ -555,7 +555,7 @@ describe('Phase 5 — Refund → SALES Reversal Entry', () => {
     // Create refund transaction
     const refundTxnId = new mongoose.Types.ObjectId();
     const db = mongoose.connection.db!;
-    await db.collection('transactions').insertOne({
+    await db.collection('revenue_transactions').insertOne({
       _id: refundTxnId,
       flow: 'outflow',
       status: 'verified',
@@ -592,7 +592,7 @@ describe('Phase 5 — Refund → SALES Reversal Entry', () => {
     expect(entry!.journalItems.length).toBe(3);
 
     const revenueId = await getAccountId('4111');
-    const vatId = await getAccountId('2131');
+    const vatId = await getAccountId('2132');
     const cashId = await getAccountId('1111');
 
     const revenueDebit = entry!.journalItems.find(
@@ -687,7 +687,7 @@ describe('Phase 7 — POS Day-Close → Aggregated SALES Entry', () => {
     const branchOid = new mongoose.Types.ObjectId(ctx.orgId);
 
     // 3 POS transactions across the day
-    await db.collection('transactions').insertMany([
+    await db.collection('revenue_transactions').insertMany([
       {
         _id: new mongoose.Types.ObjectId(),
         flow: 'inflow', status: 'verified', amount: 100000, tax: 15000,
@@ -739,7 +739,7 @@ describe('Phase 7 — POS Day-Close → Aggregated SALES Entry', () => {
     expect(revenueItem.credit).toBe(510000);
 
     // Verify VAT: 15000 + 30000 + 45000 = 90000
-    const vatAccountId = await getAccountId('2131');
+    const vatAccountId = await getAccountId('2132');
     const vatItem = entry!.journalItems.find(
       (i: any) => i.account.toString() === vatAccountId,
     );

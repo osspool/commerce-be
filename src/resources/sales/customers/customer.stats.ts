@@ -146,15 +146,20 @@ export async function updateLastActive(customerId: string): Promise<void> {
 }
 
 /**
- * Recalculate customer stats from orders (for data repair)
+ * Recalculate customer stats from `@classytic/order` (data-repair path).
+ *
+ * Reads are company-wide (bypass multi-tenant scoping) because a customer
+ * may have orders across several branches. We map new-schema fields
+ * (`totals.grandTotal.amount`, `paymentState.chargeStatus`, `status`) onto
+ * the legacy `CustomerStats` shape that the rest of the app still expects.
  */
 export async function recalculateStats(customerId: string): Promise<CustomerStats | undefined> {
   if (!customerId) return;
 
-  // Import Order here to avoid circular dependency
-  const Order = (await import('#resources/sales/orders/order.model.js')).default;
+  const { ensureOrderEngine } = await import('#resources/sales/orders/order.engine.js');
+  const engine = await ensureOrderEngine();
 
-  const orders = await Order.find({ customer: customerId }).lean();
+  const orders = await engine.models.Order.find({ customerId }).lean();
 
   const stats: CustomerStats = {
     orders: {
@@ -163,32 +168,38 @@ export async function recalculateStats(customerId: string): Promise<CustomerStat
       cancelled: 0,
       refunded: 0,
     },
-    revenue: {
-      total: 0,
-      lifetime: 0,
-    },
+    revenue: { total: 0, lifetime: 0 },
     firstOrderDate: null,
     lastOrderDate: null,
   };
 
-  for (const order of orders) {
-    if (order.status === 'delivered' && order.paymentStatus === 'completed') {
+  for (const order of orders as Array<Record<string, unknown>>) {
+    const status = order.status as string;
+    const paymentState = (order.paymentState as Record<string, unknown> | undefined) ?? {};
+    const chargeStatus = paymentState.chargeStatus as string | undefined;
+    const totals = (order.totals as Record<string, unknown> | undefined) ?? {};
+    const grand = totals.grandTotal as { amount?: number } | undefined;
+    const grandAmount = grand?.amount ?? 0;
+    const createdAt = order.createdAt as Date | undefined;
+
+    const isCompleted = ['delivered', 'completed', 'fulfilled'].includes(status) && chargeStatus === 'full';
+    if (isCompleted) {
       stats.orders.completed++;
-      stats.revenue.total += order.totalAmount;
-      stats.revenue.lifetime += order.totalAmount;
-    } else if (order.status === 'cancelled') {
+      stats.revenue.total += grandAmount;
+      stats.revenue.lifetime += grandAmount;
+    } else if (status === 'canceled' || status === 'cancelled') {
       stats.orders.cancelled++;
     }
 
-    if (order.paymentStatus === 'refunded') {
+    if (status === 'refunded' || chargeStatus === 'refunded') {
       stats.orders.refunded++;
     }
 
-    if (!stats.firstOrderDate || order.createdAt < stats.firstOrderDate) {
-      stats.firstOrderDate = order.createdAt;
+    if (createdAt && (!stats.firstOrderDate || createdAt < stats.firstOrderDate)) {
+      stats.firstOrderDate = createdAt;
     }
-    if (!stats.lastOrderDate || order.createdAt > stats.lastOrderDate) {
-      stats.lastOrderDate = order.createdAt;
+    if (createdAt && (!stats.lastOrderDate || createdAt > stats.lastOrderDate)) {
+      stats.lastOrderDate = createdAt;
     }
   }
 

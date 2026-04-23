@@ -10,7 +10,7 @@
 
 import { defineResource } from '@classytic/arc';
 import { requireAuth } from '@classytic/arc/permissions';
-import { TAX_CODES, TAX_CODES_BY_DIVISION, BD_DIVISIONS } from '@classytic/ledger-bd';
+import { BD_DIVISIONS, TAX_CODES, TAX_CODES_BY_DIVISION } from '@classytic/ledger-bd';
 
 type TaxCodeEntry = (typeof TAX_CODES)[keyof typeof TAX_CODES];
 
@@ -35,13 +35,13 @@ const taxCodeResource = defineResource({
   disableDefaultRoutes: true,
   skipValidation: true,
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET' as const,
       path: '/',
       summary: 'List all BD tax codes',
       permissions: requireAuth(),
-      wrapHandler: false,
+      raw: true,
       handler: async () => {
         const allCodes = Object.values(TAX_CODES) as any[];
         return { success: true, results: allCodes.length, data: allCodes };
@@ -53,7 +53,7 @@ const taxCodeResource = defineResource({
       path: '/divisions',
       summary: 'List BD divisions',
       permissions: requireAuth(),
-      wrapHandler: false,
+      raw: true,
       handler: async () => {
         return { success: true, data: BD_DIVISIONS };
       },
@@ -64,7 +64,7 @@ const taxCodeResource = defineResource({
       path: '/divisions/:division',
       summary: 'Get tax codes for a BD division',
       permissions: requireAuth(),
-      wrapHandler: false,
+      raw: true,
       handler: async (req: any, reply: any) => {
         const division = normalizeDivision(req.params.division);
         if (!division) {

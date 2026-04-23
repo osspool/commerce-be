@@ -1,5 +1,5 @@
-import mongoose, { Schema, type HydratedDocument } from 'mongoose';
 import slugPlugin from '@classytic/mongoose-slug-plugin';
+import mongoose, { type HydratedDocument, Schema } from 'mongoose';
 
 /**
  * Size Guide Model

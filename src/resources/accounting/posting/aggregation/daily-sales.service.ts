@@ -13,12 +13,12 @@
  */
 
 import mongoose from 'mongoose';
-import Transaction from '#resources/transaction/transaction.model.js';
-import { createPosting, ensureCompanyAccounts } from '../posting.service.js';
-import { dailyPosSummaryToPosting, type DailyPosSummary } from '../contracts/sales.contract.js';
-import { bdDayStartUtc, bdDayEndUtc } from '#lib/utils/bd-date.js';
 import config from '#config/index.js';
+import { bdDayEndUtc, bdDayStartUtc } from '#lib/utils/bd-date.js';
 import logger from '#lib/utils/logger.js';
+import { getTransactionModel } from '#shared/revenue/engine.js';
+import { type DailyPosSummary, dailyPosSummaryToPosting } from '../contracts/sales.contract.js';
+import { createPosting, ensureCompanyAccounts } from '../posting.service.js';
 
 export interface DayCloseResult {
   posted: boolean;
@@ -33,16 +33,12 @@ export interface DayCloseResult {
  * @param branchId - organizationId (BA branch)
  * @param dateStr  - YYYY-MM-DD in BD local time
  */
-export async function postDailyPosSales(
-  branchId: string,
-  dateStr: string,
-  actorId?: string,
-): Promise<DayCloseResult> {
+export async function postDailyPosSales(branchId: string, dateStr: string, actorId?: string): Promise<DayCloseResult> {
   const startUtc = bdDayStartUtc(dateStr);
   const endUtc = bdDayEndUtc(dateStr);
 
   // Aggregate POS transactions by payment method for this date
-  const results = await Transaction.aggregate([
+  const results = await getTransactionModel().aggregate([
     {
       $match: {
         branch: new mongoose.Types.ObjectId(branchId),

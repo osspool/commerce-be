@@ -1,20 +1,24 @@
 /**
- * Logistics Plugin — Engine init plugin — resources auto-discovered by loadResources()
- *
- * Initializes the logistics service on server ready.
+ * Logistics Plugin — warms the carrier registry so the first request
+ * doesn't pay the adapter-construction tax. Resources are auto-discovered
+ * by `loadResources()` — this plugin is engine-init only.
  */
 import type { FastifyInstance } from 'fastify';
-import logisticsService from './services/logistics.service.js';
+import carrierRegistry from './services/carrier-registry.js';
 
 async function logisticsPlugin(fastify: FastifyInstance): Promise<void> {
-  // Initialize logistics service on startup
   fastify.addHook('onReady', async () => {
+    const t0 = Date.now();
     try {
-      await logisticsService.initialize();
-      fastify.log.info('Logistics service initialized');
-    } catch (error) {
-      const err = error as Error;
-      fastify.log.warn({ err: err.message }, 'Logistics service initialization skipped');
+      const codes = carrierRegistry.configured();
+      fastify.log.info(
+        { ms: Date.now() - t0, carriers: codes },
+        codes.length > 0
+          ? 'logistics: carrier registry warm'
+          : 'logistics: no carriers configured (set REDX_*, PATHAO_*, or STEADFAST_*)',
+      );
+    } catch (err) {
+      fastify.log.warn({ err: (err as Error).message }, 'logistics warm-up failed');
     }
   });
 }

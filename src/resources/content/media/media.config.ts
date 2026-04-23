@@ -27,7 +27,7 @@ export const BASE_FOLDERS = ['general', 'products', 'categories', 'blog', 'users
 export const SIZE_VARIANTS = [
   { name: 'thumbnail', width: 200, height: 200, quality: 80, format: 'avif' },
   { name: 'medium', width: 800, height: 800, quality: 80, format: 'avif' },
-];
+] as const;
 
 // ============================================
 // ASPECT RATIOS
@@ -77,7 +77,7 @@ export const IMAGE_SETTINGS = {
 
   generateAlt: {
     enabled: true,
-    strategy: 'filename',
+    strategy: 'filename' as const,
     fallback: 'Image',
   },
 

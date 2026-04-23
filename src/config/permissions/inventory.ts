@@ -1,6 +1,6 @@
-import { requireRoles } from '@classytic/arc/permissions';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { roles, groups } from './roles.js';
+import type { PermissionCheck } from '@classytic/arc';
+import { anyOf, platformAdminOnly, requireOrgRole, superadminOnly } from '#shared/permissions.js';
+import { orgGroups } from './roles.js';
 
 /**
  * Inventory Permissions
@@ -23,12 +23,12 @@ import { roles, groups } from './roles.js';
 
 export interface InventoryPermissions {
   // Purchases
-  purchase: PermissionCheck;
-  purchaseView: PermissionCheck;
+  purchaseOrder: PermissionCheck;
+  purchaseOrderView: PermissionCheck;
   purchaseApprove: PermissionCheck;
-  purchaseReceive: PermissionCheck;
-  purchasePay: PermissionCheck;
-  purchaseCancel: PermissionCheck;
+  purchaseOrderReceive: PermissionCheck;
+  purchaseOrderPay: PermissionCheck;
+  purchaseOrderCancel: PermissionCheck;
 
   // Suppliers
   supplierManage: PermissionCheck;
@@ -93,6 +93,76 @@ export interface InventoryPermissions {
 
   // Reports (enterprise)
   reportView: PermissionCheck;
+
+  // Quality inspection (enterprise)
+  qualityView: PermissionCheck;
+  qualityManage: PermissionCheck;
+
+  // Execution tasks / scanner (enterprise)
+  taskManage: PermissionCheck;
+  taskExecute: PermissionCheck;
+
+  // Dispatch / carrier / dock (enterprise)
+  dispatchManage: PermissionCheck;
+
+  // Scrap write-offs (standard+)
+  scrapCreate: PermissionCheck;
+  scrapApprove: PermissionCheck;
+  scrapExecute: PermissionCheck;
+  scrapView: PermissionCheck;
+
+  // Customer returns / RMA (standard+)
+  returnCreate: PermissionCheck;
+  returnConfirm: PermissionCheck;
+  returnReceive: PermissionCheck;
+  returnInspect: PermissionCheck;
+  returnDispatch: PermissionCheck;
+  returnView: PermissionCheck;
+
+  // Consignment settlement (standard+)
+  consignmentSettle: PermissionCheck;
+  consignmentView: PermissionCheck;
+
+  // Warehouse network config (standard+) — inter-branch resupply map
+  warehouseNetworkManage: PermissionCheck;
+  warehouseNetworkView: PermissionCheck;
+
+  // UoM groups (standard+)
+  uomManage: PermissionCheck;
+  uomView: PermissionCheck;
+
+  // Standard cost + variance (standard+)
+  standardCostManage: PermissionCheck;
+  standardCostView: PermissionCheck;
+  standardCostVarianceView: PermissionCheck;
+
+  // Landed cost (standard+)
+  landedCostManage: PermissionCheck;
+  landedCostApply: PermissionCheck;
+  landedCostView: PermissionCheck;
+
+  // ABC velocity classification (standard+) — nightly batch, read-only for most
+  classificationRecompute: PermissionCheck;
+  classificationView: PermissionCheck;
+
+  // SKU slot assignments (standard+)
+  slottingManage: PermissionCheck;
+  slottingView: PermissionCheck;
+
+  // Pick waves (standard+) — plan/release/start/complete/cancel
+  waveCreate: PermissionCheck;
+  waveRelease: PermissionCheck;
+  waveExecute: PermissionCheck;
+  waveView: PermissionCheck;
+
+  // Labor tracking (standard+) — clock-in / clock-out / KPI
+  laborClock: PermissionCheck;
+  laborRecord: PermissionCheck;
+  laborView: PermissionCheck;
+
+  // LPN operations on packages (standard+) — identity stamp + seal
+  lpnAssign: PermissionCheck;
+  lpnSeal: PermissionCheck;
 }
 
 export const inventory: InventoryPermissions = {
@@ -101,186 +171,366 @@ export const inventory: InventoryPermissions = {
   // ============================================
 
   /** Record stock purchases from suppliers */
-  purchase: requireRoles(groups.platformAdmin),
+  purchaseOrder: platformAdminOnly(),
 
   /** View purchase history */
-  purchaseView: requireRoles([...groups.platformAdmin, ...groups.platformAdmin]),
+  purchaseOrderView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   /** Approve purchase invoices */
-  purchaseApprove: requireRoles(groups.platformAdmin),
+  purchaseApprove: platformAdminOnly(),
 
   /** Receive stock for purchases */
-  purchaseReceive: requireRoles(groups.platformAdmin),
+  purchaseOrderReceive: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
 
   /** Record supplier payments */
-  purchasePay: requireRoles(groups.platformAdmin),
+  purchaseOrderPay: platformAdminOnly(),
 
   /** Cancel draft/approved purchases */
-  purchaseCancel: requireRoles(groups.platformAdmin),
+  purchaseOrderCancel: platformAdminOnly(),
 
   // ============================================
   // SUPPLIERS
   // ============================================
 
   /** Create/update suppliers */
-  supplierManage: requireRoles(groups.platformAdmin),
+  supplierManage: platformAdminOnly(),
 
   /** View suppliers */
-  supplierView: requireRoles(groups.platformAdmin),
+  supplierView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   // ============================================
   // TRANSFERS (Challan Operations)
   // ============================================
 
   /** Create new stock transfer (head office only) */
-  transferCreate: requireRoles(groups.platformAdmin),
+  transferCreate: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   /** Approve transfer for dispatch */
-  transferApprove: requireRoles(groups.platformAdmin),
+  transferApprove: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
 
   /** Dispatch transfer (decrements head office stock) */
-  transferDispatch: requireRoles(groups.platformAdmin),
+  transferDispatch: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** Receive transfer at sub-branch (increments stock) */
-  transferReceive: requireRoles(groups.platformAdmin),
+  transferReceive: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
 
   /** View transfer/challan details */
-  transferView: requireRoles(groups.platformAdmin),
+  transferView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** Cancel a pending transfer */
-  transferCancel: requireRoles(groups.platformAdmin),
+  transferCancel: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
 
   // ============================================
   // ADJUSTMENTS (Any Branch)
   // ============================================
 
   /** Adjust stock quantity (damaged, lost, recount) */
-  adjust: requireRoles(groups.platformAdmin),
+  adjust: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   /** Bulk import/adjustment */
-  bulkAdjust: requireRoles([roles.ADMIN, roles.SUPERADMIN]),
+  bulkAdjust: platformAdminOnly(),
 
   // ============================================
   // VIEW OPERATIONS
   // ============================================
 
   /** View stock levels */
-  view: requireRoles(groups.platformAdmin),
+  view: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** View stock across all branches */
-  viewAll: requireRoles(groups.platformAdmin),
+  viewAll: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** View low stock alerts */
-  alerts: requireRoles(groups.platformAdmin),
+  alerts: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** View stock movement audit trail */
-  movements: requireRoles(groups.platformAdmin),
+  movements: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** View all movements across branches */
-  movementsAll: requireRoles(groups.platformAdmin),
+  movementsAll: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   // ============================================
   // BRANCH MANAGEMENT
   // ============================================
 
   /** Set head office branch */
-  setHeadOffice: requireRoles([roles.SUPERADMIN]),
+  setHeadOffice: superadminOnly(),
 
   // ============================================
   // STOCK REQUESTS (Sub-branch → Head Office)
   // ============================================
 
   /** Create stock request from sub-branch */
-  stockRequestCreate: requireRoles(groups.platformAdmin),
+  stockRequestCreate: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** View stock requests */
-  stockRequestView: requireRoles(groups.platformAdmin),
+  stockRequestView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** Approve/reject stock requests (head office only) */
-  stockRequestApprove: requireRoles(groups.platformAdmin),
+  stockRequestApprove: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
 
   /** Fulfill stock requests (creates transfer) */
-  stockRequestFulfill: requireRoles(groups.platformAdmin),
+  stockRequestFulfill: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
 
   /** Cancel stock requests */
-  stockRequestCancel: requireRoles(groups.platformAdmin),
+  stockRequestCancel: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
 
   // ============================================
   // SUB-BRANCH TRANSFERS
   // ============================================
 
   /** Create sub-branch to sub-branch transfers */
-  subBranchTransfer: requireRoles([roles.ADMIN, roles.SUPERADMIN]),
+  subBranchTransfer: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   /** Return stock from sub-branch to head office */
-  returnToHead: requireRoles([roles.ADMIN, roles.SUPERADMIN]),
+  returnToHead: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
 
   // ============================================
   // LOT/SERIAL TRACKING (Standard+)
   // ============================================
 
   /** Create/update lot/serial records */
-  lotManage: requireRoles(groups.platformAdmin),
+  lotManage: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   /** View lot/serial records */
-  lotView: requireRoles(groups.platformAdmin),
+  lotView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   // ============================================
   // PACKAGE MANAGEMENT (Standard+)
   // ============================================
 
   /** Create/nest/unnest packages */
-  packageManage: requireRoles(groups.platformAdmin),
+  packageManage: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   /** View packages */
-  packageView: requireRoles(groups.platformAdmin),
+  packageView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   // ============================================
   // PROCUREMENT (Standard+)
   // ============================================
 
   /** Create procurement orders */
-  procurementCreate: requireRoles(groups.platformAdmin),
+  procurementCreate: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   /** Approve procurement orders */
-  procurementApprove: requireRoles(groups.platformAdmin),
+  procurementApprove: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   /** Receive procurement items */
-  procurementReceive: requireRoles(groups.platformAdmin),
+  procurementReceive: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
 
   /** View procurement orders */
-  procurementView: requireRoles([...groups.platformAdmin, ...groups.platformAdmin]),
+  procurementView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   // ============================================
   // REPLENISHMENT RULES (Standard+)
   // ============================================
 
   /** Create/update/delete replenishment rules */
-  replenishmentManage: requireRoles(groups.platformAdmin),
+  replenishmentManage: platformAdminOnly(),
 
   /** View replenishment rules */
-  replenishmentView: requireRoles(groups.platformAdmin),
+  replenishmentView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   // ============================================
   // COST LAYERS & VALUATION (Standard+)
   // ============================================
 
   /** View cost layers and inventory valuation */
-  costView: requireRoles([...groups.platformAdmin, ...groups.platformAdmin]),
+  costView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   // ============================================
   // TRACEABILITY (Enterprise)
   // ============================================
 
   /** Trace lot/serial movement history and recall analysis */
-  traceView: requireRoles(groups.platformAdmin),
+  traceView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 
   // ============================================
   // REPORTS (Enterprise)
   // ============================================
 
   /** View inventory reports (aging, turnover, health) */
-  reportView: requireRoles([...groups.platformAdmin, ...groups.platformAdmin]),
+  reportView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  // ============================================
+  // QUALITY INSPECTION (Enterprise)
+  // ============================================
+
+  /** View quality points and checks */
+  qualityView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
+
+  /** Create/manage quality points, record results, apply dispositions */
+  qualityManage: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
+
+  // ============================================
+  // EXECUTION TASKS / SCANNER (Enterprise)
+  // ============================================
+
+  /** Create queues, generate tasks from move groups */
+  taskManage: platformAdminOnly(),
+
+  /** Execute tasks: get next, complete, report exception, sessions */
+  taskExecute: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
+
+  // ============================================
+  // DISPATCH / CARRIER / DOCK (Enterprise)
+  // ============================================
+
+  /** Create manifests, carriers, dock doors, appointments */
+  dispatchManage: platformAdminOnly(),
+
+  // ============================================
+  // SCRAP WRITE-OFFS (Standard+)
+  // ============================================
+
+  /** Draft a new scrap (damaged / expired / shrinkage / etc.) */
+  scrapCreate: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** Approve a draft scrap */
+  scrapApprove: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
+
+  /** Execute an approved scrap — posts the move, deducts stock */
+  scrapExecute: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** View scrap records */
+  scrapView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  // ============================================
+  // CUSTOMER RETURNS / RMA (Standard+)
+  // ============================================
+
+  /** Draft a new customer return */
+  returnCreate: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
+
+  /** Confirm / authorise an RMA */
+  returnConfirm: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
+
+  /** Receive physical goods against an RMA */
+  returnReceive: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
+
+  /** Inspect returned goods and assign dispositions */
+  returnInspect: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
+
+  /** Dispatch per-line (restock / scrap / RTV / rework) */
+  returnDispatch: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** View return orders */
+  returnView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
+
+  // ============================================
+  // CONSIGNMENT SETTLEMENT (Standard+)
+  // ============================================
+
+  /** Trigger settlement for a specific move */
+  consignmentSettle: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** View consignment-stock summaries + settlement events */
+  consignmentView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  // ============================================
+  // WAREHOUSE NETWORK CONFIG (Standard+)
+  // ============================================
+
+  /** Edit the inter-branch resupply map */
+  warehouseNetworkManage: platformAdminOnly(),
+
+  /** View the network config */
+  warehouseNetworkView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  // ============================================
+  // UoM GROUPS (Standard+)
+  // ============================================
+
+  /** Create / update / delete UoM groups */
+  uomManage: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** View UoM groups */
+  uomView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
+
+  // ============================================
+  // STANDARD COST + VARIANCE (Standard+)
+  // ============================================
+
+  /** Publish / revise per-SKU standard costs */
+  standardCostManage: platformAdminOnly(),
+
+  /** View standard-cost history */
+  standardCostView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** View purchase-price variance reports */
+  standardCostVarianceView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  // ============================================
+  // LANDED COST (Standard+)
+  // ============================================
+
+  /** Draft / edit landed-cost documents (freight, duty, insurance) */
+  landedCostManage: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** Apply or reverse a landed-cost doc — hits cost-layer allocations */
+  landedCostApply: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
+
+  /** View landed-cost history + allocations */
+  landedCostView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  // ============================================
+  // ABC VELOCITY CLASSIFICATION (Standard+)
+  // ============================================
+
+  /** Trigger recompute of ABC tiers from the stock-event ledger */
+  classificationRecompute: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
+
+  /** View computed ABC classifications */
+  classificationView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  // ============================================
+  // SLOTTING (Standard+)
+  // ============================================
+
+  /** Assign / reslot / deactivate SKU → location assignments */
+  slottingManage: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** View current and historical slot assignments */
+  slottingView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
+
+  // ============================================
+  // PICK WAVES (Standard+)
+  // ============================================
+
+  /** Plan / cancel a wave — supervisor role */
+  waveCreate: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** Release a wave to the floor — supervisor role */
+  waveRelease: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
+
+  /** Start / complete a wave — pickers on the floor */
+  waveExecute: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
+
+  /** View waves + status */
+  waveView: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.storeStaff)),
+
+  // ============================================
+  // LABOR TRACKING (Standard+)
+  // ============================================
+
+  /** Clock in / clock out / break transitions — the worker's own action */
+  laborClock: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
+
+  /** Record task-level labor events (task_started / completed / exception) */
+  laborRecord: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.warehouseStaff)),
+
+  /** View sessions + labor ledger + KPIs — supervisor visibility */
+  laborView: anyOf(platformAdminOnly(), requireOrgRole('branch_manager')),
+
+  // ============================================
+  // LPN / CONTAINER IDENTITY (Standard+)
+  // ============================================
+
+  /** Stamp an LPN code on a package — one-time per container */
+  lpnAssign: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
+
+  /** Seal a package (locks nesting) — pre-dispatch operation */
+  lpnSeal: anyOf(platformAdminOnly(), requireOrgRole(...orgGroups.inventoryStaff)),
 };
 
 export default inventory;

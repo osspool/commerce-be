@@ -7,13 +7,11 @@
  * - Reads config from EMAIL_* env vars
  */
 
-import {
-  NotificationService,
-  EmailChannel,
-  ConsoleChannel,
-  createSimpleResolver,
-} from '@classytic/notifications';
+import { arcLog } from '@classytic/arc/logger';
+import { ConsoleChannel, createSimpleResolver, EmailChannel, NotificationService } from '@classytic/notifications';
 import { templates } from './templates.js';
+
+const log = arcLog('notifications');
 
 let _service: NotificationService | null = null;
 
@@ -50,7 +48,7 @@ function getService(): NotificationService {
   });
 
   if (!hasSmtp) {
-    console.warn('[notifications] SMTP not configured — using console channel');
+    log.warn('SMTP not configured — using console channel');
   }
 
   return _service;
@@ -63,11 +61,7 @@ function getService(): NotificationService {
  * @param to - Recipient email address
  * @param data - Template context variables
  */
-export async function notify(
-  template: string,
-  to: string,
-  data: Record<string, unknown> = {},
-): Promise<void> {
+export async function notify(template: string, to: string, data: Record<string, unknown> = {}): Promise<void> {
   const service = getService();
 
   await service.send({

@@ -1,30 +1,58 @@
 /**
- * Centralized Permission Policy Map
+ * Centralized Permission Primitives — Single Source of Truth
+ *
+ * Single-tenant, multi-branch model (Nike → Nike US, Nike UK).
+ * BA organizations = branches within the ONE company.
  *
  * Two-level role architecture:
- * - requireRoles() → platform-level (user.role): superadmin, admin, user
- * - requireOrgRole() → org-level (scope.orgRoles): finance_admin, cashier, etc.
+ * - Platform roles (user.role): superadmin, admin, user
+ *     → platformAdminOnly(), superadminOnly()
+ * - Branch/org roles (scope.orgRoles): finance_admin, cashier, etc.
+ *     → requireOrgRole(), requireOrgMembership()
  *
- * Resources that need org-level checks import requireOrgRole directly in their
- * resource files. This map covers the platform-level CRUD defaults.
+ * ALL permission config files (config/permissions/*.ts, resources/*.ts)
+ * import these helpers from here. Do NOT duplicate them.
  */
 import type { PermissionCheck } from '@classytic/arc';
 
+// Re-export arc primitives so consumers only need one import path
 export {
-  allowPublic,
-  requireAuth,
-  requireRoles,
-  requireOrgRole,
   allOf,
+  allowPublic,
   anyOf,
   denyAll,
+  requireAuth,
+  requireOrgMembership,
+  requireOrgRole,
+  requireRoles,
 } from '@classytic/arc/permissions';
 
-import { allowPublic, requireAuth, requireRoles } from '@classytic/arc/permissions';
-import { groups, roles } from '#config/permissions/roles.js';
+import { allowPublic, requireAuth, requireOrgMembership, requireRoles } from '@classytic/arc/permissions';
+import { groups } from '#config/permissions/roles.js';
 
 // Re-export for convenience
-export { roles, groups, orgRoles, orgGroups } from '#config/permissions/roles.js';
+export { groups, orgGroups, orgRoles, roles } from '#config/permissions/roles.js';
+
+// ---------------------------------------------------------------------------
+// Platform-only role checks (arc 2.7.3 hardening)
+//
+// arc 2.7.1+ defaults requireRoles() to includeOrgRoles:true, which means
+// a user whose ONLY 'admin' role is on their branch membership (not
+// user.role) would silently pass a platform admin gate.
+//
+// Today safe because org-role names (branch_manager, finance_admin, …)
+// don't overlap platform names (admin, superadmin). These helpers enforce
+// that intent as code — prevents future privilege-escalation if someone
+// adds orgRoles.ADMIN = 'admin'.
+//
+// SINGLE SOURCE OF TRUTH — all permission configs import from here.
+// ---------------------------------------------------------------------------
+
+/** Platform admin (admin | superadmin) — checks user.role ONLY */
+export const platformAdminOnly = (): PermissionCheck => requireRoles(groups.platformAdmin, { includeOrgRoles: false });
+
+/** Superadmin only — checks user.role ONLY */
+export const superadminOnly = (): PermissionCheck => requireRoles(groups.superadminOnly, { includeOrgRoles: false });
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,18 +76,18 @@ type ResourceName = keyof typeof policies;
 const publicReadAdminWrite: CrudPermissions = {
   list: allowPublic(),
   get: allowPublic(),
-  create: requireRoles(groups.platformAdmin),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
+  create: platformAdminOnly(),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
 };
 
 /** All CRUD requires platform admin */
 const adminAll: CrudPermissions = {
-  list: requireRoles(groups.platformAdmin),
-  get: requireRoles(groups.platformAdmin),
-  create: requireRoles(groups.platformAdmin),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
+  list: platformAdminOnly(),
+  get: platformAdminOnly(),
+  create: platformAdminOnly(),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
 };
 
 /** All CRUD requires auth (any logged-in user) */
@@ -86,7 +114,7 @@ export const policies = {
     get: allowPublic(),
     create: requireAuth(),
     update: requireAuth(),
-    delete: requireRoles(groups.platformAdmin),
+    delete: platformAdminOnly(),
   },
 
   // Commerce
@@ -97,8 +125,8 @@ export const policies = {
     list: requireAuth(),
     get: requireAuth(),
     create: requireAuth(),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
   },
 
   customer: {
@@ -106,44 +134,44 @@ export const policies = {
     get: requireAuth(),
     create: allowPublic(),
     update: requireAuth(),
-    delete: requireRoles(groups.platformAdmin),
+    delete: platformAdminOnly(),
   },
 
   // Content
   cms: {
     list: allowPublic(),
     get: allowPublic(),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
   },
 
   media: adminAll,
 
   // Platform
   user: {
-    list: requireRoles(groups.platformAdmin),
-    get: requireRoles(groups.platformAdmin),
-    create: requireRoles(groups.superadminOnly),
-    update: requireRoles(groups.superadminOnly),
-    delete: requireRoles(groups.superadminOnly),
+    list: platformAdminOnly(),
+    get: platformAdminOnly(),
+    create: superadminOnly(),
+    update: superadminOnly(),
+    delete: superadminOnly(),
   },
 
   // Finance — platform admin (transactions are company-wide)
   transaction: {
-    list: requireRoles(groups.platformAdmin),
-    get: requireRoles(groups.platformAdmin),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.superadminOnly),
+    list: platformAdminOnly(),
+    get: platformAdminOnly(),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: superadminOnly(),
   },
 
   finance: {
-    list: requireRoles(groups.platformAdmin),
-    get: requireRoles(groups.platformAdmin),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
+    list: platformAdminOnly(),
+    get: platformAdminOnly(),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
   },
 
   job: adminAll,
@@ -151,52 +179,55 @@ export const policies = {
   logistics: {
     list: allowPublic(),
     get: allowPublic(),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
   },
 
   platform: {
     list: allowPublic(),
     get: allowPublic(),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
   },
 
   analytics: authAll,
 
   archive: {
-    list: requireRoles(groups.platformAdmin),
-    get: requireRoles(groups.platformAdmin),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.superadminOnly),
+    list: platformAdminOnly(),
+    get: platformAdminOnly(),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: superadminOnly(),
   },
 
   // Accounting — company-wide, platform admin
   account: {
     list: requireAuth(),
     get: requireAuth(),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
   },
 
+  // Branch-scoped: journal entries carry organizationId, so reads must come
+  // from a request bound to a branch (member/service/elevated scope), not
+  // just any logged-in shopper.
   journalEntry: {
-    list: requireAuth(),
-    get: requireAuth(),
-    create: requireAuth(),
-    update: requireAuth(),
-    delete: requireRoles(groups.platformAdmin),
+    list: requireOrgMembership(),
+    get: requireOrgMembership(),
+    create: requireOrgMembership(),
+    update: requireOrgMembership(),
+    delete: platformAdminOnly(),
   },
 
   fiscalPeriod: {
     list: requireAuth(),
     get: requireAuth(),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
   },
 } as const satisfies Record<string, CrudPermissions>;
 
@@ -205,26 +236,28 @@ export const policies = {
 // ---------------------------------------------------------------------------
 
 export const analyticsActions: Record<string, PermissionCheck> = {
-  overview: requireAuth(),
+  // Dashboards aggregate per-branch sales/inventory data — caller must be
+  // bound to a branch context, not a public shopper.
+  overview: requireOrgMembership(),
 };
 
 export const platformActions: Record<string, PermissionCheck> = {
   getConfig: allowPublic(),
-  updateConfig: requireRoles(groups.platformAdmin),
+  updateConfig: platformAdminOnly(),
 };
 
 export const financeActions: Record<string, PermissionCheck> = {
-  any: requireRoles(groups.platformAdmin),
+  any: platformAdminOnly(),
 };
 
 export const archiveActions: Record<string, PermissionCheck> = {
-  purge: requireRoles(groups.superadminOnly),
+  purge: superadminOnly(),
 };
 
 export const logisticsActions: Record<string, PermissionCheck> = {
   public: allowPublic(),
-  manage: requireRoles(groups.platformAdmin),
-  admin: requireRoles(groups.platformAdmin),
+  manage: platformAdminOnly(),
+  admin: platformAdminOnly(),
 };
 
 // ---------------------------------------------------------------------------

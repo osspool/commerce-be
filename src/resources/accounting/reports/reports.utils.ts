@@ -122,10 +122,7 @@ export function enrichBudgetVsActual(
 ): BudgetEnrichmentResult {
   const DAY_MS = 1000 * 60 * 60 * 24;
   const totalDays = Math.max(1, (periodEnd.getTime() - periodStart.getTime()) / DAY_MS);
-  const daysElapsed = Math.max(
-    0,
-    Math.min((now.getTime() - periodStart.getTime()) / DAY_MS, totalDays),
-  );
+  const daysElapsed = Math.max(0, Math.min((now.getTime() - periodStart.getTime()) / DAY_MS, totalDays));
   const timeRatio = daysElapsed / totalDays;
 
   let totalTheoreticalAmount = 0;
@@ -134,10 +131,7 @@ export function enrichBudgetVsActual(
 
   const enriched = rows.map((row) => {
     const theoreticalAmount = Math.round(row.budgetAmount * timeRatio);
-    const burnRate =
-      theoreticalAmount > 0
-        ? Math.round((row.actualAmount / theoreticalAmount) * 100) / 100
-        : 0;
+    const burnRate = theoreticalAmount > 0 ? Math.round((row.actualAmount / theoreticalAmount) * 100) / 100 : 0;
 
     totalTheoreticalAmount += theoreticalAmount;
     if (theoreticalAmount > 0) {
@@ -151,8 +145,7 @@ export function enrichBudgetVsActual(
   return {
     rows: enriched,
     totalTheoreticalAmount,
-    avgBurnRate:
-      burnRateCount > 0 ? Math.round((burnRateSum / burnRateCount) * 100) / 100 : 0,
+    avgBurnRate: burnRateCount > 0 ? Math.round((burnRateSum / burnRateCount) * 100) / 100 : 0,
   };
 }
 
@@ -175,9 +168,7 @@ export interface GLAccount {
 
 export function projectGeneralLedger(accounts: GLAccount[]): GLAccount[] {
   return accounts
-    .filter(
-      (a) => a.openingBalance !== 0 || a.closingBalance !== 0 || a.entries.length > 0,
-    )
+    .filter((a) => a.openingBalance !== 0 || a.closingBalance !== 0 || a.entries.length > 0)
     .map((a) => ({
       account: {
         _id: a.account._id,

@@ -8,13 +8,13 @@
  */
 
 import { defineResource } from '@classytic/arc';
+import permissions from '#config/permissions.js';
 import { createAdapter } from '#shared/adapter.js';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
+import customerController from './customer.controller.js';
 import Customer from './customer.model.js';
 import customerRepository from './customer.repository.js';
-import customerController from './customer.controller.js';
-import permissions from '#config/permissions.js';
 
 /**
  * Customer Resource
@@ -34,6 +34,12 @@ const customerResource = defineResource({
   displayName: 'Customers',
   tag: 'Customer',
   prefix: '/customers',
+
+  // Single-business multi-branch: customers are company-wide (like the
+  // product catalog), not per-branch. Disabling the default tenant field
+  // lets any branch admin view/edit customer records without org-scope
+  // denial.
+  tenantField: false,
 
   // Data Layer
   adapter: createAdapter(Customer, customerRepository),
@@ -67,14 +73,14 @@ const customerResource = defineResource({
   } as Record<string, unknown>,
 
   // Additional Routes (beyond CRUD)
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/me',
       summary: 'Get my customer profile',
       handler: 'getMe',
       permissions: permissions.customers.getMe,
-      wrapHandler: false,
+      raw: true,
     },
     // Legacy /customers/:id/membership removed — use /loyalty/members/* instead
   ],
@@ -89,8 +95,9 @@ const customerResource = defineResource({
         properties: {
           customerId: { type: 'string' },
           userId: { type: 'string' },
-          name: { type: 'string' },
+          displayName: { type: 'string' },
           email: { type: 'string' },
+          phone: { type: 'string' },
         },
       },
       description: 'Customer created (auto from order/checkout)',

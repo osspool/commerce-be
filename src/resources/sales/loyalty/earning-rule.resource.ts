@@ -1,1 +1,54 @@
-export { earningRuleResource as default } from './loyalty.resources.js';
+/**
+ * Loyalty Earning Rules Resource — modern Arc adapter + actions.
+ *
+ * Auto-CRUD via mongokit adapter (list/get/create/update/delete).
+ * Declarative `actions:` for FSM verbs (deactivate). No raw routes.
+ */
+
+import { defineResource } from '@classytic/arc';
+import type { RequestWithExtras } from '@classytic/arc/types';
+import permissions from '#config/permissions.js';
+import { createAdapter } from '#shared/adapter.js';
+import { queryParser } from '#shared/query-parser.js';
+import { ensureLoyaltyEngine } from './loyalty.plugin.js';
+
+const engine = await ensureLoyaltyEngine();
+
+const earningRuleResource = defineResource({
+  name: 'loyalty-earning-rule',
+  displayName: 'Earning Rules',
+  tag: 'Loyalty',
+  prefix: '/loyalty/earning-rules',
+  audit: true,
+
+  adapter: createAdapter(engine.models.EarningRule as never, engine.repositories.earningRule as never),
+  queryParser,
+
+  permissions: {
+    list: permissions.loyalty.view,
+    get: permissions.loyalty.view,
+    create: permissions.loyalty.manage,
+    update: permissions.loyalty.manage,
+    delete: permissions.loyalty.manage,
+  },
+
+  actions: {
+    /** Pause an active rule without deleting it. */
+    deactivate: {
+      handler: async (id: string, _data: Record<string, unknown>, _req: RequestWithExtras) => {
+        return engine.repositories.earningRule.update(id, { status: 'paused' });
+      },
+      permissions: permissions.loyalty.manage,
+    },
+
+    /** Resume a paused rule. */
+    activate: {
+      handler: async (id: string, _data: Record<string, unknown>, _req: RequestWithExtras) => {
+        return engine.repositories.earningRule.update(id, { status: 'active' });
+      },
+      permissions: permissions.loyalty.manage,
+    },
+  },
+});
+
+export default earningRuleResource;

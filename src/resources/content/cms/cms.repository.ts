@@ -1,6 +1,6 @@
 import { Repository } from '@classytic/mongokit';
-import CMS from './cms.model.js';
 import type { ICMS } from './cms.model.js';
+import CMS from './cms.model.js';
 
 class CMSRepository extends Repository<ICMS> {
   constructor() {

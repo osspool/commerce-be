@@ -1,10 +1,10 @@
 /**
  * Test resource preloader
  *
- * Uses arc 2.6.2's `preloadResourcesAsync` helper which normalizes a Vite
- * `import.meta.glob` (lazy) result into ResourceLike[]. This sidesteps
- * loadResources's dynamic import path which fails under vitest on Windows
- * because Node's ESM loader rejects raw drive-letter fallback paths.
+ * Uses Arc's `preloadResourcesAsync` helper to normalize a Vite
+ * `import.meta.glob` (lazy) result into ResourceLike[]. Tests keep using
+ * explicit preloaded resources instead of runtime discovery so boot stays
+ * deterministic under Vitest.
  *
  * Usage in test files:
  *   const { resources } = await loadTestResources();

@@ -132,9 +132,9 @@ export function createMemoryCacheAdapter(options: CacheAdapterOptions = {}): Mem
     },
 
     /**
-     * Delete cached value
+     * Delete cached value (mongokit 3.10+: renamed from `del` to `delete`).
      */
-    async del(key: string): Promise<void> {
+    async delete(key: string): Promise<void> {
       store.delete(key);
     },
 

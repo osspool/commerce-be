@@ -1,11 +1,9 @@
 import config from '#config/index.js';
 import logger from '#lib/utils/logger.js';
-import cronManager from '../../cron/index.js';
-import { eventRegistry as legacyEventRegistry } from '#lib/events/EventRegistry.js';
-import { registerInventoryEventHandlers } from '#resources/inventory/inventory.handlers.js';
-import { registerPosEventHandlers } from '#resources/sales/pos/pos.events.js';
 import { registerAccountingEventHandlers } from '#resources/accounting/accounting.events.js';
+import { registerInventoryEventHandlers } from '#resources/inventory/inventory.handlers.js';
 import { registerNotificationEventHandlers } from '#resources/notifications/notification.handlers.js';
+import cronManager from '../../cron/index.js';
 
 interface BackgroundRuntimeOptions {
   enableEventHandlers?: boolean;
@@ -24,19 +22,11 @@ async function initializeEventHandlers(): Promise<void> {
 
   eventHandlersPromise = (async () => {
     try {
-      const stats = await legacyEventRegistry.autoDiscoverEvents();
       registerInventoryEventHandlers();
-      registerPosEventHandlers();
       registerAccountingEventHandlers();
       registerNotificationEventHandlers();
 
-      logger.info(
-        {
-          events: stats.eventsRegistered,
-          handlers: stats.handlersRegistered,
-        },
-        'Event handlers registered',
-      );
+      logger.info('Event handlers registered');
       eventHandlersInitialized = true;
     } catch (error: unknown) {
       logger.warn({ error: (error as Error).message }, 'Event handler registration failed');

@@ -1,12 +1,12 @@
-import mongoose from 'mongoose';
-import StockRequest, { StockRequestStatus, RequestPriority } from './models/stock-request.model.js';
-import type { StockRequestDocument, IRequestItem } from './models/stock-request.model.js';
-import { getFlowEngine } from '../flow/flow-engine.js';
-import { buildFlowContext } from '../flow/context-helpers.js';
-import branchRepository from '#resources/commerce/branch/branch.repository.js';
-import transferService from '../transfer/transfer.service.js';
-import stockRequestRepository from './stock-request.repository.js';
+import type mongoose from 'mongoose';
 import logger from '#lib/utils/logger.js';
+import branchRepository from '#resources/commerce/branch/branch.repository.js';
+import { buildFlowContext, DEFAULT_LOCATION, skuRefFromProduct } from '../flow/context-helpers.js';
+import { getFlowEngine } from '../flow/flow-engine.js';
+import transferService from '../transfer/transfer.service.js';
+import type { IRequestItem, StockRequestDocument } from './models/stock-request.model.js';
+import StockRequest, { RequestPriority, StockRequestStatus } from './models/stock-request.model.js';
+import stockRequestRepository from './stock-request.repository.js';
 
 interface BranchDocument {
   _id: { toString(): string };
@@ -304,25 +304,6 @@ class StockRequestService {
     return { request, transfer };
   }
 
-  async markFulfilled(requestId: string, actorId: string): Promise<StockRequestDocument | null> {
-    const request = (await StockRequest.findById(requestId)) as StockRequestDocument | null;
-    if (!request) return null;
-
-    const isPartial = request.totalQuantityApproved < request.totalQuantityRequested;
-
-    request.status = isPartial ? StockRequestStatus.PARTIAL_FULFILLED : StockRequestStatus.FULFILLED;
-
-    request.statusHistory.push({
-      status: request.status,
-      actor: actorId as unknown as mongoose.Types.ObjectId,
-      timestamp: new Date(),
-      notes: isPartial ? 'Partially fulfilled' : 'Fully fulfilled',
-    });
-
-    await request.save();
-    return request;
-  }
-
   async cancelRequest(requestId: string, reason: string | undefined, actorId: string): Promise<StockRequestDocument> {
     const request = (await StockRequest.findById(requestId)) as StockRequestDocument | null;
     if (!request) {
@@ -356,59 +337,6 @@ class StockRequestService {
     );
 
     return request;
-  }
-
-  async getById(requestId: string): Promise<unknown> {
-    return stockRequestRepository.getById(requestId, {
-      populate: [
-        { path: 'requestingBranch', select: 'code name address' },
-        { path: 'fulfillingBranch', select: 'code name' },
-        { path: 'requestedBy', select: 'name email' },
-        { path: 'reviewedBy', select: 'name email' },
-        { path: 'transfer', select: 'documentNumber status' },
-      ],
-      lean: true,
-    });
-  }
-
-  async listRequests(
-    filters: Record<string, unknown> = {},
-    options: { page?: number; limit?: number; sort?: string } = {},
-  ): Promise<unknown> {
-    const query: Record<string, unknown> = {};
-
-    if (filters.requestingBranch) query.requestingBranch = filters.requestingBranch;
-    if (filters.fulfillingBranch) query.fulfillingBranch = filters.fulfillingBranch;
-    if (filters.status) query.status = filters.status;
-    if ((filters.statuses as string[] | undefined)?.length) query.status = { $in: filters.statuses };
-    if (filters.priority) query.priority = filters.priority;
-    if (filters.requestNumber) query.requestNumber = new RegExp(filters.requestNumber as string, 'i');
-
-    if (filters.startDate || filters.endDate) {
-      const createdAt: Record<string, Date> = {};
-      if (filters.startDate) createdAt.$gte = new Date(filters.startDate as string);
-      if (filters.endDate) createdAt.$lte = new Date(filters.endDate as string);
-      query.createdAt = createdAt;
-    }
-
-    const { page = 1, limit = 20, sort = '-createdAt' } = options;
-
-    return stockRequestRepository.getAll(
-      {
-        page,
-        limit,
-        sort,
-        filters: query,
-      },
-      {
-        populate: [
-          { path: 'requestingBranch', select: 'code name' },
-          { path: 'fulfillingBranch', select: 'code name' },
-          { path: 'requestedBy', select: 'name' },
-        ],
-        lean: true,
-      },
-    );
   }
 
   async getPendingForReview(): Promise<{
@@ -449,14 +377,22 @@ class StockRequestService {
     items: Array<Record<string, unknown>>,
     branchId: string,
   ): Promise<Array<Record<string, unknown>>> {
-    const Product = mongoose.model('Product');
+    const { ensureCatalogEngine } = await import('#resources/catalog/catalog.engine.js');
+    const catalog = await ensureCatalogEngine();
+    const catalogCtx = { actorId: 'stock-request', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
+
+    // Per-line keys (productId + variantSku) — previously the lookup ran
+    // per-product with the product-level SKU only, which meant a variant
+    // request always read 0 stock (the stockMap key included variantSku
+    // but the writer only set the `_null` key). Iterate per item instead.
     const productIds = [
       ...new Set(items.map((i) => (i.productId as string)?.toString() || (i.product as string)?.toString())),
-    ];
+    ].filter(Boolean) as string[];
 
-    const products = (await Product.find({ _id: { $in: productIds } })
-      .select('name sku variants')
-      .lean()) as unknown as ProductDocument[];
+    const products = (await catalog.repositories.product.findAll(
+      { _id: { $in: productIds } },
+      { ...catalogCtx, lean: true },
+    )) as unknown as ProductDocument[];
 
     const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
@@ -464,13 +400,29 @@ class StockRequestService {
     try {
       const flow = getFlowEngine();
       const ctx = buildFlowContext(branchId.toString(), 'system');
-      for (const productId of productIds) {
+      // Unique (productId, variantSku) pairs — avoids redundant Flow reads
+      // when several lines share the same product/variant.
+      const uniquePairs = new Set<string>();
+      for (const item of items) {
+        const productId = (item.productId as string)?.toString() || (item.product as string)?.toString();
         if (!productId) continue;
+        const variantSku = (item.variantSku as string | undefined) || null;
+        uniquePairs.add(`${productId}|${variantSku ?? ''}`);
+      }
+      for (const pair of uniquePairs) {
+        const [productId, variantSkuRaw] = pair.split('|');
+        const variantSku = variantSkuRaw ? variantSkuRaw : null;
         const product = productMap.get(productId);
         if (!product) continue;
-        const skuRef = product.sku || productId;
-        const avail = await flow.services.quant.getAvailability({ skuRef }, ctx);
-        stockMap.set(`${productId}_null`, avail.quantityOnHand || 0);
+        const skuRef = skuRefFromProduct(productId, variantSku);
+        // Pin the read to the physical default stock bin so virtual
+        // locations (vendor / customer / adjustment) don't inflate the
+        // "current stock" surfaced on the request form.
+        const avail = await flow.services.quant.getAvailability(
+          { skuRef, locationId: DEFAULT_LOCATION },
+          ctx,
+        );
+        stockMap.set(`${productId}_${variantSku ?? 'null'}`, avail.quantityOnHand || 0);
       }
     } catch {
       // If Flow isn't ready yet, fall back to zero stock

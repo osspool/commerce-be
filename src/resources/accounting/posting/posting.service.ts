@@ -14,21 +14,30 @@
  */
 
 import type mongoose from 'mongoose';
-import {
-  Account,
-  accountRepository,
-  JournalEntry,
-  journalEntryRepository,
-} from '../accounting.engine.js';
 import logger from '#lib/utils/logger.js';
+import { Account, accountRepository, JournalEntry, journalEntryRepository } from '../accounting.engine.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface PostingItem {
   accountCode: string;
-  debit: number; // paisa (integer)
-  credit: number; // paisa (integer)
+  debit: number; // paisa (integer) — always in base currency (BDT)
+  credit: number; // paisa (integer) — always in base currency (BDT)
   label?: string;
+  /** Subsidiary-ledger partner tag — Supplier._id or Customer._id stringified */
+  partnerId?: string;
+  /** 'supplier' | 'customer' — disambiguates a single partnerId across books */
+  partnerType?: 'supplier' | 'customer';
+  /** Due date used by generateAgedBalance to bucket AR/AP lines */
+  maturityDate?: Date;
+  /** Foreign currency ISO 4217 code (audit trail). Omit when transaction is in BDT. */
+  foreignCurrency?: string;
+  /** Original debit in foreign currency minor units (audit trail). */
+  foreignDebit?: number;
+  /** Original credit in foreign currency minor units (audit trail). */
+  foreignCredit?: number;
+  /** Exchange rate: foreignCurrency → BDT at posting time. */
+  exchangeRate?: number;
 }
 
 export interface PostingInput {
@@ -89,6 +98,11 @@ export function clearAccountCache(): void {
  * Create a journal entry from a posting input.
  * Resolves account codes to ObjectIds, creates as draft, optionally posts.
  *
+ * Idempotency: @classytic/ledger >=0.8.1 wraps `journalEntries.create` with a
+ * race-safe implementation — pre-checks by `idempotencyKey`, catches
+ * dup-key / IdempotencyConflictError, and returns the winner. We just pass
+ * `idempotencyKey` through; no in-host recovery needed.
+ *
  * @param branchId — branch that originated this entry (optional tag)
  * @param input — posting data
  */
@@ -96,20 +110,6 @@ export async function createPosting(
   branchId: string | undefined,
   input: PostingInput,
 ): Promise<{ journalEntryId: string; state: string }> {
-  // Check idempotency — skip if already posted
-  const idempotencyFilter: Record<string, unknown> = { idempotencyKey: input.idempotencyKey };
-  if (branchId) idempotencyFilter.organizationId = branchId;
-
-  const existing = await JournalEntry.findOne(idempotencyFilter)
-    .select('_id state')
-    .lean();
-
-  if (existing) {
-    logger.debug({ idempotencyKey: input.idempotencyKey }, 'Posting already exists, skipping');
-    const doc = existing as { _id: { toString(): string }; state: string };
-    return { journalEntryId: doc._id.toString(), state: doc.state };
-  }
-
   // Resolve account codes to ObjectIds (company-wide)
   const journalItems = await Promise.all(
     input.items.map(async (item) => ({
@@ -118,10 +118,25 @@ export async function createPosting(
       credit: item.credit,
       label: item.label,
       date: input.date,
+      ...(item.partnerId ? { partnerId: item.partnerId } : {}),
+      ...(item.partnerType ? { partnerType: item.partnerType } : {}),
+      ...(item.maturityDate ? { maturityDate: item.maturityDate } : {}),
+      // Multi-currency audit trail (ledger 0.9.1) — GL stays in BDT,
+      // foreign currency is metadata for audit + FX realization
+      ...(item.foreignCurrency
+        ? {
+            currency: item.foreignCurrency,
+            exchangeRate: item.exchangeRate,
+            originalDebit: item.foreignDebit ?? null,
+            originalCredit: item.foreignCredit ?? null,
+          }
+        : {}),
     })),
   );
 
-  // Create draft journal entry with optional branch tag
+  // Create draft journal entry with optional branch tag. The ledger's
+  // race-safe wrapper guarantees at-most-one entry per idempotencyKey
+  // (per org) across concurrent callers.
   const entryData: Record<string, unknown> = {
     journalType: input.journalType,
     label: input.label,
@@ -133,24 +148,28 @@ export async function createPosting(
   if (branchId) entryData.organizationId = branchId;
   if (input.sourceRef) entryData.sourceRef = input.sourceRef;
 
-  const entry = await journalEntryRepository.create(entryData) as { _id: { toString(): string } };
+  const entry = (await journalEntryRepository.create(entryData)) as {
+    _id: { toString(): string };
+    state?: string;
+  };
 
-  let state = 'draft';
+  // If the ledger short-circuited to the winner, `state` may be what the
+  // winner had (e.g. 'posted') — preserve it so we don't re-post an entry
+  // the winning caller already posted.
+  let state = entry.state ?? 'draft';
 
   // Auto-post if requested. Ledger strictness.requireActor is on, so we
   // must pass an actorId — use the caller's id when present, else fall back
   // to SYSTEM_ACTOR_ID for background flows (auto-close hook, scheduled jobs).
-  if (input.autoPost) {
+  // Skip when the ledger already returned a posted winner (idempotent replay).
+  if (input.autoPost && state !== 'posted') {
     try {
       await journalEntryRepository.post(entry._id, undefined, {
         actorId: input.actorId ?? SYSTEM_ACTOR_ID,
       });
       state = 'posted';
     } catch (err) {
-      logger.warn(
-        { entryId: entry._id, error: (err as Error).message },
-        'Auto-post failed, entry remains as draft',
-      );
+      logger.warn({ entryId: entry._id, error: (err as Error).message }, 'Auto-post failed, entry remains as draft');
     }
   }
 
@@ -177,5 +196,3 @@ export async function ensureCompanyAccounts(): Promise<void> {
 
   _companySeeded = true;
 }
-
-export default { createPosting, ensureCompanyAccounts, clearAccountCache };

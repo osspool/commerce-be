@@ -77,4 +77,57 @@ export function cogsToPosting(data: CogsData, options: { autoPost?: boolean } = 
   };
 }
 
-export default { stockAdjustmentToPosting, cogsToPosting };
+/**
+ * COGS reversal — fires when returned goods come back into inventory via RMA
+ * or are written back after a cancel-with-restock. Mirrors `cogsToPosting`:
+ *
+ *   Debit:  1165 Merchandise Inventory (goods back on the shelf)
+ *   Credit: 5111 COGS — Raw Materials (expense reversed)
+ *
+ * `costAmount` is the SUM of `line.snapshot.costPrice * returnedQuantity`
+ * across the items being restored — NOT the gross line total. Partial
+ * returns reverse proportionally; full returns nullify the original COGS.
+ *
+ * Scoped per-return (not per-order) because one order can produce multiple
+ * returns with different item subsets. Idempotency key uses the returnId
+ * so re-emission of `accounting:return.restocked` for the same return is
+ * a no-op.
+ */
+export interface CogsReversalData {
+  returnId: string;
+  orderId: string;
+  costAmount: number; // paisa — sum of (costPrice × qty) across restocked items
+  date: Date;
+  /** Optional description override — defaults to "COGS reversal — Return #<id>". */
+  description?: string;
+}
+
+export function cogsReversalToPosting(
+  data: CogsReversalData,
+  options: { autoPost?: boolean } = {},
+): PostingInput {
+  return {
+    journalType: 'INVENTORY',
+    label: data.description || `COGS reversal — Return #${data.returnId}`,
+    date: data.date,
+    items: [
+      {
+        accountCode: MERCHANDISE_INVENTORY,
+        debit: data.costAmount,
+        credit: 0,
+        label: 'Inventory restored from return',
+      },
+      {
+        accountCode: COGS_MATERIALS,
+        debit: 0,
+        credit: data.costAmount,
+        label: 'COGS reversal',
+      },
+    ],
+    idempotencyKey: `cogs-reversal-${data.returnId}`,
+    sourceRef: { sourceModel: 'Return', sourceId: data.returnId },
+    autoPost: options.autoPost ?? true,
+  };
+}
+
+export default { stockAdjustmentToPosting, cogsToPosting, cogsReversalToPosting };

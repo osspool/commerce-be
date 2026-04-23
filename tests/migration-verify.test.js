@@ -222,17 +222,13 @@ describe('Library integrations', () => {
   });
 
   it('creates a valid media-kit schema', async () => {
-    const { createMedia } = await import('@classytic/media-kit');
-    const mockDriver = {
-      write: async () => ({ key: 'test', url: 'http://test' }),
-      read: async () => new ReadableStream(),
-      delete: async () => true,
-      exists: async () => false,
-      stat: async () => ({ size: 0, lastModified: new Date() }),
-      getPublicUrl: () => 'http://test',
-    };
-    const media = createMedia({ driver: mockDriver });
-    expect(media.schema instanceof mongoose.Schema).toBe(true);
+    // media-kit 3.0 moved schema construction to `buildMediaSchema()` — no
+    // connection / driver needed to verify the shape. `createMedia()` now
+    // requires a full MediaConfig with `connection` + `driver`; the smoke
+    // test only cares that the schema factory produces a Mongoose Schema.
+    const { buildMediaSchema } = await import('@classytic/media-kit');
+    const schema = buildMediaSchema();
+    expect(schema instanceof mongoose.Schema).toBe(true);
   });
 });
 

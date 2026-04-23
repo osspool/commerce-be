@@ -339,13 +339,16 @@ describe('Journal Entries', () => {
     }
   });
 
+  // Arc 2.9 unified Stripe-style action endpoint: POST /:id/action { action }.
+  // Replaces legacy PATCH /:id/post, PATCH /:id/reverse, POST /:id/duplicate.
   it('admin can post a draft entry', async () => {
     if (!entryId) return;
 
     const res = await server.inject({
-      method: 'PATCH',
-      url: `${API}/accounting/journal-entries/${entryId}/post`,
+      method: 'POST',
+      url: `${API}/accounting/journal-entries/${entryId}/action`,
       headers: h(),
+      payload: { action: 'post' },
     });
 
     expect([200, 403]).toContain(res.statusCode);
@@ -360,9 +363,10 @@ describe('Journal Entries', () => {
     if (!entryId) return;
 
     const res = await server.inject({
-      method: 'PATCH',
-      url: `${API}/accounting/journal-entries/${entryId}/post`,
+      method: 'POST',
+      url: `${API}/accounting/journal-entries/${entryId}/action`,
       headers: h(),
+      payload: { action: 'post' },
     });
 
     // Already posted — should fail
@@ -373,9 +377,10 @@ describe('Journal Entries', () => {
     if (!entryId) return;
 
     const res = await server.inject({
-      method: 'PATCH',
-      url: `${API}/accounting/journal-entries/${entryId}/reverse`,
+      method: 'POST',
+      url: `${API}/accounting/journal-entries/${entryId}/action`,
       headers: h(),
+      payload: { action: 'reverse' },
     });
 
     expect([200, 403]).toContain(res.statusCode);
@@ -390,8 +395,9 @@ describe('Journal Entries', () => {
 
     const res = await server.inject({
       method: 'POST',
-      url: `${API}/accounting/journal-entries/${entryId}/duplicate`,
+      url: `${API}/accounting/journal-entries/${entryId}/action`,
       headers: h(),
+      payload: { action: 'duplicate' },
     });
 
     expect([200, 201, 403]).toContain(res.statusCode);
@@ -404,24 +410,37 @@ describe('Journal Entries', () => {
 
   // ── Double-Entry Validation ──
 
-  it('rejects unbalanced journal entries (debit != credit)', async () => {
+  it('rejects posting unbalanced journal entries (debit != credit)', async () => {
     if (!cashAccountId || !revenueAccountId) return;
 
-    const res = await server.inject({
+    // "draft now, validate at post" pattern (see journal-entry.resource.ts):
+    // unbalanced drafts CAN be saved (FE may build incrementally), but the
+    // doubleEntryPlugin's invariant fires at the post action.
+    const create = await server.inject({
       method: 'POST',
       url: `${API}/accounting/journal-entries`,
       headers: h(),
       payload: {
-        label: 'Unbalanced — should fail',
+        label: 'Unbalanced — should fail at post',
         journalItems: [
           { account: cashAccountId, debit: 10000, credit: 0 },
           { account: revenueAccountId, debit: 0, credit: 5000 }, // MISMATCH
         ],
       },
     });
+    if (create.statusCode === 403) return; // role lacks write perm
 
-    // doubleEntryPlugin should reject this
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(create.statusCode).toBeLessThan(300);
+    const draftId = safeParseBody(create.body).data._id;
+    expect(draftId).toBeDefined();
+
+    const post = await server.inject({
+      method: 'POST',
+      url: `${API}/accounting/journal-entries/${draftId}/action`,
+      headers: h(),
+      payload: { action: 'post' },
+    });
+    expect(post.statusCode).toBeGreaterThanOrEqual(400);
   });
 
   it('rejects fractional (non-integer) amounts', async () => {

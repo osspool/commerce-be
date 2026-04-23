@@ -1,6 +1,5 @@
-import { requireRoles } from '@classytic/arc/permissions';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { groups } from './roles.js';
+import type { PermissionCheck } from '@classytic/arc';
+import { platformAdminOnly, superadminOnly } from '#shared/permissions.js';
 
 export interface UserPermissions {
   list: PermissionCheck;
@@ -11,11 +10,11 @@ export interface UserPermissions {
 }
 
 const userPermissions: UserPermissions = {
-  list: requireRoles(groups.platformAdmin),
-  get: requireRoles(groups.platformAdmin),
-  create: requireRoles(groups.superadminOnly),
-  update: requireRoles(groups.superadminOnly),
-  delete: requireRoles(groups.superadminOnly),
+  list: platformAdminOnly(),
+  get: platformAdminOnly(),
+  create: superadminOnly(),
+  update: superadminOnly(),
+  delete: superadminOnly(),
 };
 
 export default userPermissions;

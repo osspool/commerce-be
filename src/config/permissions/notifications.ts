@@ -1,6 +1,5 @@
-import { requireAuth, requireRoles } from '@classytic/arc/permissions';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { groups } from './roles.js';
+import type { PermissionCheck } from '@classytic/arc';
+import { platformAdminOnly, requireAuth } from '#shared/permissions.js';
 
 export interface NotificationPermissions {
   /** List own notifications */
@@ -14,7 +13,7 @@ export interface NotificationPermissions {
 const notifications: NotificationPermissions = {
   view: requireAuth(),
   stream: requireAuth(),
-  manage: requireRoles(groups.platformAdmin),
+  manage: platformAdminOnly(),
 };
 
 export default notifications;

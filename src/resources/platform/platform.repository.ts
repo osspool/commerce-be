@@ -1,7 +1,6 @@
-import { Repository, cachePlugin, type InferDocument } from '@classytic/mongokit';
-import PlatformConfig from './platform.model.js';
+import { cachePlugin, type InferDocument, Repository } from '@classytic/mongokit';
 import { getSharedCacheAdapter } from '#shared/adapters/memoryCache.adapter.js';
-import { clearVatConfigCache } from '#resources/sales/orders/vat.utils.js';
+import PlatformConfig from './platform.model.js';
 
 const platformCacheAdapter = getSharedCacheAdapter({ maxSize: 200 });
 
@@ -46,7 +45,6 @@ class PlatformConfigRepository extends Repository<InferDocument<typeof PlatformC
     if (typeof (this as unknown as { invalidateAllCache?: () => Promise<void> }).invalidateAllCache === 'function') {
       await (this as unknown as { invalidateAllCache: () => Promise<void> }).invalidateAllCache();
     }
-    clearVatConfigCache();
     return config;
   }
 

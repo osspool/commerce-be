@@ -55,18 +55,24 @@ export const availabilitySchemas = {
         )
         .min(1)
         .describe('Items to check availability for'),
+      nodeId: z
+        .string()
+        .optional()
+        .describe('Narrow to a specific warehouse node. Omit to aggregate across the branch.'),
       branchId: z.string().optional().describe('Organization/branch ID'),
     }),
     response: {
       200: successEnvelope(
         z.object({
-          allAvailable: z.boolean(),
+          // Matches @classytic/flow's AvailabilityCheckResult verbatim —
+          // no translation, single vocabulary end-to-end.
+          allFulfilled: z.boolean(),
           items: z.array(
             z.object({
               skuRef: z.string(),
               requested: z.number(),
               available: z.number(),
-              sufficient: z.boolean(),
+              fulfilled: z.boolean(),
             }),
           ),
         }),
@@ -122,10 +128,16 @@ export const reservationSchemas = {
 // ── Scan ──
 
 const scanResult = z.object({
-  type: z.enum(['location', 'lot', 'serial', 'sku', 'unknown']).describe('Resolved entity type'),
-  resolvedId: z.string().optional().describe('Resolved entity ID'),
-  entity: z.any().optional().describe('Resolved entity details'),
   token: z.string().describe('Original scanned token'),
+  resolvedType: z
+    .enum(['sku', 'lot', 'serial', 'location', 'package', 'document', 'unknown'])
+    .describe('Resolved entity type'),
+  resolvedId: z.string().nullable().describe('Resolved entity ID, or null when unknown'),
+  resolvedEntity: z
+    .record(z.string(), z.unknown())
+    .nullable()
+    .describe('Resolved entity details, or null when unknown'),
+  action: z.enum(['receive', 'pick', 'move', 'count', 'verify']).optional(),
 });
 
 export const scanSchemas = {
@@ -145,7 +157,12 @@ export const adjustmentSchemaZod = {
     variantSku: z.string().optional().describe('Variant SKU'),
     quantity: z.number().optional().describe('Target quantity or adjustment amount'),
     mode: z.enum(['set', 'add', 'remove']).default('set').describe('set: absolute, add: increase, remove: decrease'),
-    reason: z.string().optional().describe('Reason for adjustment'),
+    reason: z.string().optional().describe('Short reason code / category (e.g. "recount")'),
+    notes: z.string().optional().describe('Free-form notes persisted on the move group for audit'),
+    locationId: z
+      .string()
+      .optional()
+      .describe('Target location ID (Location document _id). Defaults to branch default stock location.'),
     adjustments: z
       .array(
         z.object({
@@ -154,6 +171,8 @@ export const adjustmentSchemaZod = {
           quantity: z.number(),
           mode: z.enum(['set', 'add', 'remove']).optional(),
           reason: z.string().optional(),
+          notes: z.string().optional(),
+          locationId: z.string().optional().describe('Per-item target location ID (overrides top-level)'),
         }),
       )
       .optional()

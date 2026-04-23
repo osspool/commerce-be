@@ -1,7 +1,9 @@
 import './config/env-loader.js';
-import config from './config/index.js';
 import logger from '#lib/utils/logger.js';
-import { WorkerBootstrap, WorkerHealthServer, setupSignalHandlers } from '#lib/worker/index.js';
+import { setupSignalHandlers } from '#lib/worker/signals.js';
+import { WorkerBootstrap } from '#lib/worker/WorkerBootstrap.js';
+import { WorkerHealthServer } from '#lib/worker/WorkerHealthServer.js';
+import config from './config/index.js';
 
 let healthServer: WorkerHealthServer | null = null;
 const worker = new WorkerBootstrap({

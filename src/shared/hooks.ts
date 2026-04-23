@@ -15,21 +15,14 @@ interface HookContext {
   meta?: { id?: string };
 }
 
-/** Arc decorates fastify with `arc.hooks` (HookSystem) for resource lifecycle hooks */
-interface ArcHooks {
-  before(resource: string, operation: string, handler: (ctx: HookContext) => Promise<void>): void;
-  after(resource: string, operation: string, handler: (ctx: HookContext) => Promise<void>): void;
-}
-
-interface FastifyWithArc extends FastifyInstance {
-  arc?: { hooks?: ArcHooks };
-}
-
 /**
  * Register resource lifecycle hooks on the Arc hook system.
+ *
+ * Arc 2.10.5+ augments `FastifyInstance` with `arc?: ArcCore` (optional),
+ * so we read `fastify.arc?.hooks` directly — no local shape helper needed.
  */
 export function registerResourceHooks(fastify: FastifyInstance): void {
-  const hooks = (fastify as FastifyWithArc).arc?.hooks;
+  const hooks = fastify.arc?.hooks;
   if (!hooks) return;
 
   // Auto-set updatedBy on all resource updates

@@ -1,7 +1,8 @@
 /**
  * Loyalty Event Handlers
  *
- * Subscribes to loyalty engine events and syncs the thin
+ * Subscribes to loyalty engine events via the Arc-compatible
+ * `EventTransport.subscribe()` API and syncs the thin
  * Customer.membership projection for quick reads.
  */
 import { LoyaltyEvents } from '@classytic/loyalty/events';
@@ -15,26 +16,39 @@ let _registered = false;
  * Call this after the loyalty engine is initialized.
  * Idempotent — safe to call multiple times.
  */
-export function registerLoyaltyEventHandlers(): void {
+export async function registerLoyaltyEventHandlers(): Promise<void> {
   if (_registered) return;
   _registered = true;
 
   const engine = getLoyaltyEngine();
 
   // Points changes → sync balance
-  engine.events.on(LoyaltyEvents.POINTS_EARNED, (p) => syncBalance(p as any));
-  engine.events.on(LoyaltyEvents.POINTS_ADJUSTED, (p) => syncBalance(p as any));
-  engine.events.on(LoyaltyEvents.POINTS_EXPIRED, (p) => syncBalanceBatch(p as any));
+  await engine.events.subscribe(LoyaltyEvents.POINTS_EARNED, (event) =>
+    syncBalance(event.payload as { externalId: string; balanceAfter: number }),
+  );
+  await engine.events.subscribe(LoyaltyEvents.POINTS_ADJUSTED, (event) =>
+    syncBalance(event.payload as { externalId: string; balanceAfter: number }),
+  );
+  await engine.events.subscribe(LoyaltyEvents.POINTS_EXPIRED, (event) =>
+    syncBalanceBatch(event.payload as Record<string, unknown>),
+  );
 
   // Tier changes → sync tier
-  engine.events.on(LoyaltyEvents.TIER_UPGRADED, (p) => syncTier(p as any));
-  engine.events.on(LoyaltyEvents.TIER_DOWNGRADED, (p) => syncTier(p as any));
+  await engine.events.subscribe(LoyaltyEvents.TIER_UPGRADED, (event) =>
+    syncTier(event.payload as { externalId: string; newTier: string | null }),
+  );
+  await engine.events.subscribe(LoyaltyEvents.TIER_DOWNGRADED, (event) =>
+    syncTier(event.payload as { externalId: string; newTier: string | null }),
+  );
 }
 
 async function syncBalance(payload: { externalId: string; balanceAfter: number }) {
   try {
     const engine = getLoyaltyEngine();
-    const member = await engine.services.member.getByExternalId(payload.externalId, 'customer', { actorId: 'system' });
+    const member = await engine.repositories.member.getByQuery(
+      { externalId: payload.externalId, externalType: 'customer' },
+      { throwOnNotFound: false },
+    );
     if (!member) return;
 
     await Customer.findByIdAndUpdate(payload.externalId, {
@@ -53,11 +67,10 @@ async function syncBalanceBatch(payload: Record<string, unknown>) {
     const result = payload as { membersAffected?: number; memberIds?: string[] };
     const engine = getLoyaltyEngine();
 
-    // If engine provides memberIds, sync each affected member
     if (result.memberIds?.length) {
       for (const memberId of result.memberIds) {
         try {
-          const member = await engine.services.member.getById(memberId, { actorId: 'system' });
+          const member = await engine.repositories.member.getById(memberId, { throwOnNotFound: false });
           if (member?.externalId) {
             await syncBalance({ externalId: member.externalId, balanceAfter: member.balance.current });
           }

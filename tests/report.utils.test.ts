@@ -3,7 +3,7 @@ import {
   parseBuckets,
   parseSkuRefs,
   parsePeriodDays,
-} from '../src/resources/inventory/warehouse/report.utils.js';
+} from '../src/resources/inventory/warehouse/reports/report.utils.js';
 
 describe('report.utils', () => {
   describe('parseBuckets', () => {

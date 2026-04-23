@@ -1,42 +1,44 @@
-import users from './users.js';
-import customers from './customers.js';
-import transactions from './transactions.js';
-import commerce, {
-  products,
-  categories,
-  sizeGuides,
-  orders,
-  cart,
-  reviews,
-  branches,
-  pos,
-  orderActions,
-} from './commerce.js';
-import inventory from './inventory.js';
-import { cms, media } from './content.js';
-import loyalty from './loyalty.js';
-import promotions from './promotions.js';
-import notifications from './notifications.js';
-
-import type { UserPermissions } from './users.js';
-import type { CustomerPermissions } from './customers.js';
-import type { TransactionPermissions } from './transactions.js';
 import type {
-  ProductPermissions,
-  CategoryPermissions,
-  CrudPermissions,
-  CartPermissions,
-  ReviewPermissions,
   BranchPermissions,
-  PosPermissions,
-  OrderActionPermissions,
+  CartPermissions,
+  CategoryPermissions,
   CommercePermissions,
+  CrudPermissions,
+  OrderActionPermissions,
+  PosPermissions,
+  ProductPermissions,
+  ReviewPermissions,
 } from './commerce.js';
-import type { InventoryPermissions } from './inventory.js';
+import commerce, {
+  branches,
+  cart,
+  categories,
+  orderActions,
+  orders,
+  pos,
+  products,
+  quotations,
+  reviews,
+  sizeGuides,
+} from './commerce.js';
 import type { CmsPermissions, MediaPermissions } from './content.js';
+import { cms, media } from './content.js';
+import type { CustomerPermissions } from './customers.js';
+import customers from './customers.js';
+import type { InventoryPermissions } from './inventory.js';
+import inventory from './inventory.js';
 import type { LoyaltyPermissions } from './loyalty.js';
-import type { PromotionPermissions } from './promotions.js';
+import loyalty from './loyalty.js';
 import type { NotificationPermissions } from './notifications.js';
+import notifications from './notifications.js';
+import type { PromotionPermissions } from './promotions.js';
+import promotions from './promotions.js';
+import type { SalesPermissions } from './sales.js';
+import sales from './sales.js';
+import type { TransactionPermissions } from './transactions.js';
+import transactions from './transactions.js';
+import type { UserPermissions } from './users.js';
+import users from './users.js';
 
 export interface AllPermissions {
   users: UserPermissions;
@@ -46,6 +48,7 @@ export interface AllPermissions {
   categories: CategoryPermissions;
   sizeGuides: CrudPermissions;
   orders: CrudPermissions;
+  quotations: CrudPermissions;
   cart: CartPermissions;
   reviews: ReviewPermissions;
   branches: BranchPermissions;
@@ -58,6 +61,7 @@ export interface AllPermissions {
   loyalty: LoyaltyPermissions;
   promotions: PromotionPermissions;
   notifications: NotificationPermissions;
+  sales: SalesPermissions;
 }
 
 const permissions: AllPermissions = {
@@ -68,6 +72,7 @@ const permissions: AllPermissions = {
   categories,
   sizeGuides,
   orders,
+  quotations,
   cart,
   reviews,
   branches,
@@ -80,6 +85,7 @@ const permissions: AllPermissions = {
   loyalty,
   promotions,
   notifications,
+  sales,
 };
 
 export default permissions;

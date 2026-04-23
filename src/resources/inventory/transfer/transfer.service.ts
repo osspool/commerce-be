@@ -9,24 +9,31 @@
  * documentNumber, transport details, status history, etc.
  * Flow handles the actual stock mutation atomically.
  */
-import mongoose from 'mongoose';
+
 import { createStateMachine } from '@classytic/arc/utils';
-import Transfer, { TransferStatus, TransferType } from './models/transfer.model.js';
-import type { TransferDocument, ITransferItem, TransferTypeValue } from './models/transfer.model.js';
-import transferRepository from './transfer.repository.js';
-import branchRepository from '#resources/commerce/branch/branch.repository.js';
+import mongoose from 'mongoose';
 import logger from '#lib/utils/logger.js';
+import branchRepository from '#resources/commerce/branch/branch.repository.js';
 import { notifyEvent } from '#resources/notifications/notification.publish.js';
 import {
-  getFlowEngine,
   buildFlowContext,
-  skuRefFromProduct,
-  DEFAULT_LOCATION,
   CUSTOMER_LOCATION,
+  DEFAULT_LOCATION,
+  skuRefFromProduct,
   VENDOR_LOCATION,
-} from '../flow/index.js';
-import { createStatusError } from '../shared/status-errors.js';
+} from '../flow/context-helpers.js';
+import { getFlowEngine } from '../flow/flow-engine.js';
+import {
+  createLocationCache,
+  LocationResolutionError,
+  resolveLocationCode,
+} from '../flow/location-resolver.js';
+import { ensureBranchBootstrapped } from '../inventory-management.plugin.js';
 import type { StatusError } from '../shared/status-errors.js';
+import { createStatusError } from '../shared/status-errors.js';
+import type { ITransferItem, TransferDocument, TransferTypeValue } from './models/transfer.model.js';
+import Transfer, { TransferStatus, TransferType } from './models/transfer.model.js';
+import transferRepository from './transfer.repository.js';
 
 const transferState = createStateMachine('Transfer', {
   update: [TransferStatus.DRAFT],
@@ -58,6 +65,8 @@ interface ReceivedItem {
   productId?: string | { toString(): string };
   variantSku?: string | null;
   quantityReceived?: number;
+  /** Override the planned destinationLocationId for this line at receive time. */
+  destinationLocationId?: string;
 }
 
 interface CreateTransferData {
@@ -74,6 +83,10 @@ interface CreateTransferData {
     quantity: number;
     costPrice?: number;
     notes?: string;
+    /** Sender-scoped Location document _id. Optional — defaults to the sender's default stock bin. */
+    sourceLocationId?: string;
+    /** Receiver-scoped Location document _id. Optional — defaults to the receiver's default stock bin. */
+    destinationLocationId?: string;
   }>;
   documentType?: string;
   remarks?: string;
@@ -90,10 +103,18 @@ class TransferService {
   async createTransfer(
     data: CreateTransferData,
     actorId: string,
-    options: { canSubBranchTransfer?: boolean; canReturnToHead?: boolean } = {},
+    options: { canSubBranchTransfer?: boolean; canReturnToHead?: boolean; callerBranchId?: string } = {},
   ): Promise<TransferDocument> {
     const { senderBranchId, receiverBranchId, items, documentType, remarks } = data;
-    const { canSubBranchTransfer = false, canReturnToHead = false } = options;
+    const { canSubBranchTransfer = false, canReturnToHead = false, callerBranchId } = options;
+
+    // Enforce that the caller's authenticated branch matches sender or receiver
+    if (callerBranchId && senderBranchId && receiverBranchId) {
+      const callerStr = String(callerBranchId);
+      if (callerStr !== String(senderBranchId) && callerStr !== String(receiverBranchId)) {
+        throw createStatusError('Cross-branch access denied: caller must be sender or receiver', 403);
+      }
+    }
 
     const resolvedSenderBranchId = senderBranchId || (await branchRepository.getHeadOffice())?._id;
     if (!resolvedSenderBranchId) throw createStatusError('Head office branch not found', 404);
@@ -185,17 +206,31 @@ class TransferService {
     if (!transfer) throw createStatusError('Transfer not found', 404);
     transferState.assert('approve', transfer.status, createStatusError, 'Only draft transfers can be approved');
 
-    // Check availability via Flow
+    // Check availability via Flow, honouring each line's sender location.
     const flow = getFlowEngine();
     const senderCtx = buildFlowContext(transfer.senderBranch, actorId);
+    await ensureBranchBootstrapped(senderCtx.organizationId);
 
+    const senderLocationCache = createLocationCache();
     const unavailable: string[] = [];
-    for (const item of transfer.items) {
-      const skuRef = skuRefFromProduct(item.product, item.variantSku);
-      const avail = await flow.services.quant.getAvailability({ skuRef, locationId: DEFAULT_LOCATION }, senderCtx);
-      if (avail.quantityAvailable < item.quantity) {
-        unavailable.push(`${item.productName}: need ${item.quantity}, have ${avail.quantityAvailable}`);
+    try {
+      for (const item of transfer.items) {
+        const skuRef = skuRefFromProduct(item.product, item.variantSku);
+        const locationCode = await resolveLocationCode(flow, item.sourceLocationId, senderCtx, {
+          cache: senderLocationCache,
+        });
+        const avail = await flow.services.quant.getAvailability({ skuRef, locationId: locationCode }, senderCtx);
+        if (avail.quantityAvailable < item.quantity) {
+          unavailable.push(
+            `${item.productName} @ ${locationCode}: need ${item.quantity}, have ${avail.quantityAvailable}`,
+          );
+        }
       }
+    } catch (err) {
+      if (err instanceof LocationResolutionError) {
+        throw createStatusError(err.message, err.statusCode);
+      }
+      throw err;
     }
 
     if (unavailable.length) {
@@ -236,20 +271,46 @@ class TransferService {
 
     const flow = getFlowEngine();
     const senderCtx = buildFlowContext(transfer.senderBranch, actorId);
+    await ensureBranchBootstrapped(senderCtx.organizationId);
+
+    // Resolve per-line source locations up-front so any bad/renamed
+    // id fails fast with a 400/404 before we touch the ledger.
+    const senderLocationCache = createLocationCache();
+    const dispatchItems = [] as Array<{
+      moveGroupId: string;
+      operationType: string;
+      skuRef: string;
+      sourceLocationId: string;
+      destinationLocationId: string;
+      quantityPlanned: number;
+    }>;
+    try {
+      for (const item of transfer.items) {
+        const sourceCode = await resolveLocationCode(flow, item.sourceLocationId, senderCtx, {
+          cache: senderLocationCache,
+        });
+        dispatchItems.push({
+          moveGroupId: '',
+          operationType: 'shipment',
+          skuRef: skuRefFromProduct(item.product, item.variantSku),
+          sourceLocationId: sourceCode,
+          destinationLocationId: CUSTOMER_LOCATION,
+          quantityPlanned: item.quantity,
+        });
+      }
+    } catch (err) {
+      if (err instanceof LocationResolutionError) {
+        throw createStatusError(err.message, err.statusCode);
+      }
+      throw err;
+    }
 
     // Create outbound MoveGroup: stock → customer (virtual transit) at sender org
     const outboundGroup = await flow.services.moveGroup.create(
       {
         groupType: 'shipment',
         metadata: { transferId: transfer._id.toString(), documentNumber: transfer.documentNumber },
-        items: transfer.items.map((item) => ({
-          moveGroupId: '',
-          operationType: 'shipment',
-          skuRef: skuRefFromProduct(item.product, item.variantSku),
-          sourceLocationId: DEFAULT_LOCATION,
-          destinationLocationId: CUSTOMER_LOCATION,
-          quantityPlanned: item.quantity,
-        })),
+        items: dispatchItems,
       },
       senderCtx,
     );
@@ -322,8 +383,11 @@ class TransferService {
 
     const flow = getFlowEngine();
     const receiverCtx = buildFlowContext(transfer.receiverBranch, actorId);
+    await ensureBranchBootstrapped(receiverCtx.organizationId);
 
-    // Process received quantities
+    // Process received quantities, resolving per-line destination locations
+    // in the receiver's scope. Call-site override (`receivedItems[...]`.
+    // destinationLocationId) beats the planned value on the transfer doc.
     let allReceived = true;
     const inboundItems: Array<{
       moveGroupId: string;
@@ -334,6 +398,8 @@ class TransferService {
       quantityPlanned: number;
       metadata: { unitCost: number | undefined };
     }> = [];
+
+    const receiverLocationCache = createLocationCache();
 
     for (const item of transfer.items) {
       const previouslyReceived = Math.max(0, Number(item.quantityReceived || 0));
@@ -353,12 +419,24 @@ class TransferService {
       if ((item.quantityReceived ?? 0) < (item.quantity || 0)) allReceived = false;
 
       if (delta > 0) {
+        const destinationLocationId = receivedItem?.destinationLocationId ?? item.destinationLocationId;
+        let destinationCode: string;
+        try {
+          destinationCode = await resolveLocationCode(flow, destinationLocationId, receiverCtx, {
+            cache: receiverLocationCache,
+          });
+        } catch (err) {
+          if (err instanceof LocationResolutionError) {
+            throw createStatusError(err.message, err.statusCode);
+          }
+          throw err;
+        }
         inboundItems.push({
           moveGroupId: '',
           operationType: 'receipt',
           skuRef: skuRefFromProduct(item.product, item.variantSku),
           sourceLocationId: VENDOR_LOCATION,
-          destinationLocationId: DEFAULT_LOCATION,
+          destinationLocationId: destinationCode,
           quantityPlanned: delta,
           metadata: { unitCost: item.costPrice },
         });
@@ -431,28 +509,6 @@ class TransferService {
     return transfer;
   }
 
-  async getById(transferId: string): Promise<unknown> {
-    return transferRepository.getById(transferId, {
-      populate: [
-        { path: 'senderBranch', select: 'code name address' },
-        { path: 'receiverBranch', select: 'code name address' },
-        { path: 'createdBy', select: 'name email' },
-        { path: 'approvedBy', select: 'name email' },
-        { path: 'dispatchedBy', select: 'name email' },
-        { path: 'receivedBy', select: 'name email' },
-      ],
-      lean: true,
-    });
-  }
-
-  async getByDocumentNumber(documentNumber: string): Promise<unknown> {
-    return transferRepository.Model.findOne({ documentNumber: documentNumber.toUpperCase() })
-      .populate('senderBranch', 'code name address')
-      .populate('receiverBranch', 'code name address')
-      .populate('createdBy', 'name email')
-      .lean();
-  }
-
   async listTransfers(
     filters: Record<string, unknown> = {},
     options: { page?: number; limit?: number; sort?: string; populate?: boolean } = {},
@@ -513,18 +569,31 @@ class TransferService {
     items: CreateTransferData['items'],
     senderBranchId: unknown = null,
   ): Promise<Array<Record<string, unknown>>> {
-    const Product = mongoose.model('Product');
-    const productIds = [...new Set((items || []).map((i) => i.productId?.toString() || i.product?.toString()))];
-    const products = (await Product.find({ _id: { $in: productIds } })
-      .select('name sku costPrice variants')
-      .lean()) as unknown as ProductDocument[];
+    const { ensureCatalogEngine } = await import('#resources/catalog/catalog.engine.js');
+    const catalog = await ensureCatalogEngine();
+    const catalogCtx = { actorId: 'transfer-service', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
+    const productIds = [...new Set((items || []).map((i) => i.productId?.toString() || i.product?.toString()))].filter(
+      Boolean,
+    ) as string[];
+    const products = (await catalog.repositories.product.findAll(
+      { _id: { $in: productIds } },
+      { ...catalogCtx, lean: true },
+    )) as unknown as ProductDocument[];
     const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
-    // Get cost from Flow quants at sender branch
+    // Get cost from Flow quants at sender branch. Flatten all (productId,
+    // skuRef, key) tuples up front, then `Promise.all` the availability
+    // reads in one shot — previously this was a serial nested `for...of`
+    // that did N round-trips per product/variant. A 5-product transfer
+    // with 4 variants each blocked the HTTP response for ~20 sequential
+    // queries; the parallel form returns in roughly the slowest single
+    // query's time.
     const costMap = new Map<string, number>();
     if (senderBranchId) {
       const flow = getFlowEngine();
       const senderCtx = buildFlowContext(senderBranchId as string);
+
+      const lookups: Array<{ stockKey: string; skuRef: string }> = [];
       for (const pid of productIds) {
         if (!pid) continue;
         const product = productMap.get(pid);
@@ -532,23 +601,24 @@ class TransferService {
         if (product.variants?.length) {
           for (const v of product.variants) {
             if (!v.sku) continue;
-            const avail = await flow.services.quant.getAvailability(
-              { skuRef: v.sku, locationId: DEFAULT_LOCATION },
-              senderCtx,
-            );
-            if (avail.breakdowns?.[0]?.unitCost) {
-              costMap.set(`${pid}_${v.sku}`, avail.breakdowns[0].unitCost);
-            }
+            lookups.push({ stockKey: `${pid}_${v.sku}`, skuRef: v.sku });
           }
         } else {
+          lookups.push({ stockKey: `${pid}_null`, skuRef: pid });
+        }
+      }
+
+      const results = await Promise.all(
+        lookups.map(async ({ stockKey, skuRef }) => {
           const avail = await flow.services.quant.getAvailability(
-            { skuRef: pid, locationId: DEFAULT_LOCATION },
+            { skuRef, locationId: DEFAULT_LOCATION },
             senderCtx,
           );
-          if (avail.breakdowns?.[0]?.unitCost) {
-            costMap.set(`${pid}_null`, avail.breakdowns[0].unitCost);
-          }
-        }
+          return { stockKey, unitCost: avail.breakdowns?.[0]?.unitCost };
+        }),
+      );
+      for (const { stockKey, unitCost } of results) {
+        if (unitCost != null) costMap.set(stockKey, unitCost);
       }
     }
 
@@ -569,6 +639,8 @@ class TransferService {
         quantity: item.quantity,
         costPrice: costMap.get(stockKey) ?? variant?.costPrice ?? product?.costPrice ?? 0,
         notes: item.notes,
+        sourceLocationId: item.sourceLocationId,
+        destinationLocationId: item.destinationLocationId,
       };
     });
   }

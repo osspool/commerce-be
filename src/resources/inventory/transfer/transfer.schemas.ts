@@ -13,6 +13,16 @@ const transferItemSchema = {
     quantity: { type: 'integer', minimum: 1, description: 'Quantity to transfer' },
     costPrice: { type: 'number', minimum: 0, description: 'Cost price per unit' },
     notes: { type: 'string', description: 'Item notes' },
+    sourceLocationId: {
+      type: 'string',
+      description:
+        'Sender-branch Location _id to pull stock from. Defaults to the sender default stock bin.',
+    },
+    destinationLocationId: {
+      type: 'string',
+      description:
+        'Receiver-branch Location _id to drop stock into. Defaults to the receiver default stock bin.',
+    },
   },
   required: ['productId', 'quantity'],
 } as const;
@@ -24,6 +34,11 @@ const receivedItemSchema = {
     productId: { type: 'string', description: 'Product ID (alternative to itemId)' },
     variantSku: { type: 'string', nullable: true },
     quantityReceived: { type: 'integer', minimum: 0, description: 'Quantity actually received' },
+    destinationLocationId: {
+      type: 'string',
+      description:
+        'Override the receiver location for this line at receive time (defaults to the line\'s planned destinationLocationId).',
+    },
   },
 } as const;
 

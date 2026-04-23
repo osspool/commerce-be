@@ -12,11 +12,11 @@ import { requireAuth } from '@classytic/arc/permissions';
 import { createAdapter } from '#shared/adapter.js';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
+import { events } from './events.js';
+import { updateUserBody, userSchemaOptions } from './schemas.js';
+import userController from './user.controller.js';
 import User from './user.model.js';
 import userRepository from './user.repository.js';
-import userController from './user.controller.js';
-import { userSchemaOptions, updateUserBody } from './schemas.js';
-import { events } from './events.js';
 
 const userResource = defineResource({
   name: 'user',
@@ -29,10 +29,16 @@ const userResource = defineResource({
   controller: userController,
   queryParser,
 
+  // Users belong to organizations via Better Auth's `member` collection,
+  // not via a per-document `organizationId` field. Disable Arc's default
+  // tenant scoping so list/get queries don't filter on a column that the
+  // BA-managed `user` collection doesn't have.
+  tenantField: false,
+
   permissions: getResourcePermissions('user'),
   schemaOptions: userSchemaOptions,
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/me',
@@ -40,7 +46,6 @@ const userResource = defineResource({
       description: "Returns the authenticated user's profile information",
       handler: 'getProfile',
       permissions: requireAuth(),
-      wrapHandler: false,
       schema: {},
     },
     {
@@ -50,7 +55,6 @@ const userResource = defineResource({
       description: "Update the authenticated user's profile information",
       handler: 'updateProfile',
       permissions: requireAuth(),
-      wrapHandler: false,
       schema: { body: updateUserBody },
     },
   ],

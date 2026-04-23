@@ -5,13 +5,13 @@
  * Channel activation is controlled by NOTIFICATION_CHANNELS env config.
  */
 
+import { isChannelEnabled } from '#config/sections/notifications.config.js';
+import type { SSEManager } from '#core/plugins/sse-manager.plugin.js';
+import logger from '#lib/utils/logger.js';
+import { notify } from '#shared/notifications/index.js';
+import { resolveRecipients } from './notification.recipients.js';
 import notificationRepository from './notification.repository.js';
 import { buildInAppNotification } from './notification.templates.js';
-import { resolveRecipients } from './notification.recipients.js';
-import { isChannelEnabled } from '#config/sections/notifications.config.js';
-import { notify } from '#shared/notifications/index.js';
-import logger from '#lib/utils/logger.js';
-import type { SSEManager } from '#core/plugins/sse-manager.plugin.js';
 
 interface DispatchOptions {
   organizationId: string;
@@ -45,8 +45,7 @@ export async function dispatchNotification(options: DispatchOptions): Promise<vo
 
   try {
     // 1. Resolve recipients
-    const recipients =
-      options.recipients || (await resolveRecipients(type, organizationId, triggeredBy));
+    const recipients = options.recipients || (await resolveRecipients(type, organizationId, triggeredBy));
 
     if (recipients.length === 0) return;
 
@@ -99,14 +98,8 @@ export async function dispatchNotification(options: DispatchOptions): Promise<vo
       }
     }
 
-    logger.debug(
-      { type, organizationId, recipientCount: recipients.length },
-      'Notifications dispatched',
-    );
+    logger.debug({ type, organizationId, recipientCount: recipients.length }, 'Notifications dispatched');
   } catch (error) {
-    logger.error(
-      { type, organizationId, error: (error as Error).message },
-      'Notification dispatch failed',
-    );
+    logger.error({ type, organizationId, error: (error as Error).message }, 'Notification dispatch failed');
   }
 }

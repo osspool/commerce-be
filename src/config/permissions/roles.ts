@@ -55,8 +55,18 @@ export const orgGroups = Object.freeze({
   financeStaff: [orgRoles.FINANCE_ADMIN, orgRoles.FINANCE_MANAGER, orgRoles.BRANCH_MANAGER],
   storeStaff: [orgRoles.STORE_MANAGER, orgRoles.STORE_STAFF, orgRoles.BRANCH_MANAGER],
   warehouseStaff: [orgRoles.WAREHOUSE_ADMIN, orgRoles.WAREHOUSE_STAFF, orgRoles.BRANCH_MANAGER],
-  inventoryStaff: [orgRoles.INVENTORY_STAFF, orgRoles.WAREHOUSE_ADMIN, orgRoles.WAREHOUSE_STAFF, orgRoles.BRANCH_MANAGER],
+  inventoryStaff: [
+    orgRoles.INVENTORY_STAFF,
+    orgRoles.WAREHOUSE_ADMIN,
+    orgRoles.WAREHOUSE_STAFF,
+    orgRoles.BRANCH_MANAGER,
+  ],
   storeAdmin: [orgRoles.STORE_MANAGER, orgRoles.BRANCH_MANAGER],
+
+  // POS-specific groups
+  posCashier: [orgRoles.CASHIER, orgRoles.STORE_STAFF, orgRoles.STORE_MANAGER, orgRoles.BRANCH_MANAGER],
+  // Managers: can reconcile blind-closed shifts, approve variance overrides.
+  posManager: [orgRoles.STORE_MANAGER, orgRoles.BRANCH_MANAGER],
 } as const);
 
 export type OrgGroupName = keyof typeof orgGroups;

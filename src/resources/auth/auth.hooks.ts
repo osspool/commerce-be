@@ -5,7 +5,10 @@
  * Handles notifications after invitation acceptance.
  */
 
+import pino from 'pino';
 import { notify } from '#shared/notifications/index.js';
+
+const log = pino({ name: 'auth' });
 
 interface InvitationHookData {
   invitation: Record<string, unknown>;
@@ -15,18 +18,16 @@ interface InvitationHookData {
 }
 
 export const authHooks = {
-  afterAcceptInvitation: async ({
-    member,
-    user,
-    organization,
-  }: InvitationHookData): Promise<void> => {
-    const roles = typeof member.role === 'string'
-      ? member.role.split(',').map((r) => r.trim()).join(', ')
-      : String(member.role);
+  afterAcceptInvitation: async ({ member, user, organization }: InvitationHookData): Promise<void> => {
+    const roles =
+      typeof member.role === 'string'
+        ? member.role
+            .split(',')
+            .map((r) => r.trim())
+            .join(', ')
+        : String(member.role);
 
-    console.log(
-      `[auth] ${user.name} accepted invitation to ${organization.name} as ${roles}`,
-    );
+    log.info({ user: user.name, org: organization.name, roles }, 'Invitation accepted');
 
     // Notify the new member
     await notify('invitation_accepted', user.email, {
@@ -34,7 +35,7 @@ export const authHooks = {
       orgName: organization.name,
       roles,
     }).catch((err) => {
-      console.error('[auth] Failed to send acceptance notification:', err);
+      log.error({ err, email: user.email }, 'Failed to send acceptance notification');
     });
   },
 };

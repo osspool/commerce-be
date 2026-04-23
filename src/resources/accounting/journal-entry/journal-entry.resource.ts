@@ -1,25 +1,20 @@
 /**
- * Journal Entry Resource — CRUD only
+ * Journal Entry Resource — CRUD + Stripe Actions
  *
- * State transitions (post / reverse / duplicate / archive) live on the
- * unified action endpoint at POST /accounting/journal-entries/:id/action,
- * registered via createActionRouter from journal-entry.actions.ts in
- * accounting.plugin.ts. See [journal-entry.actions.ts](./journal-entry.actions.ts).
- *
- * Note: legacy PATCH /:id/post, /:id/reverse, /:id/unpost, POST /:id/duplicate
- * routes have been removed. unpost is intentionally gone — Odoo-correct
- * semantics treat posted entries as final. Use action="reverse".
+ * State transitions (post / reverse / duplicate / archive) via declarative
+ * `actions` block (POST /:id/action).
  *
  * Top-level defineResource — auto-discovered by loadResources().
  * Branch-tagged via orgScoped (organizationId from extraFields).
  */
 
 import { defineResource } from '@classytic/arc';
+import { requireOrgMembership, requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
 import { createAdapter } from '#shared/adapter.js';
-import { roles, requireAuth } from '@classytic/arc/permissions';
 import { orgScoped } from '#shared/presets/index.js';
 import { JournalEntry, journalEntryRepository } from '../accounting.engine.js';
+import { journalEntryActions } from './journal-entry.actions.js';
 
 const queryParser = new QueryParser({ maxLimit: 100 });
 
@@ -29,6 +24,8 @@ const journalEntryResource = defineResource({
   displayName: 'Journal Entries',
   tag: 'Accounting',
   prefix: '/accounting/journal-entries',
+
+  actions: journalEntryActions,
 
   // `softRequiredFields` (mongokit 3.5.4+) keeps `journalType` and `date` in
   // the generated body schema's `properties` (still validated when present)
@@ -63,11 +60,14 @@ const journalEntryResource = defineResource({
   },
 
   permissions: {
-    list: requireAuth(),
-    get: requireAuth(),
-    create: roles('admin', 'finance_admin', 'staff'),
-    update: roles('admin', 'finance_admin', 'staff'),
-    delete: roles('admin'),
+    // Branch-scoped via orgScoped — reads must come from a request bound to
+    // a branch (member/service/elevated). Plain authenticated shoppers (no
+    // x-organization-id) get a clear "Organization membership required".
+    list: requireOrgMembership(),
+    get: requireOrgMembership(),
+    create: requireRoles('admin', 'finance_admin', 'staff'),
+    update: requireRoles('admin', 'finance_admin', 'staff'),
+    delete: requireRoles('admin'),
   },
 });
 

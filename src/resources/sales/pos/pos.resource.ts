@@ -1,8 +1,18 @@
+/**
+ * POS Resource — thin channel on top of `@classytic/order`.
+ *
+ * POS is just an order channel, not a bespoke module. All order writes go
+ * through the same `@classytic/order` engine as web checkout; POS only
+ * owns the cashier-facing UX (product browse, barcode lookup, receipt).
+ * Stock adjustment belongs on the inventory module — not on POS — so
+ * that legacy route was intentionally removed.
+ */
+
 import { defineResource } from '@classytic/arc';
-import posController from './pos.controller.js';
-import { inventoryController } from '#resources/inventory/index.js';
 import permissions from '#config/permissions.js';
-import { posProductsSchema, lookupSchema, createOrderSchema, receiptSchema, adjustStockSchema } from './pos.schemas.js';
+import inventoryController from '#resources/inventory/inventory.controller.js';
+import posController from './pos.controller.js';
+import { createOrderSchema, lookupSchema, posProductsSchema, receiptSchema } from './pos.schemas.js';
 
 const posResource = defineResource({
   name: 'pos',
@@ -12,7 +22,7 @@ const posResource = defineResource({
 
   disableDefaultRoutes: true,
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/products',
@@ -20,7 +30,7 @@ const posResource = defineResource({
       description:
         'Main POS catalog. Filter by category, search, inStockOnly, lowStockOnly. Returns products with branchStock.',
       permissions: permissions.pos.access,
-      wrapHandler: false,
+      raw: true,
       schema: posProductsSchema,
       handler: inventoryController.getPosProducts,
     },
@@ -30,7 +40,7 @@ const posResource = defineResource({
       summary: 'Barcode/SKU lookup',
       description: 'Fast lookup by barcode or SKU. Use for scanner input.',
       permissions: permissions.pos.access,
-      wrapHandler: false,
+      raw: true,
       schema: lookupSchema,
       handler: inventoryController.lookup,
     },
@@ -38,30 +48,20 @@ const posResource = defineResource({
       method: 'POST',
       path: '/orders',
       summary: 'Create POS order',
-      description: 'Cart-free checkout. Supports pickup (immediate) or delivery.',
+      description: 'Cart-free cashier checkout. Delegates to @classytic/order pipeline.',
       permissions: permissions.pos.access,
-      wrapHandler: false,
+      raw: true,
       schema: createOrderSchema,
       handler: posController.createOrder,
     },
     {
       method: 'GET',
       path: '/orders/:orderId/receipt',
-      summary: 'Get receipt',
+      summary: 'Get receipt for a POS order',
       permissions: permissions.pos.access,
-      wrapHandler: false,
+      raw: true,
       schema: receiptSchema,
       handler: posController.getReceipt,
-    },
-    {
-      method: 'POST',
-      path: '/stock/adjust',
-      summary: 'Adjust stock',
-      description: 'Set, add, or remove stock. Supports single item or bulk (up to 500).',
-      permissions: permissions.inventory.adjust,
-      wrapHandler: false,
-      schema: adjustStockSchema,
-      handler: inventoryController.bulkImport,
     },
   ],
 });

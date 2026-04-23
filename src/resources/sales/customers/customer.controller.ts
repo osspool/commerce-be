@@ -1,8 +1,8 @@
 import { BaseController } from '@classytic/arc';
-import type { FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { NotFoundError } from '#shared/utils/errors.js';
 import customerRepository from './customer.repository.js';
 import { customerSchemaOptions } from './customer.schemas.js';
-import { NotFoundError } from '#shared/utils/errors.js';
 
 interface AuthenticatedUser {
   _id?: string;
@@ -21,7 +21,11 @@ interface AuthenticatedUser {
  */
 export class CustomerController extends BaseController {
   constructor(service: typeof customerRepository, schemaOptions: typeof customerSchemaOptions) {
-    super(service, { schemaOptions });
+    // tenantField: false — customers are company-wide in this
+    // single-business multi-branch model. The customer doc has no
+    // organizationId field; without this flag Arc's default scope check
+    // denies every CRUD hit with ORG_SCOPE_DENIED.
+    super(service, { schemaOptions, tenantField: false });
     this.getMe = this.getMe.bind(this);
   }
 

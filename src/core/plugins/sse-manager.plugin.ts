@@ -7,15 +7,21 @@
  * Connections are keyed by userId:organizationId for branch-scoped delivery.
  */
 
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import type { ServerResponse } from 'node:http';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
 import config from '#config/index.js';
+
+interface SSELogger {
+  info(obj: object, msg?: string): void;
+  warn(obj: object, msg?: string): void;
+}
 
 export class SSEManager {
   private connections = new Map<string, Set<ServerResponse>>();
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private heartbeatMs: number;
+  logger: SSELogger | null = null;
 
   constructor(heartbeatMs = 30_000) {
     this.heartbeatMs = heartbeatMs;
@@ -33,13 +39,18 @@ export class SSEManager {
       this.connections.set(key, set);
     }
     set.add(res);
+    const openedAt = Date.now();
+    this.logger?.info({ key, total: set.size }, '[sse] connection opened');
 
-    // Cleanup on close
     res.on('close', () => {
+      const durationMs = Date.now() - openedAt;
+      this.logger?.info(
+        { key, durationMs, writableEnded: res.writableEnded },
+        '[sse] connection closed',
+      );
       this.removeConnection(userId, orgId, res);
     });
 
-    // Start heartbeat if first connection
     if (!this.heartbeatInterval) {
       this.startHeartbeat();
     }
@@ -136,6 +147,7 @@ declare module 'fastify' {
 
 const sseManagerPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const manager = new SSEManager(config.notifications?.ttlDays ? 30_000 : 30_000);
+  manager.logger = fastify.log;
   fastify.decorate('sseManager', manager);
 
   fastify.addHook('onClose', () => {

@@ -2,7 +2,7 @@
  * Analytics Plugin - MIGRATED TO RESOURCE PATTERN
  *
  * BEFORE: createRoutes with itemWrapper/messageWrapper
- * AFTER: Arc resource with additionalRoutes
+ * AFTER: Arc resource with routes
  *
  * All configuration moved to analytics.resource.js:
  * - Custom analytics endpoint

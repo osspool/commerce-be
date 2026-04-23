@@ -5,8 +5,8 @@
  * Single-tenant - no organizationId needed
  */
 
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import { getFinancialReport, getCategoryBreakdown, getCashFlowTrend } from '../workflows/financial-reports.workflow.js';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { getCashFlowTrend, getCategoryBreakdown, getFinancialReport } from '../workflows/financial-reports.workflow.js';
 
 interface ProfitLossQuery {
   startDate?: string;

@@ -1,28 +1,41 @@
 /**
- * Loyalty Resources — Members, Earning Rules, Tiers, Referrals
+ * Loyalty wrapper resources — Member (customer-id mapping) + Self-service + Referrals.
  *
- * Arc resources backed by @classytic/loyalty engine.
- * Follows warehouse.resources.ts convention: inline handlers, Zod schemas, no separate handler files.
+ * These resources stay raw because they don't map cleanly to vanilla Arc CRUD:
+ *   - **member**: keyed by `customerId` (be-prod's Customer model id), translated
+ *     to memberId via the bridge. Includes customer-membership projection sync.
+ *   - **loyalty-self**: customer derived from the authenticated user; no `:id` slot.
+ *   - **referral**: `recordReferral` is a domain verb (validates self-referral,
+ *     applies dual-side rewards); not a vanilla insert.
+ *
+ * Earning Rules and Tiers — which DO have vanilla CRUD shapes — moved to
+ * `earning-rule.resource.ts` and `tier.resource.ts` using the modern
+ * `adapter + actions` pattern.
  */
-import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { defineResource } from '@classytic/arc';
-import type { CreateEarningRuleInput, CreateTierInput } from '@classytic/loyalty';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
-import { getLoyaltyEngine } from './loyalty.plugin.js';
-import * as bridge from './loyalty.bridge.js';
-import customerRepository from '../customers/customer.repository.js';
 import Branch from '#resources/commerce/branch/branch.model.js';
-import { memberSchemas, earningRuleSchemas, tierSchemas, referralSchemas } from './loyalty.schemas.js';
+import customerRepository from '../customers/customer.repository.js';
+import * as bridge from './loyalty.bridge.js';
+import { ensureLoyaltyEngine } from './loyalty.plugin.js';
+import { memberSchemas, referralSchemas } from './loyalty.schemas.js';
+
+const loyaltyEngine = await ensureLoyaltyEngine();
 
 // ── Helpers (like flowCtx / flow in warehouse) ──
 
 function engine() {
-  return getLoyaltyEngine();
+  return loyaltyEngine;
 }
 
 function ctx(req: FastifyRequest) {
   const user = (req as any).user;
-  return { actorId: (user?._id || user?.id || 'anonymous') as string };
+  const actorId = (user?._id || user?.id || 'anonymous') as string;
+  const organizationId =
+    (req.headers['x-organization-id'] as string | undefined) || user?.organizationId || user?.orgId;
+  return organizationId ? { actorId, organizationId } : { actorId };
 }
 
 async function resolveBranchCode(req: FastifyRequest): Promise<string | undefined> {
@@ -54,13 +67,13 @@ export const memberResource = defineResource({
   tag: 'Loyalty',
   prefix: '/loyalty/members',
   disableDefaultRoutes: true,
-  additionalRoutes: [
+  routes: [
     {
       method: 'POST',
       path: '/',
       summary: 'Enroll customer in loyalty program',
       permissions: permissions.customers.update,
-      wrapHandler: false,
+      raw: true,
       schema: memberSchemas.enroll,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.body as { customerId: string };
@@ -78,13 +91,20 @@ export const memberResource = defineResource({
       path: '/:customerId',
       summary: 'Get loyalty member + balance',
       permissions: permissions.customers.get,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.params as { customerId: string };
         try {
           const member = await bridge.getMemberForCustomer(customerId, ctx(req));
           if (!member) return reply.code(404).send({ success: false, message: 'Not enrolled' });
-          const balance = await engine().services.member.getBalance(member._id, ctx(req));
+          const balance = {
+            current: member.balance.current,
+            lifetime: member.balance.lifetime,
+            redeemed: member.balance.redeemed,
+            expired: member.balance.expired,
+            tier: member.tier,
+            tierOverride: member.tierOverride,
+          };
           return reply.send({ success: true, data: { member, balance } });
         } catch (err: any) {
           return reply.code(mapError(err)).send({ success: false, message: err.message });
@@ -96,7 +116,7 @@ export const memberResource = defineResource({
       path: '/:customerId/deactivate',
       summary: 'Deactivate membership',
       permissions: permissions.customers.update,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.params as { customerId: string };
         try {
@@ -112,7 +132,7 @@ export const memberResource = defineResource({
       path: '/:customerId/reactivate',
       summary: 'Reactivate membership',
       permissions: permissions.customers.update,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.params as { customerId: string };
         try {
@@ -128,18 +148,33 @@ export const memberResource = defineResource({
       path: '/:customerId/adjust',
       summary: 'Adjust points (admin)',
       permissions: permissions.customers.update,
-      wrapHandler: false,
+      raw: true,
       schema: memberSchemas.adjust,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.params as { customerId: string };
         const { points, reason } = req.body as { points: number; reason: string };
+        const reqCtx = ctx(req);
         try {
-          const member = await bridge.requireMemberForCustomer(customerId, ctx(req));
-          const tx = await engine().services.ledger.adjustPoints(
+          const member = await bridge.requireMemberForCustomer(customerId, reqCtx);
+          const tx = await engine().repositories.pointTransaction.adjustPoints(
             { memberId: member._id, points, description: reason, reason },
-            ctx(req),
+            reqCtx,
           );
           await bridge.syncCustomerMembership(customerId);
+          req.log.info(
+            {
+              audit: true,
+              op: 'loyalty.points.adjust',
+              customerId,
+              memberId: String(member._id),
+              points,
+              reason,
+              balanceAfter: tx.balanceAfter,
+              actorId: reqCtx.actorId,
+              organizationId: (reqCtx as { organizationId?: string }).organizationId,
+            },
+            'loyalty points adjusted',
+          );
           return reply.send({ success: true, data: { transaction: tx, balanceAfter: tx.balanceAfter } });
         } catch (err: any) {
           return reply.code(mapError(err)).send({ success: false, message: err.message });
@@ -151,17 +186,18 @@ export const memberResource = defineResource({
       path: '/:customerId/history',
       summary: 'Transaction history',
       permissions: permissions.customers.get,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.params as { customerId: string };
         const { page = 1, limit = 20 } = req.query as { page?: number; limit?: number };
         try {
           const member = await bridge.requireMemberForCustomer(customerId, ctx(req));
-          const data = await engine().services.ledger.getHistory(
-            member._id,
-            { page: Number(page), limit: Math.min(Number(limit), 100) },
-            ctx(req),
-          );
+          const data = await engine().repositories.pointTransaction.getAll({
+            filters: { memberId: member._id },
+            page: Number(page),
+            limit: Math.min(Number(limit), 100),
+            sort: { createdAt: -1 },
+          });
           return reply.send({ success: true, data });
         } catch (err: any) {
           return reply.code(mapError(err)).send({ success: false, message: err.message });
@@ -172,16 +208,30 @@ export const memberResource = defineResource({
       method: 'POST',
       path: '/:customerId/tier-override',
       summary: 'Set tier override',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
+      permissions: permissions.loyalty.memberOps,
+      raw: true,
       schema: memberSchemas.tierOverride,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.params as { customerId: string };
         const { tier, reason } = req.body as { tier: string; reason: string };
+        const reqCtx = ctx(req);
         try {
-          const member = await bridge.requireMemberForCustomer(customerId, ctx(req));
-          const updated = await engine().services.tier.setOverride(member._id, tier, reason, ctx(req));
+          const member = await bridge.requireMemberForCustomer(customerId, reqCtx);
+          const updated = await engine().repositories.tierDefinition.setOverride(member._id, tier, reason, reqCtx);
           await bridge.syncCustomerMembership(customerId);
+          req.log.info(
+            {
+              audit: true,
+              op: 'loyalty.tier-override.set',
+              customerId,
+              memberId: String(member._id),
+              tier,
+              reason,
+              actorId: reqCtx.actorId,
+              organizationId: (reqCtx as { organizationId?: string }).organizationId,
+            },
+            'loyalty tier override set',
+          );
           return reply.send({ success: true, data: updated });
         } catch (err: any) {
           return reply.code(mapError(err)).send({ success: false, message: err.message });
@@ -192,14 +242,26 @@ export const memberResource = defineResource({
       method: 'DELETE',
       path: '/:customerId/tier-override',
       summary: 'Clear tier override',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
+      permissions: permissions.loyalty.memberOps,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.params as { customerId: string };
+        const reqCtx = ctx(req);
         try {
-          const member = await bridge.requireMemberForCustomer(customerId, ctx(req));
-          const result = await engine().services.tier.clearOverride(member._id, ctx(req));
+          const member = await bridge.requireMemberForCustomer(customerId, reqCtx);
+          const result = await engine().repositories.tierDefinition.clearOverride(member._id, reqCtx);
           await bridge.syncCustomerMembership(customerId);
+          req.log.info(
+            {
+              audit: true,
+              op: 'loyalty.tier-override.clear',
+              customerId,
+              memberId: String(member._id),
+              actorId: reqCtx.actorId,
+              organizationId: (reqCtx as { organizationId?: string }).organizationId,
+            },
+            'loyalty tier override cleared',
+          );
           return reply.send({ success: true, data: result });
         } catch (err: any) {
           return reply.code(mapError(err)).send({ success: false, message: err.message });
@@ -211,17 +273,17 @@ export const memberResource = defineResource({
       path: '/:customerId/referrals',
       summary: 'Get member referrals',
       permissions: permissions.customers.get,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { customerId } = req.params as { customerId: string };
         const { page = 1, limit = 20 } = req.query as { page?: number; limit?: number };
         try {
           const member = await bridge.requireMemberForCustomer(customerId, ctx(req));
-          const data = await engine().services.referral.getReferralsByReferrer(
-            member._id,
-            { page: Number(page), limit: Math.min(Number(limit), 100) },
-            ctx(req),
-          );
+          const data = await engine().repositories.referral.getAll({
+            filters: { referrerId: member._id },
+            page: Number(page),
+            limit: Math.min(Number(limit), 100),
+          });
           return reply.send({ success: true, data });
         } catch (err: any) {
           return reply.code(mapError(err)).send({ success: false, message: err.message });
@@ -239,13 +301,13 @@ export const loyaltySelfResource = defineResource({
   tag: 'Loyalty',
   prefix: '/loyalty/me',
   disableDefaultRoutes: true,
-  additionalRoutes: [
+  routes: [
     {
       method: 'POST',
       path: '/enroll',
       summary: 'Self-enroll in loyalty program',
       permissions: permissions.customers.getMe,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const user = (req as any).user;
         const userId = user?._id || user?.id;
@@ -271,7 +333,7 @@ export const loyaltySelfResource = defineResource({
       path: '/',
       summary: 'Get my loyalty status',
       permissions: permissions.customers.getMe,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const user = (req as any).user;
         const userId = user?._id || user?.id;
@@ -281,7 +343,14 @@ export const loyaltySelfResource = defineResource({
           if (!customer) return reply.code(404).send({ success: false, message: 'Customer profile not found' });
           const member = await bridge.getMemberForCustomer(customer._id as unknown as string, ctx(req));
           if (!member) return reply.send({ success: true, data: { enrolled: false } });
-          const balance = await engine().services.member.getBalance(member._id, ctx(req));
+          const balance = {
+            current: member.balance.current,
+            lifetime: member.balance.lifetime,
+            redeemed: member.balance.redeemed,
+            expired: member.balance.expired,
+            tier: member.tier,
+            tierOverride: member.tierOverride,
+          };
           return reply.send({ success: true, data: { enrolled: true, member, balance } });
         } catch (err: any) {
           return reply.code(400).send({ success: false, message: err.message });
@@ -293,7 +362,7 @@ export const loyaltySelfResource = defineResource({
       path: '/referral',
       summary: 'Apply a referral code (self-service)',
       permissions: permissions.customers.getMe,
-      wrapHandler: false,
+      raw: true,
       schema: referralSchemas.selfRecord,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const user = (req as any).user;
@@ -303,7 +372,7 @@ export const loyaltySelfResource = defineResource({
         try {
           const customer = await customerRepository.getByUserId(userId);
           if (!customer) return reply.code(404).send({ success: false, message: 'Customer profile not found' });
-          const referral = await engine().services.referral.recordReferral(
+          const referral = await engine().repositories.referral.recordReferral(
             { referralCode, refereeExternalId: customer._id as unknown as string, refereeExternalType: 'customer' },
             ctx(req),
           );
@@ -316,200 +385,9 @@ export const loyaltySelfResource = defineResource({
   ],
 });
 
-// ── Earning Rules Resource ──
-
-export const earningRuleResource = defineResource({
-  name: 'loyalty-earning-rule',
-  displayName: 'Earning Rules',
-  tag: 'Loyalty',
-  prefix: '/loyalty/earning-rules',
-  disableDefaultRoutes: true,
-  additionalRoutes: [
-    {
-      method: 'GET',
-      path: '/',
-      summary: 'List earning rules',
-      permissions: permissions.loyalty.view,
-      wrapHandler: false,
-      schema: earningRuleSchemas.list,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { page = 1, limit = 50, status } = req.query as { page?: number; limit?: number; status?: string };
-        try {
-          const query: Record<string, unknown> = {};
-          if (status) query.status = status;
-          const data = await engine().services.earning.listRules(
-            { ...query, page: Number(page), limit: Math.min(Number(limit), 100) },
-            ctx(req),
-          );
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(400).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'GET',
-      path: '/:ruleId',
-      summary: 'Get earning rule',
-      permissions: permissions.loyalty.view,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { ruleId } = req.params as { ruleId: string };
-        try {
-          const rule = await engine().repositories.earningRule.getById(ruleId);
-          if (!rule) return reply.code(404).send({ success: false, message: 'Not found' });
-          return reply.send({ success: true, data: rule });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'POST',
-      path: '/',
-      summary: 'Create earning rule',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
-      schema: earningRuleSchemas.create,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const rule = await engine().services.earning.createRule(req.body as CreateEarningRuleInput, ctx(req));
-          return reply.code(201).send({ success: true, data: rule });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'PUT',
-      path: '/:ruleId',
-      summary: 'Update earning rule',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
-      schema: earningRuleSchemas.update,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { ruleId } = req.params as { ruleId: string };
-        try {
-          const rule = await engine().services.earning.updateRule(
-            ruleId,
-            req.body as Record<string, unknown>,
-            ctx(req),
-          );
-          return reply.send({ success: true, data: rule });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'POST',
-      path: '/:ruleId/deactivate',
-      summary: 'Deactivate earning rule',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { ruleId } = req.params as { ruleId: string };
-        try {
-          const rule = await engine().services.earning.deactivateRule(ruleId, ctx(req));
-          return reply.send({ success: true, data: rule });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-  ],
-});
-
-// ── Tiers Resource ──
-
-export const tierResource = defineResource({
-  name: 'loyalty-tier',
-  displayName: 'Loyalty Tiers',
-  tag: 'Loyalty',
-  prefix: '/loyalty/tiers',
-  disableDefaultRoutes: true,
-  additionalRoutes: [
-    {
-      method: 'GET',
-      path: '/',
-      summary: 'List tier definitions',
-      permissions: permissions.loyalty.view,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const tiers = await engine().services.tier.listTiers(ctx(req));
-          return reply.send({ success: true, data: tiers });
-        } catch (err: any) {
-          return reply.code(400).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'POST',
-      path: '/',
-      summary: 'Create tier',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
-      schema: tierSchemas.create,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const tier = await engine().services.tier.createTier(req.body as CreateTierInput, ctx(req));
-          return reply.code(201).send({ success: true, data: tier });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'PUT',
-      path: '/:tierId',
-      summary: 'Update tier',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
-      schema: tierSchemas.update,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { tierId } = req.params as { tierId: string };
-        try {
-          const tier = await engine().services.tier.updateTier(tierId, req.body as Record<string, unknown>, ctx(req));
-          return reply.send({ success: true, data: tier });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'DELETE',
-      path: '/:tierId',
-      summary: 'Delete tier',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { tierId } = req.params as { tierId: string };
-        try {
-          await engine().services.tier.deleteTier(tierId, ctx(req));
-          return reply.send({ success: true, message: 'Tier deleted' });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'POST',
-      path: '/evaluate',
-      summary: 'Evaluate all members for tier changes',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const result = await engine().services.tier.evaluateAll(ctx(req));
-          return reply.send({ success: true, data: result });
-        } catch (err: any) {
-          return reply.code(400).send({ success: false, message: err.message });
-        }
-      },
-    },
-  ],
-});
+// Earning Rules + Tiers moved to earning-rule.resource.ts / tier.resource.ts
+// (modern adapter + actions pattern). They have vanilla CRUD shapes and don't
+// belong in this wrapper file.
 
 // ── Referrals Resource ──
 
@@ -519,18 +397,18 @@ export const referralResource = defineResource({
   tag: 'Loyalty',
   prefix: '/loyalty/referrals',
   disableDefaultRoutes: true,
-  additionalRoutes: [
+  routes: [
     {
       method: 'POST',
       path: '/',
       summary: 'Record a referral',
       permissions: permissions.customers.update,
-      wrapHandler: false,
+      raw: true,
       schema: referralSchemas.record,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { referralCode, refereeCustomerId } = req.body as { referralCode: string; refereeCustomerId: string };
         try {
-          const referral = await engine().services.referral.recordReferral(
+          const referral = await engine().repositories.referral.recordReferral(
             { referralCode, refereeExternalId: refereeCustomerId, refereeExternalType: 'customer' },
             ctx(req),
           );
@@ -544,12 +422,23 @@ export const referralResource = defineResource({
       method: 'POST',
       path: '/:referralId/approve',
       summary: 'Approve referral',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
+      permissions: permissions.loyalty.memberOps,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { referralId } = req.params as { referralId: string };
+        const reqCtx = ctx(req);
         try {
-          const referral = await engine().services.referral.approve(referralId, ctx(req));
+          const referral = await engine().repositories.referral.approve(referralId, reqCtx);
+          req.log.info(
+            {
+              audit: true,
+              op: 'loyalty.referral.approve',
+              referralId,
+              actorId: reqCtx.actorId,
+              organizationId: (reqCtx as { organizationId?: string }).organizationId,
+            },
+            'loyalty referral approved',
+          );
           return reply.send({ success: true, data: referral });
         } catch (err: any) {
           return reply.code(mapError(err)).send({ success: false, message: err.message });
@@ -560,14 +449,26 @@ export const referralResource = defineResource({
       method: 'POST',
       path: '/:referralId/reject',
       summary: 'Reject referral',
-      permissions: permissions.loyalty.manage,
-      wrapHandler: false,
+      permissions: permissions.loyalty.memberOps,
+      raw: true,
       schema: referralSchemas.reject,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { referralId } = req.params as { referralId: string };
         const { reason } = req.body as { reason: string };
+        const reqCtx = ctx(req);
         try {
-          const referral = await engine().services.referral.reject(referralId, reason, ctx(req));
+          const referral = await engine().repositories.referral.reject(referralId, reason, reqCtx);
+          req.log.info(
+            {
+              audit: true,
+              op: 'loyalty.referral.reject',
+              referralId,
+              reason,
+              actorId: reqCtx.actorId,
+              organizationId: (reqCtx as { organizationId?: string }).organizationId,
+            },
+            'loyalty referral rejected',
+          );
           return reply.send({ success: true, data: referral });
         } catch (err: any) {
           return reply.code(mapError(err)).send({ success: false, message: err.message });
@@ -579,11 +480,11 @@ export const referralResource = defineResource({
       path: '/lookup/:code',
       summary: 'Lookup referral code',
       permissions: permissions.customers.get,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { code } = req.params as { code: string };
         try {
-          const member = await engine().services.referral.lookupByCode(code, ctx(req));
+          const member = await engine().repositories.referral.lookupByCode(code, ctx(req));
           if (!member) return reply.code(404).send({ success: false, message: 'Code not found' });
           return reply.send({ success: true, data: { referrerMemberId: member._id } });
         } catch (err: any) {

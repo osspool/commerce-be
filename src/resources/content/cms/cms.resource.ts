@@ -1,9 +1,9 @@
 import { defineResource } from '@classytic/arc';
+import permissions from '#config/permissions.js';
 import { createAdapter } from '#shared/adapter.js';
+import cmsController from './cms.controller.js';
 import CMS from './cms.model.js';
 import cmsRepository from './cms.repository.js';
-import cmsController from './cms.controller.js';
-import permissions from '#config/permissions.js';
 
 const cmsResource = defineResource({
   name: 'cms',
@@ -15,14 +15,14 @@ const cmsResource = defineResource({
   controller: cmsController,
 
   disableDefaultRoutes: true,
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/:slug',
       handler: 'getBySlug',
       summary: 'Get CMS page by slug',
       permissions: permissions.cms.get,
-      wrapHandler: false,
+      raw: true,
     },
     {
       method: 'POST',
@@ -30,7 +30,7 @@ const cmsResource = defineResource({
       handler: 'getOrCreateBySlug',
       summary: 'Get or create CMS page by slug',
       permissions: permissions.cms.create,
-      wrapHandler: false,
+      raw: true,
     },
     {
       method: 'PATCH',
@@ -38,7 +38,7 @@ const cmsResource = defineResource({
       handler: 'updateBySlug',
       summary: 'Update CMS page by slug',
       permissions: permissions.cms.update,
-      wrapHandler: false,
+      raw: true,
     },
     {
       method: 'DELETE',
@@ -46,7 +46,7 @@ const cmsResource = defineResource({
       handler: 'deleteBySlug',
       summary: 'Delete CMS page by slug',
       permissions: permissions.cms.delete,
-      wrapHandler: false,
+      raw: true,
     },
   ],
 });

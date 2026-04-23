@@ -1,4 +1,4 @@
-import mongoose, { Schema, type HydratedDocument } from 'mongoose';
+import mongoose, { type HydratedDocument, Schema } from 'mongoose';
 
 /**
  * User Model — Better Auth Overlay
@@ -72,8 +72,14 @@ export type UserDocument = HydratedDocument<IUser, IUserMethods>;
 
 const userSchema = new Schema<IUser, mongoose.Model<IUser, object, IUserMethods>, IUserMethods>(
   {
-    // BA manages: name, email, emailVerified, image, createdAt, updatedAt
-    // We define our additional fields here
+    // BA owns these fields and writes them via its own API. Declaring them
+    // here (without validators that would conflict with BA) lets Mongoose
+    // hydrate them on read and persist updates via `user.save()` — which
+    // the profile-update workflow relies on.
+    name: { type: String },
+    email: { type: String },
+    emailVerified: { type: Boolean },
+    image: { type: String },
 
     // System-level roles (global permissions)
     role: {

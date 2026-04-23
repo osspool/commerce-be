@@ -1,7 +1,7 @@
 /**
  * Day-Close Action Router Integration Tests
  *
- * Verifies POST /accounting/posting/day/action — close / reopen / backfill.
+ * Verifies POST /accounting/posting/:id/action — close / reopen / backfill.
  *
  * Coverage:
  *   - close: posts canonical POS_SALES JE, idempotent
@@ -48,7 +48,7 @@ async function seedPlatformConfig(): Promise<void> {
 /** Insert a verified POS transaction so postDailyPosSales has something to aggregate. */
 async function insertPosTransaction(branchId: string, date: string, amount = 100000) {
   const db = mongoose.connection.db!;
-  await db.collection('transactions').insertOne({
+  await db.collection('revenue_transactions').insertOne({
     _id: new mongoose.Types.ObjectId(),
     flow: 'inflow',
     status: 'verified',
@@ -76,7 +76,7 @@ async function callAction(action: string, body: Record<string, unknown> = {}) {
     method: 'POST',
     // Action router register on /:id/action; we don't have a meaningful id
     // for day-close so we pass a placeholder. The handlers ignore it.
-    url: `${API}/accounting/posting/day/_/action`,
+    url: `${API}/accounting/posting/_/action`,
     headers: auth.getHeaders('admin'),
     payload: { action, ...body },
   });
@@ -158,7 +158,7 @@ beforeEach(async () => {
   // Reset between tests; keep accounts.
   const db = mongoose.connection.db!;
   await db.collection('journalentries').deleteMany({});
-  await db.collection('transactions').deleteMany({});
+  await db.collection('revenue_transactions').deleteMany({});
   await db.collection('day_close_states').deleteMany({});
   await db.collection('fiscalperiods').deleteMany({});
 

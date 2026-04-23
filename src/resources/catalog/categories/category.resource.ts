@@ -1,17 +1,18 @@
 /**
- * Category Resource Definition
+ * Category Resource — catalog-backed.
+ *
+ * Pure wiring: adapter, permissions, cache, routes.
+ * Handler logic lives in category.handlers.ts.
+ * Zod schemas in category.catalog.schemas.ts.
  */
 
 import { defineResource } from '@classytic/arc';
-import { createAdapter } from '#shared/adapter.js';
-import { getResourcePermissions } from '#shared/permissions.js';
-import { slugLookup, tree } from '#shared/presets.js';
-import { queryParser } from '#shared/query-parser.js';
-import Category from './category.model.js';
-import categoryRepository from './category.repository.js';
-import categoryController from './category.controller.js';
 import permissions from '#config/permissions.js';
-import { events as categoryEvents } from './events.js';
+import { getResourcePermissions } from '#shared/permissions.js';
+import { queryParser } from '#shared/query-parser.js';
+import { createCatalogCategoryAdapter } from './catalog-category.adapter.js';
+import { parentSlugParam, slugParam } from './category.catalog.schemas.js';
+import { getBySlug, getChildren, getTree, syncCounts } from './category.handlers.js';
 
 const categoryResource = defineResource({
   name: 'category',
@@ -19,41 +20,65 @@ const categoryResource = defineResource({
   tag: 'Categories',
   prefix: '/categories',
 
-  adapter: createAdapter(Category, categoryRepository),
-  controller: categoryController,
-  queryParser,
+  // Catalog engine runs in `mode: 'global'` — category documents carry no
+  // `organizationId` field (categories are company-wide, shared across all
+  // branches). Without this opt-out, Arc injects `organizationId: <header>`
+  // into every query, the docs fail to match, and the pipeline denies with
+  // ORG_SCOPE_DENIED / 404.
+  tenantField: false,
 
-  // Presets add: /slug/:slug, /tree, /:parent/children routes
-  presets: [slugLookup, tree],
+  adapter: {
+    type: 'custom' as const,
+    name: 'catalog',
+    repository: createCatalogCategoryAdapter(),
+  },
+
+  queryParser,
 
   permissions: getResourcePermissions('category'),
 
-  // Categories change rarely — aggressive caching
   cache: {
     staleTime: 60,
     gcTime: 300,
     tags: ['categories'],
   },
 
-  schemaOptions: {
-    fieldRules: {
-      slug: { systemManaged: true },
+  routes: [
+    {
+      method: 'GET',
+      path: '/slug/:slug',
+      summary: 'Get category by slug',
+      permissions: getResourcePermissions('category').list,
+      raw: true,
+      schema: { params: slugParam },
+      handler: getBySlug,
     },
-  },
-
-  // Only truly custom routes - tree is handled by preset
-  additionalRoutes: [
+    {
+      method: 'GET',
+      path: '/tree',
+      summary: 'Get full category tree',
+      permissions: getResourcePermissions('category').list,
+      raw: true,
+      handler: getTree,
+    },
+    {
+      method: 'GET',
+      path: '/:parentSlug/children',
+      summary: 'Get child categories',
+      permissions: getResourcePermissions('category').list,
+      raw: true,
+      schema: { params: parentSlugParam },
+      handler: getChildren,
+    },
     {
       method: 'POST',
       path: '/sync-counts',
       summary: 'Recalculate product counts',
-      handler: 'syncProductCounts',
       permissions: permissions.categories.syncProductCounts,
-      wrapHandler: false,
+      raw: true,
+      handler: syncCounts,
     },
   ],
-
-  events: categoryEvents,
 });
 
 export default categoryResource;

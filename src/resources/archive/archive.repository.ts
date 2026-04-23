@@ -1,15 +1,16 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type mongoose from 'mongoose';
-import { Repository, methodRegistryPlugin, mongoOperationsPlugin, batchOperationsPlugin } from '@classytic/mongokit';
 import type { MongoOperationsMethods } from '@classytic/mongokit';
-import Archive from './archive.model.js';
-import type { IArchive } from './archive.model.js';
-import Transaction from '#resources/transaction/transaction.model.js';
+import { batchOperationsPlugin, methodRegistryPlugin, mongoOperationsPlugin, Repository } from '@classytic/mongokit';
+import type mongoose from 'mongoose';
 import { createDefaultLoader } from '#lib/utils/lazy-import.js';
+import { getTransactionModel } from '#shared/revenue/engine.js';
+import type { IArchive } from './archive.model.js';
+import Archive from './archive.model.js';
 
 const ARCHIVE_DIR = path.resolve(process.cwd(), 'storage', 'archives');
-const loadStockMovementModel = createDefaultLoader('#resources/inventory/stockMovement.model.js');
+// Legacy stockMovement model removed — stock movements are now in Flow's StockMove collection.
+// Archive for stock_movement type is disabled until Flow archive integration is implemented.
 
 interface ArchiveRunParams {
   type: string;
@@ -48,10 +49,11 @@ export class ArchiveRepository extends Repository<IArchive> {
 
     let Model: mongoose.Model<any>;
     if (type === 'transaction') {
-      Model = Transaction;
+      Model = getTransactionModel();
     } else if (type === 'stock_movement') {
-      const StockMovement = await loadStockMovementModel();
-      Model = StockMovement as mongoose.Model<any>;
+      throw new Error(
+        "stock_movement archive not available — stock movements are managed by Flow engine. Use Flow's audit trail instead.",
+      );
     } else {
       throw new Error(`Unsupported archive type: ${type}. Supported types: transaction, stock_movement`);
     }

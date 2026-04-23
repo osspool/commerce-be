@@ -19,9 +19,8 @@ let _mockEngine: LoyaltyEngine;
 async function createTestCustomer(overrides: Record<string, unknown> = {}) {
   const phone = `017${Date.now().toString().slice(-8)}`;
   return Customer.create({
-    name: 'Test Customer',
-    phone,
-    email: `test-${phone}@example.com`,
+    name: { given: 'Test', family: 'Customer' },
+    contact: { phone, email: `test-${phone}@example.com` },
     isActive: true,
     stats: {
       orders: { total: 0, completed: 0, cancelled: 0, refunded: 0 },

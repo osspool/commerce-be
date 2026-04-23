@@ -1,0 +1,67 @@
+{
+  "admin": {
+    "name": "Platform Admin",
+    "email": "admin@example.com",
+    "password": "change-me-before-prod"
+  },
+  "branches": [
+    {
+      "name": "Head Office",
+      "slug": "head-office",
+      "code": "HO-001",
+      "branchType": "warehouse",
+      "role": "head_office",
+      "isDefault": true,
+      "phone": "+8801700000000"
+    },
+    {
+      "name": "Dhaka Store",
+      "slug": "dhaka-store",
+      "code": "DHK-001",
+      "branchType": "store",
+      "role": "sub_branch"
+    }
+  ],
+  "accounting": {
+    "seedCOA": true,
+    "fiscalYear": {
+      "year": 2026,
+      "startMonth": 1,
+      "periods": "quarterly"
+    }
+  },
+  "platformConfig": {
+    "platformName": "BigBoss Commerce",
+    "paymentMethods": [
+      { "type": "cash", "name": "Cash", "isActive": true },
+      {
+        "type": "mfs",
+        "provider": "bkash",
+        "name": "bKash Personal",
+        "walletNumber": "01700000000",
+        "walletName": "BigBoss",
+        "isActive": true
+      }
+    ],
+    "vat": {
+      "isRegistered": false,
+      "defaultRate": 15,
+      "pricesIncludeVat": true,
+      "invoice": { "prefix": "INV-", "startNumber": 1 }
+    },
+    "logistics": {
+      "autoCreateShipment": false,
+      "autoCreateOnStatus": "processing"
+    },
+    "membership": {
+      "enabled": false,
+      "pointsPerAmount": 1,
+      "amountPerPoint": 100
+    },
+    "checkout": {
+      "allowStorePickup": false,
+      "deliveryFeeSource": "provider",
+      "freeDeliveryThreshold": 0
+    }
+  }
+}

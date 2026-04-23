@@ -1,35 +1,57 @@
 /**
  * Promo Resources — Programs, Vouchers, Evaluation
  *
- * Arc resources backed by @classytic/promo engine.
- * Follows loyalty.resources.ts convention: inline handlers, no separate handler files.
+ * Program & Voucher use Arc adapter for auto CRUD (list, get, create, update, delete).
+ * State transitions use declarative `actions` (Stripe pattern).
+ * Custom routes ONLY for sub-resources (rules, rewards) and composite views.
+ * Evaluation is pure service orchestration — no model, disableDefaultRoutes.
+ *
+ * Raw routes go through `handleRaw` (Arc 2.9 utility) so each handler just
+ * returns data — Arc owns the success envelope and respects `reply.sent` to
+ * avoid double-write hazards. Domain errors from @classytic/promo are mapped
+ * to ArcError instances with the right HTTP status code.
+ *
+ * ensurePromoEngine() is idempotent — safe to call at module top-level.
+ * Same pattern as pricelist.resource.ts and order.resource.ts.
  */
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import { defineResource } from '@classytic/arc';
-import type {
-  CreateProgramInput,
-  CreateRewardInput,
-  GenerateCodesInput,
-  GenerateSingleCodeInput,
-  EvaluateInput,
-  ListQuery,
-} from '@classytic/promo';
-import permissions from '#config/permissions.js';
-import { getPromoEngine } from './promo.plugin.js';
 
-// -- Helpers --
+import { defineResource } from '@classytic/arc';
+import { ArcError, handleRaw } from '@classytic/arc/utils';
+import type { CreateRewardInput, EvaluateInput, GenerateCodesInput, GenerateSingleCodeInput } from '@classytic/promo';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import permissions from '#config/permissions.js';
+import { createAdapter } from '#shared/adapter.js';
+import { ensurePromoEngine } from './promo.plugin.js';
+
+// ── Top-level engine + adapter wiring ───────────────────────────────────────
+// ensurePromoEngine() creates on first call, returns cached after.
+// Mongoose is connected before loadResources() runs (Arc guarantee).
+
+const promoEngine = ensurePromoEngine();
+
+const programAdapter = createAdapter(promoEngine.models.Program as never, promoEngine.repositories.program as never);
+
+const voucherAdapter = createAdapter(promoEngine.models.Voucher as never, promoEngine.repositories.voucher as never);
 
 function engine() {
-  return getPromoEngine();
+  return promoEngine;
 }
 
+/**
+ * Company-wide context for promo service calls. `organizationId` is
+ * intentionally omitted — promo is global across branches (see
+ * [promo.plugin.ts](./promo.plugin.ts) and Arc's `tenantField: false`
+ * on the program/voucher resources). Passing orgId here would make the
+ * promo package's repos inject a per-branch filter on reads and stamp
+ * it on writes, undoing the cross-branch design.
+ */
 function ctx(req: FastifyRequest) {
-  const user = (req as any).user;
-  return { actorId: (user?._id || user?.id || 'anonymous') as string };
+  const user = (req as unknown as Record<string, unknown>).user as Record<string, unknown> | undefined;
+  const actorId = (user?._id || user?.id || 'anonymous') as string;
+  return { actorId };
 }
 
-function mapError(err: any): number {
-  const code = err.code;
+function statusForCode(code: string | undefined): number {
   if (
     code === 'PROGRAM_NOT_FOUND' ||
     code === 'VOUCHER_NOT_FOUND' ||
@@ -42,346 +64,247 @@ function mapError(err: any): number {
   if (code === 'VOUCHER_EXPIRED' || code === 'VOUCHER_EXHAUSTED') return 410;
   if (code === 'INSUFFICIENT_BALANCE' || code === 'VALIDATION_ERROR') return 400;
   if (code === 'DUPLICATE_REDEMPTION') return 409;
+  if (code === 'CART_HASH_MISMATCH') return 409;
   if (code === 'TENANT_ISOLATION') return 403;
   return 400;
 }
 
-// -- Program Resource --
+/**
+ * Wrap a promo route so domain errors with `code` get mapped to the right
+ * HTTP status. Anything that isn't already an ArcError is converted into one
+ * so handleRaw's default error path produces a clean envelope.
+ */
+function promoRoute<T>(fn: (req: FastifyRequest, reply: FastifyReply) => Promise<T>, statusCode = 200) {
+  return handleRaw<T>(async (req, reply) => {
+    try {
+      return await fn(req, reply);
+    } catch (err) {
+      if (err instanceof ArcError) throw err;
+      const e = err as Error & { code?: string };
+      throw new ArcError(e.message, {
+        code: e.code ?? 'PROMO_ERROR',
+        statusCode: statusForCode(e.code),
+      });
+    }
+  }, statusCode);
+}
+
+// ── Program Resource ────────────────────────────────────────────────────────
+// Arc auto-generates: GET /, GET /:id, POST /, PATCH /:id, DELETE /:id
+// Actions: activate, pause, archive (Stripe pattern).
+// Custom routes: composite view, sub-resource CRUD (rules, rewards).
 
 export const programResource = defineResource({
   name: 'promo-program',
   displayName: 'Promo Programs',
   tag: 'Promotions',
   prefix: '/promotions/programs',
-  disableDefaultRoutes: true,
-  additionalRoutes: [
-    {
-      method: 'GET',
-      path: '/',
-      summary: 'List programs',
-      permissions: permissions.promotions.programs.list,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { page, limit, sort, ...filters } = req.query as Record<string, unknown>;
-        try {
-          const data = await engine().services.program.list(
-            { page: page as number | undefined, limit: limit as number | undefined, sort: sort as string | undefined, filters } satisfies ListQuery,
-            ctx(req),
-          );
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+  // Promo is company-wide (single-tenant multi-branch commerce): a Dhaka 10%
+  // code must redeem at the Chittagong POS. `tenantField: false` opts out of
+  // Arc's `AccessControl` org-scope filter; `organizationId` still lands on
+  // each doc via promo's `injectTenantField` for audit/analytics.
+  tenantField: false,
+  adapter: programAdapter,
+  permissions: {
+    list: permissions.promotions.programs.list,
+    get: permissions.promotions.programs.get,
+    create: permissions.promotions.programs.create,
+    update: permissions.promotions.programs.update,
+    delete: permissions.promotions.programs.delete,
+  },
+  actions: {
+    activate: {
+      handler: async (id, _data, req) => engine().repositories.program.activate(id, ctx(req)),
+      permissions: permissions.promotions.programs.transition,
     },
-    {
-      method: 'GET',
-      path: '/:id',
-      summary: 'Get program by ID',
-      permissions: permissions.promotions.programs.get,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { id } = req.params as { id: string };
-        try {
-          const data = await engine().services.program.getById(id, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+    pause: {
+      handler: async (id, _data, req) => engine().repositories.program.pause(id, ctx(req)),
+      permissions: permissions.promotions.programs.transition,
     },
+    archive: {
+      handler: async (id, _data, req) => engine().repositories.program.archive(id, ctx(req)),
+      permissions: permissions.promotions.programs.transition,
+    },
+  },
+  routes: [
     {
       method: 'GET',
       path: '/:id/full',
       summary: 'Get full program with rules + rewards',
       permissions: permissions.promotions.programs.get,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
+      raw: true,
+      handler: promoRoute(async (req) => {
         const { id } = req.params as { id: string };
-        try {
-          const data = await engine().services.program.getFullProgram(id, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
+        const [program, rules, rewards] = await Promise.all([
+          engine().repositories.program.getById(id, { lean: true }),
+          engine().repositories.rule.findAll({ programId: id }),
+          engine().repositories.reward.findAll({ programId: id }),
+        ]);
+        if (!program) {
+          throw new ArcError('Program not found', { code: 'PROGRAM_NOT_FOUND', statusCode: 404 });
         }
-      },
+        return { ...program, rules, rewards };
+      }),
     },
-    {
-      method: 'POST',
-      path: '/',
-      summary: 'Create program',
-      permissions: permissions.promotions.programs.create,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const data = await engine().services.program.create(req.body as CreateProgramInput, ctx(req));
-          return reply.code(201).send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'PUT',
-      path: '/:id',
-      summary: 'Update program',
-      permissions: permissions.promotions.programs.update,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { id } = req.params as { id: string };
-        try {
-          const data = await engine().services.program.update(id, req.body as Record<string, unknown>, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'POST',
-      path: '/:id/action',
-      summary: 'Transition program state (activate, pause, archive)',
-      permissions: permissions.promotions.programs.transition,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { id } = req.params as { id: string };
-        const { action } = req.body as { action: 'activate' | 'pause' | 'archive' };
-        try {
-          let data: unknown;
-          if (action === 'activate') {
-            data = await engine().services.program.activate(id, ctx(req));
-          } else if (action === 'pause') {
-            data = await engine().services.program.pause(id, ctx(req));
-          } else if (action === 'archive') {
-            data = await engine().services.program.archive(id, ctx(req));
-          } else {
-            return reply.code(400).send({ success: false, message: `Unknown action: ${action}` });
-          }
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
+    // ── Sub-resource: Rules ──
     {
       method: 'POST',
       path: '/:id/rules',
       summary: 'Add rule to program',
       permissions: permissions.promotions.programs.update,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
+      raw: true,
+      handler: promoRoute(async (req) => {
         const { id } = req.params as { id: string };
-        try {
-          const data = await engine().services.program.addRule(id, req.body as Record<string, unknown>, ctx(req));
-          return reply.code(201).send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+        return engine().repositories.rule.create({
+          ...(req.body as Record<string, unknown>),
+          programId: id,
+        });
+      }, 201),
     },
     {
       method: 'PUT',
       path: '/:id/rules/:ruleId',
       summary: 'Update rule',
       permissions: permissions.promotions.programs.update,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { id, ruleId } = req.params as { id: string; ruleId: string };
-        try {
-          const data = await engine().services.program.updateRule(
-            id,
-            ruleId,
-            req.body as Record<string, unknown>,
-            ctx(req),
-          );
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+      raw: true,
+      handler: promoRoute(async (req) => {
+        const { ruleId } = req.params as { id: string; ruleId: string };
+        return engine().repositories.rule.update(ruleId, req.body as Record<string, unknown>, { lean: true });
+      }),
     },
     {
       method: 'DELETE',
       path: '/:id/rules/:ruleId',
-      summary: 'Remove rule from program',
+      summary: 'Remove rule',
       permissions: permissions.promotions.programs.update,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { id, ruleId } = req.params as { id: string; ruleId: string };
-        try {
-          await engine().services.program.removeRule(id, ruleId, ctx(req));
-          return reply.send({ success: true, message: 'Rule removed' });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+      raw: true,
+      handler: promoRoute(async (req) => {
+        const { ruleId } = req.params as { id: string; ruleId: string };
+        await engine().repositories.rule.delete(ruleId);
+        return { message: 'Rule removed' };
+      }),
     },
+    // ── Sub-resource: Rewards ──
     {
       method: 'POST',
       path: '/:id/rewards',
       summary: 'Add reward to program',
       permissions: permissions.promotions.programs.update,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
+      raw: true,
+      handler: promoRoute(async (req) => {
         const { id } = req.params as { id: string };
-        try {
-          const data = await engine().services.program.addReward(id, req.body as CreateRewardInput, ctx(req));
-          return reply.code(201).send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+        return engine().repositories.reward.create({
+          ...(req.body as CreateRewardInput),
+          programId: id,
+        });
+      }, 201),
     },
     {
       method: 'PUT',
       path: '/:id/rewards/:rewardId',
       summary: 'Update reward',
       permissions: permissions.promotions.programs.update,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { id, rewardId } = req.params as { id: string; rewardId: string };
-        try {
-          const data = await engine().services.program.updateReward(
-            id,
-            rewardId,
-            req.body as Record<string, unknown>,
-            ctx(req),
-          );
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+      raw: true,
+      handler: promoRoute(async (req) => {
+        const { rewardId } = req.params as { id: string; rewardId: string };
+        return engine().repositories.reward.update(rewardId, req.body as Record<string, unknown>, { lean: true });
+      }),
     },
     {
       method: 'DELETE',
       path: '/:id/rewards/:rewardId',
-      summary: 'Remove reward from program',
+      summary: 'Remove reward',
       permissions: permissions.promotions.programs.update,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { id, rewardId } = req.params as { id: string; rewardId: string };
-        try {
-          await engine().services.program.removeReward(id, rewardId, ctx(req));
-          return reply.send({ success: true, message: 'Reward removed' });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+      raw: true,
+      handler: promoRoute(async (req) => {
+        const { rewardId } = req.params as { id: string; rewardId: string };
+        await engine().repositories.reward.delete(rewardId);
+        return { message: 'Reward removed' };
+      }),
     },
   ],
 });
 
-// -- Voucher Resource --
+// ── Voucher Resource ────────────────────────────────────────────────────────
+// Arc auto-generates: GET /, GET /:id
+// Custom routes: generate, validate, cancel, lookup by code.
 
 export const voucherResource = defineResource({
   name: 'promo-voucher',
   displayName: 'Promo Vouchers',
   tag: 'Promotions',
   prefix: '/promotions/vouchers',
-  disableDefaultRoutes: true,
-  additionalRoutes: [
+  tenantField: false,
+  adapter: voucherAdapter,
+  permissions: {
+    list: permissions.promotions.vouchers.list,
+    get: permissions.promotions.vouchers.get,
+  },
+  routes: [
     {
       method: 'POST',
       path: '/generate',
       summary: 'Generate batch voucher codes',
       permissions: permissions.promotions.vouchers.generate,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const data = await engine().services.voucher.generateCodes(req.body as GenerateCodesInput, ctx(req));
-          return reply.code(201).send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+      raw: true,
+      handler: promoRoute(
+        async (req) => engine().services.voucher.generateCodes(req.body as GenerateCodesInput, ctx(req)),
+        201,
+      ),
     },
     {
       method: 'POST',
       path: '/generate-single',
       summary: 'Generate single voucher code',
       permissions: permissions.promotions.vouchers.generate,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const data = await engine().services.voucher.generateSingleCode(
-            req.body as GenerateSingleCodeInput,
-            ctx(req),
-          );
-          return reply.code(201).send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+      raw: true,
+      handler: promoRoute(
+        async (req) => engine().services.voucher.generateSingleCode(req.body as GenerateSingleCodeInput, ctx(req)),
+        201,
+      ),
     },
     {
       method: 'POST',
       path: '/validate/:code',
       summary: 'Validate voucher code',
       permissions: permissions.promotions.vouchers.get,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
+      raw: true,
+      handler: promoRoute(async (req) => {
         const { code } = req.params as { code: string };
-        try {
-          const data = await engine().services.voucher.validateCode(code, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
-    },
-    {
-      method: 'GET',
-      path: '/:id',
-      summary: 'Get voucher by ID',
-      permissions: permissions.promotions.vouchers.get,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        const { id } = req.params as { id: string };
-        try {
-          const data = await engine().services.voucher.getById(id, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+        return engine().services.voucher.validateCode(code, ctx(req));
+      }),
     },
     {
       method: 'GET',
       path: '/code/:code',
       summary: 'Get voucher by code',
       permissions: permissions.promotions.vouchers.get,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
+      raw: true,
+      handler: promoRoute(async (req) => {
         const { code } = req.params as { code: string };
-        try {
-          const data = await engine().services.voucher.getByCode(code, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
+        const data = await engine().repositories.voucher.getByCode(code);
+        if (!data) {
+          throw new ArcError('Voucher not found', { code: 'VOUCHER_NOT_FOUND', statusCode: 404 });
         }
-      },
+        return data;
+      }),
     },
     {
       method: 'POST',
       path: '/:id/cancel',
       summary: 'Cancel voucher',
       permissions: permissions.promotions.vouchers.cancel,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
+      raw: true,
+      handler: promoRoute(async (req) => {
         const { id } = req.params as { id: string };
-        try {
-          const data = await engine().services.voucher.cancel(id, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+        return engine().repositories.voucher.cancel(id, ctx(req));
+      }),
     },
   ],
 });
 
-// -- Evaluation Resource --
+// ── Evaluation Resource ─────────────────────────────────────────────────────
+// No model, no adapter — pure service orchestration.
 
 export const evaluationResource = defineResource({
   name: 'promo-evaluation',
@@ -389,69 +312,53 @@ export const evaluationResource = defineResource({
   tag: 'Promotions',
   prefix: '/promotions/evaluate',
   disableDefaultRoutes: true,
-  additionalRoutes: [
+  routes: [
     {
       method: 'POST',
       path: '/preview',
       summary: 'Preview evaluation (no side effects)',
       permissions: permissions.promotions.evaluation.preview,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const data = await engine().services.evaluation.preview(req.body as EvaluateInput, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+      raw: true,
+      handler: promoRoute(async (req) => engine().services.evaluation.preview(req.body as EvaluateInput, ctx(req))),
     },
     {
       method: 'POST',
       path: '/',
       summary: 'Evaluate cart (creates pending evaluation)',
       permissions: permissions.promotions.evaluation.evaluate,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const data = await engine().services.evaluation.evaluate(req.body as EvaluateInput, ctx(req));
-          return reply.code(201).send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+      raw: true,
+      handler: promoRoute(
+        async (req) => engine().services.evaluation.evaluate(req.body as EvaluateInput, ctx(req)),
+        201,
+      ),
     },
     {
       method: 'POST',
       path: '/:evaluationId/commit',
       summary: 'Commit evaluation to order',
       permissions: permissions.promotions.evaluation.evaluate,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
+      raw: true,
+      handler: promoRoute(async (req) => {
         const { evaluationId } = req.params as { evaluationId: string };
-        const { orderId } = req.body as { orderId: string };
-        try {
-          const data = await engine().services.evaluation.commit(evaluationId, orderId, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+        const { orderId, cartHash } = req.body as { orderId: string; cartHash?: string };
+        // Forward `cartHash` when the client sends it — engine throws
+        // CART_HASH_MISMATCH (→ 409) if the cart changed between evaluate
+        // and commit. Classic tamper guard; see
+        // packages/promo/src/services/evaluation.service.ts.
+        return engine().services.evaluation.commit(evaluationId, orderId, ctx(req), cartHash ? { cartHash } : {});
+      }),
     },
     {
       method: 'POST',
       path: '/:evaluationId/rollback',
       summary: 'Rollback evaluation',
       permissions: permissions.promotions.evaluation.evaluate,
-      wrapHandler: false,
-      handler: async (req: FastifyRequest, reply: FastifyReply) => {
+      raw: true,
+      handler: promoRoute(async (req) => {
         const { evaluationId } = req.params as { evaluationId: string };
-        try {
-          const data = await engine().services.evaluation.rollback(evaluationId, ctx(req));
-          return reply.send({ success: true, data });
-        } catch (err: any) {
-          return reply.code(mapError(err)).send({ success: false, message: err.message });
-        }
-      },
+        await engine().services.evaluation.rollback(evaluationId, ctx(req));
+        return { message: 'Rolled back' };
+      }),
     },
   ],
 });

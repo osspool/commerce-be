@@ -7,23 +7,29 @@
  * - movements: Queries Flow StockMove model
  * - getPosProducts: Products with branch stock
  */
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import { BaseController } from '@classytic/arc';
-import { branchRepository } from '#resources/commerce/branch/index.js';
-import { filterCostPriceByRole } from '#resources/catalog/products/product.utils.js';
-import logger from '#lib/utils/logger.js';
-import { createVerifiedOperationalExpenseTransaction } from '#resources/transaction/utils/operational-transactions.js';
-import { notifyEvent } from '#resources/notifications/notification.publish.js';
-import { createModuleLoader } from '#lib/utils/lazy-import.js';
 
-import posLookupService from './flow/pos-lookup.service.js';
+import { BaseController } from '@classytic/arc';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { createModuleLoader } from '#lib/utils/lazy-import.js';
+import logger from '#lib/utils/logger.js';
+import { filterCostPriceByRole } from '#resources/catalog/products/product.utils.js';
+import branchRepository from '#resources/commerce/branch/branch.repository.js';
+import { notifyEvent } from '#resources/notifications/notification.publish.js';
+import { createVerifiedOperationalExpenseTransaction } from '#resources/transaction/utils/operational-transactions.js';
 import {
-  getFlowEngine,
-  buildFlowContext,
-  skuRefFromProduct,
-  DEFAULT_LOCATION,
   ADJUSTMENT_LOCATION,
-} from './flow/index.js';
+  buildFlowContext,
+  DEFAULT_LOCATION,
+  resolveAuthorizedBranchId,
+  skuRefFromProduct,
+} from './flow/context-helpers.js';
+import { getFlowEngine } from './flow/flow-engine.js';
+import {
+  createLocationCache,
+  LocationResolutionError,
+  resolveLocationCode,
+} from './flow/location-resolver.js';
+import posLookupService from './flow/pos-lookup.service.js';
 
 const loadPosUtils = createModuleLoader('#resources/sales/pos/pos.utils.js');
 
@@ -47,6 +53,8 @@ interface AdjustmentItem {
   quantity: number;
   mode?: string;
   reason?: string;
+  notes?: string;
+  locationId?: string;
 }
 
 interface AdjustmentSuccessResult {
@@ -104,9 +112,8 @@ class InventoryController extends BaseController {
       return reply.code(400).send({ success: false, message: 'Code must be at least 2 characters' });
     }
 
-    const branch: BranchDocument | null = branchId
-      ? await branchRepository.getById(branchId)
-      : await branchRepository.getDefaultBranch();
+    const authorizedBranchId = resolveAuthorizedBranchId(req, branchId);
+    const branch = await branchRepository.getById(authorizedBranchId);
 
     const entry = await posLookupService.getByBarcodeOrSku(code, branch?._id);
 
@@ -137,11 +144,16 @@ class InventoryController extends BaseController {
   // ── POS PRODUCTS ────────────────────────────────────────
 
   async getPosProducts(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const { branchId, ...params } = req.query as Record<string, string>;
+    // Raw forward of `req.query` (minus `branchId` which resolves on this
+    // layer). `pos.utils.ts` runs the shared `@classytic/mongokit`
+    // `QueryParser` over it — the same parser Arc wires into adapter-backed
+    // CRUD routes — so bracket operators (`basePrice[gte]=100`,
+    // `status[in]=active,draft`), sort, pagination, and ReDoS-guarded
+    // search all behave consistently with the rest of the codebase.
+    const { branchId, ...params } = req.query as { branchId?: string } & Record<string, unknown>;
 
-    const branch: BranchDocument | null = branchId
-      ? await branchRepository.getById(branchId)
-      : await branchRepository.getDefaultBranch();
+    const authorizedBranchId = resolveAuthorizedBranchId(req, branchId);
+    const branch = await branchRepository.getById(authorizedBranchId);
 
     if (!branch) {
       return reply.code(400).send({ success: false, message: 'Invalid branch' });
@@ -153,15 +165,17 @@ class InventoryController extends BaseController {
         params: Record<string, unknown>,
       ) => Promise<{ docs: unknown[]; [key: string]: unknown }>;
     };
-    const result = await getPosProducts(branch._id, {
-      ...params,
-      inStockOnly: params.inStockOnly === 'true',
-      lowStockOnly: params.lowStockOnly === 'true',
-      page: params.page ? parseInt(params.page, 10) : undefined,
-      limit: parseInt(params.limit, 10) || 15,
-    });
 
-    const summary = await posLookupService.getBranchStockSummary(branch._id);
+    // `getPosProducts` (catalog page + quant enrichment) and
+    // `getBranchStockSummary` (branch-wide stock totals) hit disjoint data
+    // — the summary does NOT read from the product page. Fire both in
+    // parallel so the page's wall-clock cost is `max(products, summary)`,
+    // not `products + summary`.
+    const [result, summary] = await Promise.all([
+      getPosProducts(branch._id, params),
+      posLookupService.getBranchStockSummary(branch._id),
+    ]);
+
     const filteredDocs = filterCostPriceByRole(result.docs as Record<string, unknown>[], req.user);
 
     return reply.send({
@@ -184,6 +198,8 @@ class InventoryController extends BaseController {
       mode?: string;
       branchId?: string;
       reason?: string;
+      notes?: string;
+      locationId?: string;
       lostAmount?: number;
       transactionData?: TransactionData;
     };
@@ -196,6 +212,8 @@ class InventoryController extends BaseController {
       mode,
       branchId,
       reason,
+      notes,
+      locationId: topLevelLocationId,
       lostAmount,
       transactionData = {},
     } = body;
@@ -203,7 +221,7 @@ class InventoryController extends BaseController {
     const items: AdjustmentItem[] = adjustments?.length
       ? adjustments
       : productId
-        ? [{ productId, variantSku, quantity: quantity ?? 0, mode, reason }]
+        ? [{ productId, variantSku, quantity: quantity ?? 0, mode, reason, notes, locationId: topLevelLocationId }]
         : [];
 
     if (!items.length) {
@@ -213,15 +231,14 @@ class InventoryController extends BaseController {
       return reply.code(400).send({ success: false, message: 'Maximum 500 adjustments per request' });
     }
 
-    const branch: BranchDocument | null = branchId
-      ? await branchRepository.getById(branchId)
-      : await branchRepository.getDefaultBranch();
+    const user = req.user as AuthUser | undefined;
+    const authorizedBranchId = resolveAuthorizedBranchId(req, branchId);
+    const branch = await branchRepository.getById(authorizedBranchId);
 
     if (!branch) {
       return reply.code(400).send({ success: false, message: 'Invalid branch' });
     }
 
-    const user = req.user as AuthUser | undefined;
     const isAdminUser = Array.isArray(user?.role) && (user.role.includes('admin') || user.role.includes('superadmin'));
 
     if (branch.role === 'head_office' && !isAdminUser) {
@@ -235,12 +252,52 @@ class InventoryController extends BaseController {
 
     const results: { success: AdjustmentSuccessResult[]; failed: AdjustmentFailResult[] } = { success: [], failed: [] };
 
+    // Resolve the top-level location up-front so a bad ID fails the
+    // request before we touch any item. Per-item overrides are resolved
+    // lazily inside `processOne` (a bad override only fails that row).
+    // Cache is shared across all calls in the request to avoid repeat
+    // reads for the same id in a bulk batch.
+    const locationCache = createLocationCache();
+    let topLevelLocationCode: string;
+    try {
+      topLevelLocationCode = await resolveLocationCode(flow, topLevelLocationId, ctx, {
+        cache: locationCache,
+      });
+    } catch (err) {
+      if (err instanceof LocationResolutionError) {
+        return reply.code(err.statusCode).send({ success: false, message: err.message });
+      }
+      throw err;
+    }
+
+    // ── Group items by skuRef so same-SKU adjustments stay serial (avoids
+    // lock contention on the quant row) and different-SKU adjustments
+    // can run in parallel. The previous implementation did THREE txns per
+    // item (create → confirm → receive); `adjustInSingleTxn` collapses
+    // those to ONE, and the parallel dispatch below cuts wall-clock on
+    // multi-SKU batches.
+    const groups = new Map<string, AdjustmentItem[]>();
     for (const adj of items) {
+      const skuRef = skuRefFromProduct(adj.productId, adj.variantSku);
+      const bucket = groups.get(skuRef);
+      if (bucket) bucket.push(adj);
+      else groups.set(skuRef, [adj]);
+    }
+
+    async function processOne(adj: AdjustmentItem, skuRef: string): Promise<void> {
       try {
         const adjMode = adj.mode || mode || 'set';
-        const skuRef = skuRefFromProduct(adj.productId, adj.variantSku);
+        const locationCode = adj.locationId
+          ? await resolveLocationCode(flow, adj.locationId, ctx, { cache: locationCache })
+          : topLevelLocationCode;
 
-        const current = await flow.services.quant.getAvailability({ skuRef, locationId: DEFAULT_LOCATION }, ctx);
+        // Read current qty OUTSIDE the write transaction. We only need
+        // it when mode='set' computes a delta; for mode='add'/'sub' we
+        // still read it to drive the sub-branch-increase guard and the
+        // no-op short-circuit. It's a single lean doc read — measured at
+        // ~2-5ms on warm MongoDB — so the extra round-trip is worth the
+        // shorter transaction span.
+        const current = await flow.services.quant.getAvailability({ skuRef, locationId: locationCode }, ctx);
         const currentQty = current.quantityOnHand;
 
         let newQuantity: number;
@@ -261,38 +318,47 @@ class InventoryController extends BaseController {
         const delta = newQuantity - currentQty;
         if (delta === 0) {
           results.success.push({ productId: adj.productId, variantSku: adj.variantSku, newQuantity });
-          continue;
+          return;
         }
 
-        const sourceLocation = delta > 0 ? ADJUSTMENT_LOCATION : DEFAULT_LOCATION;
-        const destLocation = delta > 0 ? DEFAULT_LOCATION : ADJUSTMENT_LOCATION;
+        const sourceLocation = delta > 0 ? ADJUSTMENT_LOCATION : locationCode;
+        const destLocation = delta > 0 ? locationCode : ADJUSTMENT_LOCATION;
 
-        const group = await flow.services.moveGroup.create(
+        // Single-transaction create+confirm+post — replaces the old
+        // 3-call chain (moveGroup.create → executeAction('confirm') →
+        // executeAction('receive')) that opened three nested transactions
+        // per adjustment. Same business semantics, ~3x fewer MongoDB
+        // round-trips.
+        await flow.services.moveGroup.adjustInSingleTxn(
           {
+            skuRef,
+            sourceLocationId: sourceLocation,
+            destinationLocationId: destLocation,
+            quantity: Math.abs(delta),
+            notes: adj.notes || adj.reason || notes || reason || `Stock ${adjMode}`,
             groupType: 'adjustment',
-            items: [
-              {
-                moveGroupId: '',
-                operationType: 'adjustment',
-                skuRef,
-                sourceLocationId: sourceLocation,
-                destinationLocationId: destLocation,
-                quantityPlanned: Math.abs(delta),
-              },
-            ],
-            notes: adj.reason || reason || `Stock ${adjMode}`,
           },
           ctx,
         );
-
-        await flow.services.moveGroup.executeAction(group._id, 'confirm', {}, ctx);
-        await flow.services.moveGroup.executeAction(group._id, 'receive', {}, ctx);
 
         results.success.push({ productId: adj.productId, variantSku: adj.variantSku, newQuantity });
       } catch (error) {
         results.failed.push({ ...adj, error: (error as Error).message });
       }
     }
+
+    // Adjustments to different skuRefs don't contend on MongoDB locks, so
+    // we fan out across SKUs in parallel. Items targeting the same skuRef
+    // stay sequential (the in-bucket for-loop) — two concurrent writes to
+    // the same quant row would either deadlock or produce a last-write-
+    // wins race against `mode:'set'` reads.
+    await Promise.all(
+      Array.from(groups.entries()).map(async ([skuRef, bucket]) => {
+        for (const adj of bucket) {
+          await processOne(adj, skuRef);
+        }
+      }),
+    );
 
     if (results.success.length > 0) {
       notifyEvent.stockAdjusted({
@@ -304,7 +370,7 @@ class InventoryController extends BaseController {
     }
 
     // Expense transaction for inventory loss
-    let transaction: { _id: unknown; amount: number; category: string } | null = null;
+    let transaction: any = null;
     const normalizedLostAmount = lostAmount !== undefined && lostAmount !== null ? Number(lostAmount) : null;
 
     if (normalizedLostAmount && normalizedLostAmount > 0 && results.success.length > 0) {
@@ -382,9 +448,8 @@ class InventoryController extends BaseController {
   async getLowStock(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const { branchId, threshold } = req.query as { branchId?: string; threshold?: string };
 
-    const branch: BranchDocument | null = branchId
-      ? await branchRepository.getById(branchId)
-      : await branchRepository.getDefaultBranch();
+    const authorizedBranchId = resolveAuthorizedBranchId(req, branchId);
+    const branch = await branchRepository.getById(authorizedBranchId);
 
     if (!branch) {
       return reply.code(400).send({ success: false, message: 'branchId is required' });
@@ -431,11 +496,7 @@ class InventoryController extends BaseController {
     const { productId, product, branchId, branch, type, startDate, endDate, page, limit } = query;
 
     const flow = getFlowEngine();
-    const orgId = branchId || branch;
-
-    if (!orgId) {
-      return reply.code(400).send({ success: false, message: 'branchId is required' });
-    }
+    const orgId = resolveAuthorizedBranchId(req, branchId || branch);
 
     const ctx = buildFlowContext(orgId);
     const filter: Record<string, unknown> = {};
@@ -451,22 +512,27 @@ class InventoryController extends BaseController {
       filter.createdAt = createdAt;
     }
 
-    const moves = await flow.repositories.move.findMany(filter, ctx, undefined, {
-      sort: { createdAt: -1 },
-    });
-
+    // Use mongokit's `getAll` (paginated) instead of `findAll` (which silently
+    // ignores `limit`). On a busy branch the previous code loaded the entire
+    // move history into memory before slicing — `getAll` pushes pagination
+    // into the driver and returns the canonical envelope shape, which Arc /
+    // arc-next consumers narrow on directly.
     const pageNum = parseInt(page, 10) || 1;
     const pageSize = Math.min(parseInt(limit, 10) || 50, 200);
-    const start = (pageNum - 1) * pageSize;
-    const paged = moves.slice(start, start + pageSize);
 
-    return reply.send({
-      success: true,
-      docs: paged,
-      total: moves.length,
+    // `organizationId` isn't on mongokit's static `PaginationParams` type
+    // but is read at runtime by the multi-tenant plugin (same pattern Arc's
+    // `BaseController.list` uses when merging tenant scope into getAll).
+    const result = await flow.repositories.move.getAll({
+      filters: filter,
+      sort: '-createdAt',
       page: pageNum,
-      pages: Math.ceil(moves.length / pageSize),
-    });
+      limit: pageSize,
+      lean: true,
+      organizationId: ctx.organizationId,
+    } as Parameters<typeof flow.repositories.move.getAll>[0]);
+
+    return reply.send({ success: true, ...result });
   }
 
   // ── EXPORT ─────────────────────────────────────────────
@@ -477,10 +543,7 @@ class InventoryController extends BaseController {
     const exportLimit = Math.min(parseInt(limit, 10) || 10000, 50000);
 
     const flow = getFlowEngine();
-    const orgId = branchId || branch;
-    if (!orgId) {
-      return reply.code(400).send({ success: false, message: 'branchId is required' });
-    }
+    const orgId = resolveAuthorizedBranchId(req, branchId || branch);
 
     const ctx = buildFlowContext(orgId);
     const filter: Record<string, unknown> = {};
@@ -493,10 +556,16 @@ class InventoryController extends BaseController {
       filter.createdAt = createdAt;
     }
 
-    const moves = await flow.repositories.move.findMany(filter, ctx, undefined, {
-      sort: { createdAt: -1 },
-    });
-    const docs = moves.slice(0, exportLimit) as MoveDocument[];
+    // Use `getAll` with the export bound pushed into the query rather than
+    // pulling the whole collection into memory and slicing client-side.
+    const result = await flow.repositories.move.getAll({
+      filters: filter,
+      sort: '-createdAt',
+      limit: exportLimit,
+      lean: true,
+      organizationId: ctx.organizationId,
+    } as Parameters<typeof flow.repositories.move.getAll>[0]);
+    const docs = ((result as { docs?: unknown[] })?.docs ?? result) as unknown as MoveDocument[];
 
     const csvRows: string[] = [];
     csvRows.push(

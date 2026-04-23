@@ -36,13 +36,13 @@ const accountTypeResource = defineResource({
   disableDefaultRoutes: true,
   skipValidation: true,
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET' as const,
       path: '/',
       summary: 'List all BFRS account types',
       permissions: requireAuth(),
-      wrapHandler: false,
+      raw: true,
       handler: async (req: any) => {
         const { search, category, mainType } = req.query as any;
         let accountTypes = (BD_ACCOUNT_TYPES as any[]).map(mapAccountType);
@@ -69,7 +69,7 @@ const accountTypeResource = defineResource({
       path: '/:code',
       summary: 'Get account type by code',
       permissions: requireAuth(),
-      wrapHandler: false,
+      raw: true,
       handler: async (req: any, reply: any) => {
         const { code } = req.params;
         const accountType = (BD_ACCOUNT_TYPES as any[]).find((at) => at.code === code);

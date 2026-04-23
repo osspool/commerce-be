@@ -113,10 +113,7 @@ export async function markDayClosed(branchId: string, bdDate: string): Promise<v
  * Release the closing lock on failure (without updating lastClosedDate).
  */
 export async function releaseLock(branchId: string): Promise<void> {
-  await DayCloseState.updateOne(
-    { branchId },
-    { $set: { closingInProgress: false, closingStartedAt: null } },
-  );
+  await DayCloseState.updateOne({ branchId }, { $set: { closingInProgress: false, closingStartedAt: null } });
   closingTriggered.delete(branchId);
 }
 

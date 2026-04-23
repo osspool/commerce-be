@@ -1,23 +1,22 @@
 /**
- * Budget Resource — Arc CRUD + Bulk/Summary
+ * Budget Resource — Arc CRUD + Bulk/Summary + Stripe Actions
  *
  * Top-level defineResource — auto-discovered by loadResources().
  * Enterprise mode only — exports null in simple mode (loadResources skips it).
  *
- * CRUD (list, get, create, update, delete) is auto-handled by defineResource + BaseController.
- * State transitions (submit/approve/reject/close) use createActionRouter (Stripe pattern)
- * and are registered separately via budget.actions.ts in accounting.plugin.ts.
+ * CRUD auto-handled by defineResource + BaseController.
+ * State transitions (submit/approve/reject/close) via declarative `actions` block.
  */
 
-import mongoose from 'mongoose';
 import { defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
+import mongoose from 'mongoose';
 import config from '#config/index.js';
+import { groups } from '#config/permissions/roles.js';
 import { createAdapter } from '#shared/adapter.js';
 import { requireAuth, requireRoles } from '#shared/permissions.js';
 import { orgScoped } from '#shared/presets/index.js';
-import { groups } from '#config/permissions/roles.js';
-import { Budget, budgetRepository, BUDGET_STATUS_VALUES } from '../accounting.engine.js';
+import { BUDGET_STATUS_VALUES, Budget, budgetRepository } from '../accounting.engine.js';
 
 // Enterprise-only — `default` is null in simple mode so loadResources skips this file.
 let budgetResource: ReturnType<typeof defineResource> | null = null;
@@ -53,6 +52,9 @@ if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
     tag: 'Accounting',
     prefix: '/accounting/budgets',
 
+    actions: (await import('./budget.actions.js')).budgetActions,
+    actionPermissions: (await import('./budget.actions.js')).budgetActionPermissions,
+
     adapter: createAdapter(Budget, budgetRepository, {
       create: { omitFields: omitWorkflowFields },
       update: { omitFields: omitWorkflowFields },
@@ -61,14 +63,14 @@ if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
     presets: [orgScoped],
     permissions: budgetPermissions,
 
-    additionalRoutes: [
+    routes: [
       // ── POST /bulk — Bulk create budget lines ──
       {
         method: 'POST' as const,
         path: '/bulk',
         summary: 'Bulk create budget lines for a branch',
         permissions: requireRoles(groups.platformAdmin),
-        wrapHandler: false,
+        raw: true,
         schema: {
           body: {
             type: 'object',
@@ -128,7 +130,7 @@ if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
         path: '/summary',
         summary: 'Budget summary aggregated by status for the branch',
         permissions: requireRoles(groups.platformAdmin),
-        wrapHandler: false,
+        raw: true,
         handler: async (req: any, reply: any) => {
           const orgId = req.scope?.organizationId;
           if (!orgId) return reply.status(400).send({ error: 'Organization context required' });

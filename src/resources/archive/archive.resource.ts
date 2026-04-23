@@ -6,16 +6,16 @@
  */
 
 import { defineResource } from '@classytic/arc';
+import permissions from '#config/permissions.js';
 import { createAdapter } from '#shared/adapter.js';
-import { getResourcePermissions, archiveActions } from '#shared/permissions.js';
+import { toArcSchemas } from '#shared/event-helpers.js';
+import { archiveActions, getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
+import archiveController from './archive.controller.js';
 import Archive from './archive.model.js';
 import archiveRepository from './archive.repository.js';
-import archiveController from './archive.controller.js';
-import permissions from '#config/permissions.js';
-import archiveSchemas, { archiveSchemaOptions, archiveRunQuery } from './schemas.js';
 import { events } from './events.js';
-import { toArcSchemas } from '#shared/event-helpers.js';
+import archiveSchemas, { archiveRunQuery, archiveSchemaOptions } from './schemas.js';
 
 const archiveResource = defineResource({
   name: 'archive',
@@ -31,14 +31,14 @@ const archiveResource = defineResource({
   schemaOptions: archiveSchemaOptions,
   customSchemas: toArcSchemas(archiveSchemas),
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'POST',
       path: '/run',
       summary: 'Run archive for orders or transactions and delete originals',
       handler: 'runArchive',
       permissions: permissions.transactions.delete,
-      wrapHandler: false,
+      raw: true,
       schema: {
         body: archiveRunQuery,
       },
@@ -49,7 +49,7 @@ const archiveResource = defineResource({
       summary: 'Download archive file',
       handler: 'downloadArchive',
       permissions: permissions.transactions.get,
-      wrapHandler: false,
+      raw: true,
       schema: {
         params: archiveSchemas.params,
       },
@@ -60,7 +60,7 @@ const archiveResource = defineResource({
       summary: 'Superadmin purge archive and file',
       handler: 'purgeArchive',
       permissions: archiveActions.purge,
-      wrapHandler: false,
+      raw: true,
     },
   ],
 

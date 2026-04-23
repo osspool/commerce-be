@@ -13,7 +13,6 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import {
   MemoryEventTransport,
   EventOutbox,
@@ -22,16 +21,23 @@ import {
 } from '@classytic/arc/events';
 import type { DomainEvent } from '@classytic/arc/events';
 
-let mongod: MongoMemoryServer;
+// MongoDB connection managed by per-suite-mongo.ts setupFile.
 
 beforeAll(async () => {
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri());
+  if (mongoose.connection.readyState === 0) {
+    const { MongoMemoryServer } = await import('mongodb-memory-server');
+    const mongod = await MongoMemoryServer.create();
+    await mongoose.connect(mongod.getUri());
+    (globalThis as any).__STRESS_TEST_MONGO__ = mongod;
+  }
 }, 30000);
 
 afterAll(async () => {
-  await mongoose.disconnect();
-  await mongod.stop();
+  const mongod = (globalThis as any).__STRESS_TEST_MONGO__;
+  if (mongod) {
+    await mongoose.disconnect();
+    await mongod.stop();
+  }
 });
 
 beforeEach(async () => {
@@ -230,32 +236,20 @@ describe('withCompensation context mutation edge cases', () => {
 // BUG 5: Event registry is created but not wired to eventPlugin in app.ts
 // ============================================================================
 
-describe('Event registry integration gap', () => {
-  it('KNOWN GAP: eventRegistry exists but is not passed to Arc eventPlugin', async () => {
-    // The eventRegistry in shared/event-registry.ts has all 76 events registered.
-    // BUT app.ts creates the Arc app with:
-    //   arcPlugins: { events: { logEvents: !config.isProduction } }
-    // There is NO registry or validateMode passed to the event plugin.
-    //
-    // This means:
-    // - Schema validation never runs on publish
-    // - The registry catalog is not accessible via fastify.events.registry
-    //
-    // FIX: In app.ts, pass eventRegistry to the event plugin options:
-    //   arcPlugins: { events: { logEvents: !config.isProduction, registry: eventRegistry, validateMode: 'warn' } }
-
+describe('Event registry integration', () => {
+  it('eventRegistry is populated at import time and passed to Arc eventPlugin', async () => {
+    // `shared/event-registry.ts` registers every event shipped by the commerce
+    // packages at module import time (see `for (const def of catalogEventDefinitions) ...`).
+    // `create-arc-app-options.ts` passes `{ registry: eventRegistry, validateMode: 'warn' }`
+    // to arc's eventPlugin so schema validation + introspection work.
     const { eventRegistry } = await import('#shared/event-registry.js');
-    // In isolation, registry is empty — events register at module import time,
-    // which only happens when the full app boots.
-    // The real gap: app.ts doesn't pass eventRegistry to Arc's eventPlugin.
-    // FIX: add { registry: eventRegistry, validateMode: 'warn' } to arcPlugins.events in app.ts
     const catalog = eventRegistry.catalog();
-    expect(catalog.length).toBe(0); // Empty in test isolation — this is expected
+    expect(catalog.length).toBeGreaterThan(0);
 
-    // After importing an events module, it should be registered:
+    // Adding a host-specific event registration is still live — resource
+    // modules register their own events at import time.
     await import('#resources/commerce/branch/events.js');
     const catalogAfterImport = eventRegistry.catalog();
-    expect(catalogAfterImport.length).toBeGreaterThan(0);
     expect(catalogAfterImport.some(e => e.name === 'branch:created')).toBe(true);
   });
 });
@@ -315,7 +309,7 @@ describe('MemoryEventTransport handler execution', () => {
 // ============================================================================
 
 describe('Outbox partial relay failure', () => {
-  it('stops on first failure — remaining events stay pending', async () => {
+  it('arc 2.9 continues past failure when store.fail() is available — failed events re-scheduled via fail()', async () => {
     const store = new MemoryOutboxStore();
     let publishCount = 0;
 
@@ -335,13 +329,17 @@ describe('Outbox partial relay failure', () => {
       await outbox.store(createEvent(`batch.event.${i}`, { i }));
     }
 
-    // Relay — fails on 3rd event
+    // Arc 2.9: `MemoryOutboxStore` implements optional `fail()`. Relay
+    // continues past the failure and re-schedules event 3 for retry via
+    // `fail()` (previous behaviour stopped the batch on first failure;
+    // that's now opt-in by passing a store without `fail()`).
     const relayed = await outbox.relay();
-    expect(relayed).toBe(2); // Only 2 succeeded before failure
+    expect(relayed).toBe(4); // events 1, 2, 4, 5 acknowledged
 
-    // 3 events still pending (3rd failed + 4th and 5th never attempted)
+    // Event 3 stays re-claimable (pending for retry). 4 and 5 were already
+    // acknowledged so they're no longer pending.
     const pending = await store.getPending(10);
-    expect(pending).toHaveLength(3);
+    expect(pending).toHaveLength(1);
     expect(pending[0].type).toBe('batch.event.3');
   });
 });

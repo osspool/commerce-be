@@ -5,8 +5,9 @@
  * `dependencies: ['register-core-plugins']` for ordering.
  * All actual work (error handling, security, parsing) is handled by Arc's createApp.
  */
-import fp from 'fastify-plugin';
+
 import type { FastifyInstance } from 'fastify';
+import fp from 'fastify-plugin';
 
 async function registerCorePlugins(_fastify: FastifyInstance): Promise<void> {
   // Arc handles: error handler, helmet, cors, rate-limit, JSON parsing, auth

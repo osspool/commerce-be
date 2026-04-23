@@ -4,13 +4,22 @@
  * Converts verified POS/Order transactions into SALES journal entries.
  *
  * Debit:  1111 Cash in Hand (POS cash) or 1112 Bank Account (card/bKash/Nagad)
- * Credit: 4111 Domestic Sales Revenue
- * Credit: 2131 VAT Payable (if VAT applicable)
+ * Debit:  4115 Sales Discount (contra-revenue, only when a promo was applied)
+ * Credit: 4111 Domestic Sales Revenue (gross — includes any promo discount)
+ * Credit: 2132 VAT Output Payable (if VAT applicable)
+ *
+ * Posting a promo as a contra-revenue line (rather than netting it off the
+ * credit to 4111) keeps gross sales visible in the trial balance and makes
+ * the discount given auditable. VAT is computed on the net-of-discount price
+ * the customer actually paid, so only the revenue credit is grossed up.
  *
  * For daily POS aggregation (standard+ mode):
  *   Groups all verified POS transactions for a branch+day into one entry.
+ *
+ * VAT account code sourced from `@classytic/ledger-bd` via the tax submodule.
  */
 
+import { VAT_ACCOUNTS } from '../../tax/tax.accounts.js';
 import type { PostingInput, PostingItem } from '../posting.service.js';
 
 // ─── Account Code Mapping ───────────────────────────────────────────────────
@@ -27,7 +36,8 @@ const PAYMENT_METHOD_ACCOUNTS: Record<string, string> = {
 };
 
 const SALES_REVENUE = '4111'; // Domestic Sales — Goods
-const VAT_PAYABLE = '2131'; // VAT Payable
+const SALES_DISCOUNT = '4115'; // Sales Discount — contra-revenue (from ledger-bd)
+const VAT_PAYABLE = VAT_ACCOUNTS.OUTPUT; // 2132 — VAT Output Payable (from ledger-bd)
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +51,8 @@ export interface SalesTransactionData {
   source?: string; // 'pos' | 'web'
   branchCode?: string;
   description?: string;
+  /** Promo/coupon discount applied to the order, in paisa. When set, posts a contra-revenue line to 4115. */
+  promoDiscount?: number;
 }
 
 // ─── Single Transaction → Journal Entry ─────────────────────────────────────
@@ -51,13 +63,32 @@ export function salesTransactionToPosting(
 ): PostingInput {
   const cashAccount = PAYMENT_METHOD_ACCOUNTS[data.method] || '1111';
   const netSales = data.amount - (data.tax || 0);
+  const promoDiscount = data.promoDiscount && data.promoDiscount > 0 ? data.promoDiscount : 0;
 
   const items: PostingItem[] = [
     // Debit: Cash/Bank (what we received)
     { accountCode: cashAccount, debit: data.amount, credit: 0, label: `${data.source || 'Sale'} — ${data.method}` },
-    // Credit: Sales Revenue (net of VAT)
-    { accountCode: SALES_REVENUE, debit: 0, credit: netSales, label: 'Sales revenue' },
   ];
+
+  // Debit: Sales Discount — contra-revenue keeps gross sales visible.
+  // Only the revenue credit is grossed up; VAT is computed on the price the
+  // customer actually paid and therefore stays as-is.
+  if (promoDiscount > 0) {
+    items.push({
+      accountCode: SALES_DISCOUNT,
+      debit: promoDiscount,
+      credit: 0,
+      label: 'Promo discount',
+    });
+  }
+
+  // Credit: Sales Revenue (gross of promo, net of VAT)
+  items.push({
+    accountCode: SALES_REVENUE,
+    debit: 0,
+    credit: netSales + promoDiscount,
+    label: 'Sales revenue',
+  });
 
   // VAT line (only if applicable)
   if (data.tax > 0) {

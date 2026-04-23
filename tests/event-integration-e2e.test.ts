@@ -11,7 +11,6 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import {
   defineEvent,
   createEventRegistry,
@@ -22,16 +21,25 @@ import {
 } from '@classytic/arc/events';
 import type { DomainEvent, EventHandler } from '@classytic/arc/events';
 
-let mongod: MongoMemoryServer;
+// MongoDB connection managed by per-suite-mongo.ts setupFile.
+// No need to create our own MongoMemoryServer.
 
 beforeAll(async () => {
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri());
+  if (mongoose.connection.readyState === 0) {
+    const { MongoMemoryServer } = await import('mongodb-memory-server');
+    const mongod = await MongoMemoryServer.create();
+    await mongoose.connect(mongod.getUri());
+    // Store for cleanup
+    (globalThis as any).__EVENT_TEST_MONGO__ = mongod;
+  }
 }, 30000);
 
 afterAll(async () => {
-  await mongoose.disconnect();
-  await mongod.stop();
+  const mongod = (globalThis as any).__EVENT_TEST_MONGO__;
+  if (mongod) {
+    await mongoose.disconnect();
+    await mongod.stop();
+  }
 });
 
 beforeEach(async () => {

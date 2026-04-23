@@ -1,4 +1,9 @@
 import mongoose from 'mongoose';
+import {
+  CASH_MOVEMENT_REASON_CODES,
+  DEFAULT_SHIFT_POLICY,
+  SHIFT_PAYMENT_METHODS,
+} from '#resources/sales/pos/shift.constants.js';
 
 const { Schema } = mongoose;
 
@@ -110,6 +115,29 @@ const vatConfigSchema = new Schema(
 );
 
 /**
+ * Delivery Zone Schema
+ * Admin-defined pricing tiers matched to a customer's delivery area.
+ * Resolution order (most specific wins): areaIds → districts → divisions → empty match (fallback).
+ * `priority` tie-breaks when multiple zones match at the same specificity.
+ */
+const deliveryZoneSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    charge: { type: Number, required: true, min: 0 },
+    codCharge: { type: Number, default: 0, min: 0 },
+    freeOverAmount: { type: Number, default: 0, min: 0 },
+    match: {
+      divisions: { type: [String], default: [] },
+      districts: { type: [String], default: [] },
+      areaIds: { type: [Number], default: [] },
+    },
+    priority: { type: Number, default: 0 },
+    isActive: { type: Boolean, default: true },
+  },
+  { _id: true },
+);
+
+/**
  * Checkout Settings Schema
  */
 const checkoutSettingsSchema = new Schema(
@@ -122,13 +150,21 @@ const checkoutSettingsSchema = new Schema(
         branchName: String,
       },
     ],
-    // Delivery fee source (provider-managed pricing)
+    /**
+     * Delivery fee source:
+     * - `zones`: resolve via `deliveryZones[]` + `defaultZoneCharge` fallback
+     * - `flat`:  single `flatCharge` for every address
+     * - `provider`: live quote from carrier adapter (admin-only routes)
+     */
     deliveryFeeSource: {
       type: String,
-      enum: ['provider'],
-      default: 'provider',
+      enum: ['zones', 'flat', 'provider'],
+      default: 'zones',
     },
-    freeDeliveryThreshold: { type: Number, default: 0 },
+    flatCharge: { type: Number, default: 60, min: 0 },
+    defaultZoneCharge: { type: Number, default: 120, min: 0 },
+    deliveryZones: { type: [deliveryZoneSchema], default: [] },
+    freeDeliveryThreshold: { type: Number, default: 0, min: 0 },
   },
   { _id: false },
 );
@@ -235,6 +271,52 @@ const membershipConfigSchema = new Schema(
 );
 
 /**
+ * Default POS Shift Policy Schema
+ * Platform-wide defaults. Individual branches can override any field via
+ * branch.shiftPolicy. Every field must have an explicit default so the
+ * resolver always gets a complete policy without nulls.
+ */
+const defaultShiftPolicySchema = new Schema(
+  {
+    requiredOpeningFloat: { type: Number, default: DEFAULT_SHIFT_POLICY.requiredOpeningFloat, min: 0 },
+    enforceBusinessHours: { type: Boolean, default: DEFAULT_SHIFT_POLICY.enforceBusinessHours },
+
+    blindCloseRequired: { type: Boolean, default: DEFAULT_SHIFT_POLICY.blindCloseRequired },
+    varianceThresholdAbs: { type: Number, default: DEFAULT_SHIFT_POLICY.varianceThresholdAbs, min: 0 },
+    varianceThresholdPct: {
+      type: Number,
+      default: DEFAULT_SHIFT_POLICY.varianceThresholdPct,
+      min: 0,
+      max: 100,
+    },
+    managerOverrideRequired: { type: Boolean, default: DEFAULT_SHIFT_POLICY.managerOverrideRequired },
+
+    autoCloseEnabled: { type: Boolean, default: DEFAULT_SHIFT_POLICY.autoCloseEnabled },
+    autoCloseTime: {
+      type: String,
+      default: DEFAULT_SHIFT_POLICY.autoCloseTime,
+      validate: {
+        validator: (v: string | null) => v === null || /^([01]\d|2[0-3]):[0-5]\d$/.test(v),
+        message: 'autoCloseTime must be HH:mm (24-hour)',
+      },
+    },
+    autoCloseTimezone: { type: String, default: DEFAULT_SHIFT_POLICY.autoCloseTimezone },
+
+    allowHandover: { type: Boolean, default: DEFAULT_SHIFT_POLICY.allowHandover },
+    requireReasonCode: { type: Boolean, default: DEFAULT_SHIFT_POLICY.requireReasonCode },
+    allowedReasonCodes: {
+      type: [{ type: String, enum: CASH_MOVEMENT_REASON_CODES }],
+      default: () => [...DEFAULT_SHIFT_POLICY.allowedReasonCodes],
+    },
+    allowedPaymentMethods: {
+      type: [{ type: String, enum: SHIFT_PAYMENT_METHODS }],
+      default: () => [...DEFAULT_SHIFT_POLICY.allowedPaymentMethods],
+    },
+  },
+  { _id: false },
+);
+
+/**
  * Platform Config Schema
  * Singleton document storing all platform-wide settings
  */
@@ -260,6 +342,12 @@ const platformConfigSchema = new Schema(
     vat: vatConfigSchema,
     membership: membershipConfigSchema,
 
+    /**
+     * Platform-wide defaults for POS shift behaviour. Resolved as:
+     *   shift.policySnapshot → branch.shiftPolicy → platform.defaultShiftPolicy → code default.
+     */
+    defaultShiftPolicy: { type: defaultShiftPolicySchema, default: () => ({}) },
+
     policies: {
       termsAndConditions: String,
       privacyPolicy: String,
@@ -284,6 +372,30 @@ platformConfigSchema.statics.getConfig = async function () {
       platformName: process.env.PLATFORM_NAME || 'My Store',
       isSingleton: true,
       paymentMethods: [{ type: 'cash', name: 'Cash', isActive: true }],
+      checkout: {
+        deliveryFeeSource: 'zones',
+        defaultZoneCharge: 120,
+        flatCharge: 60,
+        freeDeliveryThreshold: 0,
+        deliveryZones: [
+          {
+            name: 'Inside Dhaka',
+            charge: 60,
+            codCharge: 15,
+            match: { districts: ['Dhaka'] },
+            priority: 10,
+            isActive: true,
+          },
+          {
+            name: 'Outside Dhaka',
+            charge: 120,
+            codCharge: 20,
+            match: {},
+            priority: 0,
+            isActive: true,
+          },
+        ],
+      },
       vat: {
         isRegistered: false,
         defaultRate: 15,

@@ -1,6 +1,5 @@
-import { allowPublic, requireRoles } from '@classytic/arc/permissions';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { groups } from './roles.js';
+import type { PermissionCheck } from '@classytic/arc';
+import { allowPublic, platformAdminOnly } from '#shared/permissions.js';
 
 export interface CmsPermissions {
   get: PermissionCheck;
@@ -19,17 +18,17 @@ export interface MediaPermissions {
 
 export const cms: CmsPermissions = {
   get: allowPublic(),
-  create: requireRoles(groups.platformAdmin),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
+  create: platformAdminOnly(),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
 };
 
 export const media: MediaPermissions = {
-  list: requireRoles(groups.platformAdmin),
-  get: requireRoles(groups.platformAdmin),
-  update: requireRoles(groups.platformAdmin),
-  delete: requireRoles(groups.platformAdmin),
-  manage: requireRoles(groups.platformAdmin),
+  list: platformAdminOnly(),
+  get: platformAdminOnly(),
+  update: platformAdminOnly(),
+  delete: platformAdminOnly(),
+  manage: platformAdminOnly(),
 };
 
 export default { cms, media };

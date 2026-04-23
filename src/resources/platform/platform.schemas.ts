@@ -1,4 +1,5 @@
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+import type { CrudSchemas } from '@classytic/repo-core/schema';
 import PlatformConfig from './platform.model.js';
 
 export const platformConfigSchemaOptions = {
@@ -11,6 +12,6 @@ export const platformConfigSchemaOptions = {
   },
 };
 
-const crudSchemas = buildCrudSchemasFromModel(PlatformConfig, platformConfigSchemaOptions as any);
+const crudSchemas: CrudSchemas = buildCrudSchemasFromModel(PlatformConfig, platformConfigSchemaOptions as any);
 
 export default crudSchemas;

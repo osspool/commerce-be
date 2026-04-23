@@ -4,16 +4,17 @@
  * Manual triggers for accounting day-close and backfill operations.
  * Finance admin and above only. All dates are BD local (YYYY-MM-DD in UTC+6).
  */
-import mongoose from 'mongoose';
+
 import { defineResource } from '@classytic/arc';
-import { requireAuth, roles } from '@classytic/arc/permissions';
+import { requireOrgMembership, requireRoles } from '@classytic/arc/permissions';
+import mongoose from 'mongoose';
 import { publish } from '#lib/events/arcEvents.js';
-import { postDailyPosSales } from './aggregation/daily-sales.service.js';
 import { bdToday, bdYesterday, toBdDateStr } from '#lib/utils/bd-date.js';
 import { JournalEntry } from '../accounting.engine.js';
+import { postDailyPosSales } from './aggregation/daily-sales.service.js';
 import { DayCloseState } from './day-close-state.model.js';
 
-const authenticated = requireAuth();
+const branchMember = requireOrgMembership();
 
 const postingResource = defineResource({
   name: 'accounting-posting',
@@ -22,14 +23,17 @@ const postingResource = defineResource({
   prefix: '/accounting/posting',
   disableDefaultRoutes: true,
 
-  additionalRoutes: [
+  actions: (await import('./day-close.actions.js')).dayCloseActions,
+  actionPermissions: requireRoles('admin', 'finance_admin'),
+
+  routes: [
     {
       method: 'POST',
       path: '/close-day',
       summary: 'Close POS books for a specific BD date',
       description: 'Creates one aggregated SALES journal entry for all POS transactions. Idempotent.',
-      permissions: authenticated,
-      wrapHandler: false,
+      permissions: branchMember,
+      raw: true,
       schema: {
         body: {
           type: 'object',
@@ -79,8 +83,8 @@ const postingResource = defineResource({
       path: '/backfill',
       summary: 'Backfill journal entries for a date range',
       description: 'Recovery tool. Processes one day at a time, skips already-posted days. Max 90 days.',
-      permissions: authenticated,
-      wrapHandler: false,
+      permissions: branchMember,
+      raw: true,
       schema: {
         body: {
           type: 'object',
@@ -134,8 +138,8 @@ const postingResource = defineResource({
       summary: 'Cross-branch day-close oversight',
       description:
         'Returns per-branch lastClosedDate, days behind, and a summary for the finance director / multi-branch dashboard. Not branch-scoped.',
-      permissions: roles('admin', 'finance_admin'),
-      wrapHandler: false,
+      permissions: requireRoles('admin', 'finance_admin'),
+      raw: true,
       handler: async (_req: any, reply: any) => {
         const today = bdToday();
 
@@ -200,8 +204,8 @@ const postingResource = defineResource({
       path: '/status',
       summary: 'Get posting status for today and yesterday',
       description: 'Returns whether POS books are open/closed for dashboard display.',
-      permissions: authenticated,
-      wrapHandler: false,
+      permissions: branchMember,
+      raw: true,
       handler: async (req: any, reply: any) => {
         const orgId = req.scope?.organizationId;
         if (!orgId) {
@@ -232,12 +236,22 @@ const postingResource = defineResource({
             today: {
               date: today,
               closed: !!todayEntry,
-              entry: todayEntry ? { id: (todayEntry as Record<string, unknown>)._id, state: (todayEntry as Record<string, unknown>).state } : null,
+              entry: todayEntry
+                ? {
+                    id: (todayEntry as Record<string, unknown>)._id,
+                    state: (todayEntry as Record<string, unknown>).state,
+                  }
+                : null,
             },
             yesterday: {
               date: yesterday,
               closed: !!yesterdayEntry,
-              entry: yesterdayEntry ? { id: (yesterdayEntry as Record<string, unknown>)._id, state: (yesterdayEntry as Record<string, unknown>).state } : null,
+              entry: yesterdayEntry
+                ? {
+                    id: (yesterdayEntry as Record<string, unknown>)._id,
+                    state: (yesterdayEntry as Record<string, unknown>).state,
+                  }
+                : null,
             },
           },
         });

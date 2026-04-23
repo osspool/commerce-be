@@ -1,6 +1,5 @@
-import { requireRoles } from '@classytic/arc/permissions';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { groups } from './roles.js';
+import type { PermissionCheck } from '@classytic/arc';
+import { platformAdminOnly, requireAuth } from '#shared/permissions.js';
 
 export interface PromotionPermissions {
   programs: {
@@ -26,23 +25,26 @@ export interface PromotionPermissions {
 
 const promotions: PromotionPermissions = {
   programs: {
-    list: requireRoles(groups.platformAdmin),
-    get: requireRoles(groups.platformAdmin),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
-    transition: requireRoles(groups.platformAdmin),
+    list: platformAdminOnly(),
+    get: platformAdminOnly(),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
+    transition: platformAdminOnly(),
   },
   vouchers: {
-    list: requireRoles(groups.platformAdmin),
-    get: requireRoles(groups.platformAdmin),
-    generate: requireRoles(groups.platformAdmin),
-    cancel: requireRoles(groups.platformAdmin),
+    list: platformAdminOnly(),
+    get: platformAdminOnly(),
+    generate: platformAdminOnly(),
+    cancel: platformAdminOnly(),
   },
   evaluation: {
-    preview: requireRoles(groups.platformAdmin),
-    evaluate: requireRoles(groups.platformAdmin),
-    validateCode: requireRoles(groups.platformAdmin),
+    // Checkout flow: cashiers, POS, and logged-in shoppers must be able to
+    // preview/commit promo evaluations. ctx carries actorId + organizationId
+    // so the engine scopes and audits per-branch.
+    preview: requireAuth(),
+    evaluate: requireAuth(),
+    validateCode: requireAuth(),
   },
 };
 

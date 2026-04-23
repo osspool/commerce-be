@@ -1,6 +1,6 @@
 import { defineResource } from '@classytic/arc';
 import { requireRoles } from '@classytic/arc/permissions';
-import type { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 
 // Module -> resource name mapping for frontend filtering
@@ -30,14 +30,14 @@ export default defineResource({
   tag: 'Audit',
   prefix: '/audit-logs',
   disableDefaultRoutes: true,
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/',
       summary: 'Query audit logs (superadmin only)',
       permissions: requireRoles(['superadmin']),
-      wrapHandler: false,
-      handler: async (req: FastifyRequest<{ Querystring: AuditQuerystring }>, reply: FastifyReply) => {
+      raw: true,
+      handler: (async (req: FastifyRequest<{ Querystring: AuditQuerystring }>, reply: FastifyReply) => {
         const q = req.query;
 
         // Resolve module filter to resource names
@@ -54,7 +54,11 @@ export default defineResource({
               documentId: q.documentId,
               userId: q.userId,
               organizationId: q.organizationId,
-              action: q.action ? (q.action.includes(',') ? q.action.split(',') as any : q.action as any) : undefined,
+              action: q.action
+                ? q.action.includes(',')
+                  ? (q.action.split(',') as any)
+                  : (q.action as any)
+                : undefined,
               from: q.from ? new Date(q.from) : undefined,
               to: q.to ? new Date(q.to) : undefined,
               limit: limit * 2, // over-fetch then trim after merge
@@ -76,7 +80,7 @@ export default defineResource({
           documentId: q.documentId,
           userId: q.userId,
           organizationId: q.organizationId,
-          action: q.action ? (q.action.includes(',') ? q.action.split(',') as any : q.action as any) : undefined,
+          action: q.action ? (q.action.includes(',') ? (q.action.split(',') as any) : (q.action as any)) : undefined,
           from: q.from ? new Date(q.from) : undefined,
           to: q.to ? new Date(q.to) : undefined,
           limit: q.limit ? parseInt(q.limit, 10) : 50,
@@ -84,15 +88,15 @@ export default defineResource({
         });
 
         return reply.send({ success: true, data: entries });
-      },
+      }) as any,
     },
     {
       method: 'GET',
       path: '/:id',
       summary: 'Get single audit log entry',
       permissions: requireRoles(['superadmin']),
-      wrapHandler: false,
-      handler: async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      raw: true,
+      handler: (async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
         const db = mongoose.connection.db;
         if (!db) return reply.code(500).send({ success: false, error: 'Database not available' });
 
@@ -100,7 +104,7 @@ export default defineResource({
         if (!doc) return reply.code(404).send({ success: false, error: 'Audit entry not found' });
 
         return reply.send({ success: true, data: doc });
-      },
+      }) as any,
     },
   ],
 });

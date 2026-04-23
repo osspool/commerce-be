@@ -1,5 +1,6 @@
-import Customer from './customer.model.js';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+import type { CrudSchemas } from '@classytic/repo-core/schema';
+import Customer from './customer.model.js';
 
 /**
  * Customer CRUD Schemas with Field Rules
@@ -8,7 +9,7 @@ import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
  * - userId: systemManaged (auto-linked from user)
  * - stats.*: systemManaged (calculated from orders/subscriptions)
  */
-const crudSchemas = buildCrudSchemasFromModel(Customer, {
+const crudSchemas: CrudSchemas = buildCrudSchemasFromModel(Customer, {
   strictAdditionalProperties: true, // Reject unknown fields at schema level
   fieldRules: {
     userId: { systemManaged: true },
@@ -30,10 +31,15 @@ export const customerSchemaOptions = {
   query: {
     allowedPopulate: ['userId'],
     filterableFields: {
-      name: 'string',
-      phone: 'string',
-      email: 'string',
+      'name.given': 'string',
+      'name.family': 'string',
+      'contact.phone': 'string',
+      'contact.email': 'string',
       userId: 'ObjectId',
+      customerType: 'string',
+      'crm.stage': 'string',
+      'crm.ownerId': 'string',
+      'crm.accountId': 'string',
     },
   },
 };

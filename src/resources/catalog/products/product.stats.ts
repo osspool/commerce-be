@@ -1,171 +1,98 @@
 /**
- * Product Stats Utilities
+ * Product Stats — atomic updates via catalog repository.
  *
- * Pure functions for updating product statistics.
- * Called from Order repository events.
- *
- * Uses atomic MongoDB operations for concurrency safety.
+ * Called from order events to maintain denormalized stats.
  */
 
-import type mongoose from 'mongoose';
-import Product from './product.model.js';
+import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 
 interface OrderItem {
-  product: string | mongoose.Types.ObjectId;
+  product: string | { toString(): string };
   quantity: number;
-  price?: number;
 }
 
-interface RecalculatedStats {
-  totalSales: number;
-  totalQuantitySold: number;
+const ctx = { actorId: 'stats-sync', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
+
+function toId(value: string | { toString(): string }): string {
+  return typeof value === 'string' ? value : value.toString();
 }
 
-/**
- * Update product stats when order items are purchased
- */
 export async function onOrderItemsSold(items: OrderItem[]): Promise<void> {
-  if (!items || items.length === 0) return;
-
-  const bulkOps = items.map((item) => ({
-    updateOne: {
-      filter: { _id: item.product },
-      update: {
-        $inc: {
-          'stats.totalSales': 1,
-          'stats.totalQuantitySold': item.quantity,
-        },
-      },
-    },
-  }));
-
-  await Product.bulkWrite(bulkOps);
+  if (!items?.length) return;
+  const engine = await ensureCatalogEngine();
+  for (const item of items) {
+    await engine.repositories.product.incrementStats(
+      toId(item.product),
+      { totalSales: 1, totalQuantitySold: item.quantity },
+      ctx,
+    );
+  }
 }
 
-/**
- * Revert product stats when order is cancelled/refunded
- */
 export async function onOrderItemsReverted(items: OrderItem[]): Promise<void> {
-  if (!items || items.length === 0) return;
-
-  const bulkOps = items.map((item) => ({
-    updateOne: {
-      filter: { _id: item.product },
-      update: {
-        $inc: {
-          'stats.totalSales': -1,
-          'stats.totalQuantitySold': -item.quantity,
-        },
-      },
-    },
-  }));
-
-  await Product.bulkWrite(bulkOps);
+  if (!items?.length) return;
+  const engine = await ensureCatalogEngine();
+  for (const item of items) {
+    await engine.repositories.product.incrementStats(
+      toId(item.product),
+      { totalSales: -1, totalQuantitySold: -item.quantity },
+      ctx,
+    );
+  }
 }
 
-/**
- * Update product stats when quantity changes (e.g., inventory adjustment)
- */
-export async function adjustQuantity(productId: string, quantityChange: number): Promise<void> {
-  if (!productId) return;
-
-  await Product.findByIdAndUpdate(productId, {
-    $inc: {
-      quantity: quantityChange,
-    },
-  });
-}
-
-/**
- * Increment view count for product
- */
 export async function incrementViewCount(productId: string): Promise<void> {
   if (!productId) return;
-
-  await Product.findByIdAndUpdate(productId, {
-    $inc: {
-      'stats.viewCount': 1,
-    },
-  });
+  const engine = await ensureCatalogEngine();
+  await engine.repositories.product.incrementStats(productId, { viewCount: 1 }, ctx);
 }
 
 /**
- * Decrement product quantities when order is placed
+ * Recompute `product.stats.{totalSales,totalQuantitySold}` by aggregating
+ * delivered/completed orders from `@classytic/order`. Runs company-wide
+ * (all branches) because product stats are global — not per-branch.
  */
-export async function decrementInventory(items: OrderItem[]): Promise<void> {
-  if (!items || items.length === 0) return;
-
-  const bulkOps = items.map((item) => ({
-    updateOne: {
-      filter: { _id: item.product },
-      update: {
-        $inc: {
-          quantity: -item.quantity,
-        },
-      },
-    },
-  }));
-
-  await Product.bulkWrite(bulkOps);
-}
-
-/**
- * Restore product quantities when order is cancelled
- */
-export async function restoreInventory(items: OrderItem[]): Promise<void> {
-  if (!items || items.length === 0) return;
-
-  const bulkOps = items.map((item) => ({
-    updateOne: {
-      filter: { _id: item.product },
-      update: {
-        $inc: {
-          quantity: item.quantity,
-        },
-      },
-    },
-  }));
-
-  await Product.bulkWrite(bulkOps);
-}
-
-/**
- * Recalculate product stats from orders (for data repair)
- */
-export async function recalculateStats(productId: string): Promise<RecalculatedStats> {
+export async function recalculateStats(productId: string): Promise<{ totalSales: number; totalQuantitySold: number }> {
   if (!productId) return { totalSales: 0, totalQuantitySold: 0 };
 
-  // Import Order here to avoid circular dependency
-  const Order = (await import('#resources/sales/orders/order.model.js')).default;
+  const { ensureOrderEngine } = await import('#resources/sales/orders/order.engine.js');
+  const orderEngine = await ensureOrderEngine();
 
-  // Aggregate stats from completed orders
-  const result = await Order.aggregate([
+  // Raw model access — we aggregate across ALL organizations, so we
+  // deliberately bypass the repository's multi-tenant scoping.
+  const result = await orderEngine.models.Order.aggregate([
     {
       $match: {
-        'items.product': productId,
-        status: 'delivered',
-        paymentStatus: 'completed',
+        status: { $in: ['delivered', 'completed', 'fulfilled'] },
+        $or: [{ 'lines.metadata.productId': productId }, { 'lines.offerId': productId }],
       },
     },
-    { $unwind: '$items' },
-    { $match: { 'items.product': productId } },
+    { $unwind: '$lines' },
+    {
+      $match: {
+        $or: [{ 'lines.metadata.productId': productId }, { 'lines.offerId': productId }],
+      },
+    },
     {
       $group: {
         _id: null,
         totalSales: { $sum: 1 },
-        totalQuantitySold: { $sum: '$items.quantity' },
+        totalQuantitySold: { $sum: '$lines.quantity' },
       },
     },
   ]);
 
-  const stats: RecalculatedStats = result[0] || { totalSales: 0, totalQuantitySold: 0 };
+  const stats = (result[0] as { totalSales: number; totalQuantitySold: number } | undefined) || {
+    totalSales: 0,
+    totalQuantitySold: 0,
+  };
 
-  await Product.findByIdAndUpdate(productId, {
-    $set: {
-      'stats.totalSales': stats.totalSales,
-      'stats.totalQuantitySold': stats.totalQuantitySold,
-    },
-  });
+  const engine = await ensureCatalogEngine();
+  await engine.repositories.product.update(
+    productId,
+    { stats: { totalSales: stats.totalSales, totalQuantitySold: stats.totalQuantitySold } } as Record<string, unknown>,
+    ctx,
+  );
 
   return stats;
 }

@@ -1,143 +1,213 @@
-import { BaseController } from '@classytic/arc';
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import cartRepository from './cart.repository.js';
+/**
+ * Cart controller — thin handlers that delegate to @classytic/cart repositories.
+ *
+ * BigBoss is single-tenant multi-branch, but the customer shopping cart is
+ * company-wide: a customer's cart follows them regardless of branch. POS does
+ * not use this package — its cart lives in the frontend. Therefore every call
+ * here runs with `skipTenant: true` and no `x-organization-id` is read.
+ */
 
-interface AuthenticatedUser {
-  _id?: string;
-  id?: string;
+import type { OperationContext } from '@classytic/cart';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { getCartEngine } from './cart.engine.js';
+
+function buildCartContext(req: FastifyRequest, opts: { actorRef?: string } = {}): OperationContext {
+  const user = (req as FastifyRequest & { user?: { _id?: string; id?: string } }).user;
+  const actorRef = opts.actorRef ?? user?._id ?? user?.id ?? '';
+
+  return {
+    organizationId: '',
+    actorRef,
+    actorKind: 'user',
+    correlationId: req.id,
+    locale: (req.headers['accept-language'] as string | undefined)?.split(',')[0] || 'en',
+    currency: process.env.DEFAULT_CURRENCY || 'BDT',
+    skipTenant: true,
+  } as OperationContext;
 }
 
-class CartController extends BaseController {
-  constructor() {
-    super(cartRepository);
-    this.getCart = this.getCart.bind(this);
-    this.addItem = this.addItem.bind(this);
-    this.updateItem = this.updateItem.bind(this);
-    this.removeItem = this.removeItem.bind(this);
-    this.clearCart = this.clearCart.bind(this);
-    // Admin methods
-    this.listAllCarts = this.listAllCarts.bind(this);
-    this.getAbandonedCarts = this.getAbandonedCarts.bind(this);
-    this.getUserCart = this.getUserCart.bind(this);
+// ─── Repository shortcuts ─────────────────────────────────────────────────────
+
+const draft = () => getCartEngine().repositories.draft;
+const checkout = () => getCartEngine().repositories.checkout;
+
+// ─── Shared helpers — DRY the "active cart lookup + 404" pattern ─────────────
+
+async function requireActiveCart(ctx: OperationContext, reply: FastifyReply) {
+  const active = await draft().findActiveByActor(ctx.actorRef, ctx);
+  if (!active) {
+    reply.code(404).send({ success: false, message: 'Cart not found' });
+    return null;
   }
+  return active;
+}
 
-  /**
-   * Get user ID from request - handles both JWT 'id' and '_id' formats
-   */
-  getUserId(req: FastifyRequest): string {
-    const user = (req as unknown as { user: AuthenticatedUser }).user;
-    return (user._id || user.id) as string;
-  }
+// ─── User operations ──────────────────────────────────────────────────────────
 
-  async getCart(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    try {
-      const cart = await cartRepository.getOrCreateCart(this.getUserId(req));
-      return reply.code(200).send({ success: true, data: cart });
-    } catch (error) {
-      return reply.code(500).send({ success: false, message: (error as Error).message });
-    }
-  }
+export async function getCart(req: FastifyRequest, reply: FastifyReply) {
+  const ctx = buildCartContext(req);
+  const cart = await draft().findActiveByActor(ctx.actorRef, ctx);
+  reply.send({ success: true, data: cart });
+}
 
-  async addItem(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const {
-      productId,
-      variantSku = null,
-      quantity,
-    } = req.body as { productId: string; variantSku?: string | null; quantity: number };
+export async function addItem(req: FastifyRequest, reply: FastifyReply) {
+  const { productId, variantSku, quantity, display } = req.body as {
+    productId: string;
+    variantSku?: string | null;
+    quantity: number;
+    display?: {
+      name?: string;
+      imageUrl?: string;
+      slug?: string;
+      variantLabel?: string;
+      compareAtPrice?: { amount: number; currency: string } | null;
+      capturedAt?: Date | string;
+    };
+  };
 
-    try {
-      const cart = await cartRepository.addItem(this.getUserId(req), productId, variantSku, quantity);
-      return reply.code(200).send({ success: true, data: cart });
-    } catch (error) {
-      return reply.code(400).send({ success: false, message: (error as Error).message });
-    }
-  }
-
-  async updateItem(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const { itemId } = req.params as { itemId: string };
-    const { quantity } = req.body as { quantity: number };
-
-    try {
-      const cart = await cartRepository.updateItem(this.getUserId(req), itemId, quantity);
-      return reply.code(200).send({ success: true, data: cart });
-    } catch (error) {
-      return reply.code(400).send({ success: false, message: (error as Error).message });
-    }
-  }
-
-  async removeItem(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const { itemId } = req.params as { itemId: string };
-
-    try {
-      const cart = await cartRepository.removeItem(this.getUserId(req), itemId);
-      return reply.code(200).send({ success: true, data: cart });
-    } catch (error) {
-      return reply.code(400).send({ success: false, message: (error as Error).message });
-    }
-  }
-
-  async clearCart(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    try {
-      const cart = await cartRepository.clearCart(this.getUserId(req));
-      return reply.code(200).send({ success: true, data: cart });
-    } catch (error) {
-      return reply.code(500).send({ success: false, message: (error as Error).message });
-    }
-  }
-
-  // Admin methods
-
-  /**
-   * List all carts (admin only)
-   */
-  async listAllCarts(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    try {
-      const { page, limit, sort } = req.query as { page?: number; limit?: number; sort?: string };
-      const result = await cartRepository.getAllCarts({ page, limit, sort });
-      return reply.code(200).send({ success: true, ...result });
-    } catch (error) {
-      return reply.code(500).send({ success: false, message: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get abandoned carts (admin only)
-   * For marketing purposes - users with items in cart but no recent orders
-   */
-  async getAbandonedCarts(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    try {
-      const { daysOld = 7, page, limit } = req.query as { daysOld?: number; page?: number; limit?: number };
-      const result = await cartRepository.getAbandonedCarts(daysOld, { page, limit });
-      return reply.code(200).send({
-        success: true,
-        ...result,
-        metadata: { daysOld },
-      });
-    } catch (error) {
-      return reply.code(500).send({ success: false, message: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get specific user's cart (admin only)
-   */
-  async getUserCart(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    try {
-      const { userId } = req.params as { userId: string };
-      const cart = await cartRepository.getCartByUserId(userId);
-
-      if (!cart) {
-        return reply.code(404).send({
-          success: false,
-          message: 'Cart not found for this user',
-        });
+  // Normalize the client-provided display snapshot. Accepting it skips the
+  // kind's displayOf() call (one catalog round-trip per add). Price is
+  // still computed server-side — display fields are cosmetic and drift is
+  // tolerated by design (see @classytic/cart CLAUDE.md).
+  //
+  // `compareAtPrice: null` (client's "no sale price" marker) collapses to
+  // `undefined` — cart's `LineDisplay.compareAtPrice` is `Money | undefined`,
+  // so null would fail the strict type check.
+  const normalizedDisplay = display
+    ? {
+        ...display,
+        compareAtPrice: display.compareAtPrice ?? undefined,
+        capturedAt: display.capturedAt ? new Date(display.capturedAt) : new Date(),
       }
+    : undefined;
 
-      return reply.code(200).send({ success: true, data: cart });
-    } catch (error) {
-      return reply.code(500).send({ success: false, message: (error as Error).message });
-    }
-  }
+  const base = variantSku
+    ? { kind: 'variant' as const, payload: { productRef: productId, variantSku }, quantity }
+    : { kind: 'sku' as const, payload: { skuRef: productId }, quantity };
+
+  const item = normalizedDisplay ? { ...base, display: normalizedDisplay } : base;
+
+  const result = await draft().addItem(item, buildCartContext(req));
+  reply.send({ success: true, data: result });
 }
 
-export default new CartController();
+export async function updateItem(req: FastifyRequest, reply: FastifyReply) {
+  const { itemId } = req.params as { itemId: string };
+  const { quantity } = req.body as { quantity: number };
+  const ctx = buildCartContext(req);
+
+  const active = await requireActiveCart(ctx, reply);
+  if (!active) return;
+
+  const result = await draft().updateItemQuantity({ draftPublicId: active.publicId, lineId: itemId, quantity }, ctx);
+  reply.send({ success: true, data: result });
+}
+
+export async function removeItem(req: FastifyRequest, reply: FastifyReply) {
+  const { itemId } = req.params as { itemId: string };
+  const ctx = buildCartContext(req);
+
+  const active = await requireActiveCart(ctx, reply);
+  if (!active) return;
+
+  const result = await draft().removeItem({ draftPublicId: active.publicId, lineId: itemId }, ctx);
+  reply.send({ success: true, data: result });
+}
+
+export async function clearCart(req: FastifyRequest, reply: FastifyReply) {
+  const ctx = buildCartContext(req);
+  const active = await requireActiveCart(ctx, reply);
+  if (!active) return;
+
+  const result = await draft().clear(active.publicId, ctx);
+  reply.send({ success: true, data: result });
+}
+
+// ─── Checkout ────────────────────────────────────────────────────────────────
+
+export async function startCheckout(req: FastifyRequest, reply: FastifyReply) {
+  const { expectedPricingHash } = (req.body || {}) as { expectedPricingHash?: string | null };
+  const ctx = buildCartContext(req);
+
+  const active = await requireActiveCart(ctx, reply);
+  if (!active) return;
+
+  // Cart engine treats `null` as "skip pricing-hash interlock" and any
+  // string (including "") as "client expected exactly this hash". Normalize
+  // missing/empty values to null so callers that omit the field don't trip
+  // PriceChangedError.
+  const normalizedHash = expectedPricingHash === undefined || expectedPricingHash === '' ? null : expectedPricingHash;
+
+  const result = await checkout().createFromDraft(
+    { draftPublicId: active.publicId, expectedPricingHash: normalizedHash },
+    ctx,
+  );
+  reply.send({ success: true, data: result });
+}
+
+export async function commitCheckout(req: FastifyRequest, reply: FastifyReply) {
+  const { checkoutId } = req.params as { checkoutId: string };
+  const { externalRef } = (req.body || {}) as { externalRef?: string };
+
+  const result = await checkout().commit({ checkoutPublicId: checkoutId, externalRef }, buildCartContext(req));
+  reply.send({ success: true, data: result });
+}
+
+export async function cancelCheckout(req: FastifyRequest, reply: FastifyReply) {
+  const { checkoutId } = req.params as { checkoutId: string };
+  const { reason } = (req.body || {}) as { reason?: string };
+
+  const result = await checkout().cancel(
+    { checkoutPublicId: checkoutId, reason: reason || 'user_canceled' },
+    buildCartContext(req),
+  );
+  reply.send({ success: true, data: result });
+}
+
+// ─── Admin ────────────────────────────────────────────────────────────────────
+
+export async function listAllCarts(req: FastifyRequest, reply: FastifyReply) {
+  const {
+    page = 1,
+    limit = 20,
+    sort = '-updatedAt',
+  } = req.query as {
+    page?: number;
+    limit?: number;
+    sort?: string;
+  };
+
+  const result = await draft().getAll(
+    { filters: {}, pagination: { page: Number(page), limit: Number(limit) }, sort },
+    buildCartContext(req),
+  );
+  reply.send({ success: true, ...result });
+}
+
+export async function getAbandonedCarts(req: FastifyRequest, reply: FastifyReply) {
+  const { daysOld = 7, limit = 20 } = req.query as { daysOld?: number; limit?: number };
+  const { findAbandonedDrafts } = await import('@classytic/cart');
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - Number(daysOld));
+
+  const data = await findAbandonedDrafts({
+    repo: draft() as Parameters<typeof findAbandonedDrafts>[0]['repo'],
+    cutoff,
+    limit: Number(limit),
+    ctx: buildCartContext(req),
+  });
+  reply.send({ success: true, data, metadata: { daysOld } });
+}
+
+export async function getUserCart(req: FastifyRequest, reply: FastifyReply) {
+  const { userId } = req.params as { userId: string };
+  const ctx = buildCartContext(req, { actorRef: userId });
+
+  const cart = await draft().findActiveByActor(userId, ctx);
+  if (!cart) {
+    return reply.code(404).send({ success: false, message: 'Cart not found for this user' });
+  }
+
+  reply.send({ success: true, data: cart });
+}

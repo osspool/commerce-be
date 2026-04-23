@@ -4,8 +4,8 @@
  * Domain events emitted by the stock-request submodule.
  */
 
-import { defineEvent } from '@classytic/arc/events';
 import type { EventDefinition } from '@classytic/arc';
+import { defineEvent } from '@classytic/arc/events';
 import { eventRegistry } from '#shared/event-registry.js';
 
 // --- Payload Interfaces ---

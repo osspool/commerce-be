@@ -15,8 +15,9 @@
  * Cross-branch operations (transfers, stock requests) use explicit
  * dual contexts — one for each branch involved in the operation.
  */
-import type { FastifyRequest } from 'fastify';
+
 import type { FlowContext } from '@classytic/flow';
+import type { FastifyRequest } from 'fastify';
 
 interface AuthUser {
   id?: string;
@@ -33,10 +34,24 @@ interface AuthUser {
  */
 export function getFlowContext(req: FastifyRequest): FlowContext {
   const user = (req as FastifyRequest & { user?: AuthUser }).user ?? {};
+  const scope = (req as FastifyRequest & { scope?: { organizationId?: string; userId?: string; orgRoles?: string[] } })
+    .scope;
+  const organizationId =
+    scope?.organizationId ??
+    user.organizationId ??
+    user.orgId ??
+    (req.headers['x-organization-id'] as string | undefined) ??
+    '';
+  if (!organizationId) {
+    throw Object.assign(
+      new Error('Missing organization context. Send x-organization-id header or set active branch.'),
+      { statusCode: 400 },
+    );
+  }
   return {
-    organizationId: user.organizationId ?? user.orgId ?? (req.headers['x-organization-id'] as string | undefined) ?? '',
-    actorId: user.id ?? user._id ?? 'system',
-    roles: user.roles ?? [],
+    organizationId,
+    actorId: scope?.userId ?? user.id ?? user._id ?? 'system',
+    roles: scope?.orgRoles ?? user.roles ?? [],
     idempotencyKey: (req.headers['idempotency-key'] as string | undefined) ?? undefined,
   };
 }
@@ -68,7 +83,45 @@ export function skuRefFromProduct(
  * The default storage location ID used per org.
  * Each branch has a single logical storage location.
  */
+/**
+ * Resolve branch ID from request, enforcing auth scope.
+ * If caller supplies a branchId, it must match their auth scope.
+ * Prevents cross-branch data access/mutation.
+ */
+export function resolveAuthorizedBranchId(req: FastifyRequest, requestedBranchId?: string | null): string {
+  const user = (req as FastifyRequest & { user?: AuthUser }).user ?? {};
+  const scope = (req as FastifyRequest & { scope?: { organizationId?: string } }).scope;
+  const authBranchId =
+    scope?.organizationId ??
+    user.organizationId ??
+    user.orgId ??
+    (req.headers['x-organization-id'] as string | undefined) ??
+    '';
+
+  if (!authBranchId) {
+    throw Object.assign(new Error('Missing organization context'), { statusCode: 400 });
+  }
+
+  // If caller requested a specific branch, enforce it matches their auth scope
+  if (requestedBranchId && requestedBranchId !== authBranchId) {
+    throw Object.assign(new Error('Cross-branch access denied'), { statusCode: 403 });
+  }
+
+  return authBranchId;
+}
+
 export const DEFAULT_LOCATION = 'stock';
 export const VENDOR_LOCATION = 'vendor';
 export const CUSTOMER_LOCATION = 'customer';
 export const ADJUSTMENT_LOCATION = 'adjustment';
+
+export const SYSTEM_LOCATION_CODES: readonly string[] = [
+  DEFAULT_LOCATION,
+  VENDOR_LOCATION,
+  CUSTOMER_LOCATION,
+  ADJUSTMENT_LOCATION,
+];
+
+export function isSystemLocationCode(code: string): boolean {
+  return SYSTEM_LOCATION_CODES.includes(code);
+}

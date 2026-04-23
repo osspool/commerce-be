@@ -1,4 +1,4 @@
-import mongoose, { Schema, type HydratedDocument, type Model } from 'mongoose';
+import mongoose, { type HydratedDocument, type Model, Schema } from 'mongoose';
 import { InventoryCounter } from '../../flow/counter-bridge.js';
 
 export const SupplierType = Object.freeze({
@@ -34,10 +34,40 @@ export interface ISupplier {
   isActive: boolean;
   notes?: string;
   tags: string[];
+  // ─── Bangladesh VAT / NBR fields ───────────────────────────────────
+  /** BIN (13-digit) — required for VAT-registered suppliers */
+  bin?: string;
+  /** Fiscal position code on purchase side (usually NATIONAL or INTERNATIONAL for imports) */
+  fiscalPositionCode?: string | null;
+  /**
+   * Supplier charges a truncated rate (5% / 7.5% / 10%). Per NBR we cannot
+   * claim input credit on these — the tax folds into inventory cost. This
+   * flag ensures the posting contract does the right thing even if the
+   * rate lookup is ambiguous.
+   */
+  isTruncatedRateSupplier?: boolean;
+  /**
+   * This supplier delivers into our bonded warehouse (RMG raw material
+   * scenario). VAT is deferred — the posting uses 1150.VAT0.INPUT and
+   * doesn't release input credit until goods exit bond into DTA sale.
+   */
+  bondedWarehouseSupplier?: boolean;
+  /**
+   * ISO country code — 'BD' for domestic, anything else flags this as an
+   * import supplier for customs-clearance handling.
+   */
+  countryCode?: string | null;
   createdBy?: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
   createdAt?: Date;
   updatedAt?: Date;
+  /**
+   * Soft-delete marker managed by mongokit's `softDeletePlugin` on the
+   * repository. `null` = live, `Date` = archived. List / get queries
+   * filter `deletedAt: null` by default; `getDeleted()` / `restore()`
+   * on the repo surface archived docs.
+   */
+  deletedAt?: Date | null;
 }
 
 export type SupplierDocument = HydratedDocument<ISupplier>;
@@ -129,6 +159,33 @@ const supplierSchema = new Schema<ISupplier, SupplierModel>(
       type: Schema.Types.ObjectId,
       ref: 'User',
     },
+
+    // ─── Bangladesh VAT / NBR fields ───────────────────────────────
+    bin: {
+      type: String,
+      trim: true,
+      validate: {
+        validator: (v: string) => !v || /^\d{13}$/.test(v),
+        message: 'BIN must be 13 digits',
+      },
+      index: true,
+      sparse: true,
+    },
+    fiscalPositionCode: {
+      // `null` is included so the AJV-validated create body accepts the
+      // mongoose-applied default (`default: null`). Without it, mongokit's
+      // generated schema rejects the auto-defaulted `null` as an enum miss.
+      type: String,
+      enum: ['NATIONAL', 'INTERNATIONAL', null],
+      default: null,
+    },
+    isTruncatedRateSupplier: { type: Boolean, default: false },
+    bondedWarehouseSupplier: { type: Boolean, default: false },
+    countryCode: { type: String, trim: true, default: null },
+    // softDeletePlugin needs the field declared with `default: null` so
+    // newly-created docs match the `{ deletedAt: null }` filter (default
+    // `filterMode: 'null'`). See supplier.repository.ts.
+    deletedAt: { type: Date, default: null, index: true },
   },
   { timestamps: true },
 );

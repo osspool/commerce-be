@@ -1,35 +1,41 @@
 /**
- * Logistics Config Tests
+ * Logistics Config Tests — be-prod side.
  *
- * Tests that config is loaded correctly from environment variables.
+ * The new contract: `config.logistics.providers` only contains entries
+ * for carriers whose env vars are set. Empty providers object is valid.
  */
-
-import { describe, it, expect } from 'vitest';
-
+import { describe, expect, it } from 'vitest';
 import config from '../../../config/index.js';
 
 describe('Logistics Config', () => {
-  describe('Environment-based configuration', () => {
-    it('should have logistics config section', () => {
-      expect(config.logistics).toBeDefined();
-      expect(config.logistics.defaultProvider).toBeDefined();
-      expect(config.logistics.providers).toBeDefined();
-    });
+  it('exposes a logistics section with defaultProvider + providers', () => {
+    expect(config.logistics).toBeDefined();
+    expect(config.logistics.defaultProvider).toMatch(/^(redx|pathao|steadfast)$/);
+    expect(config.logistics.providers).toBeDefined();
+  });
 
-    it('should have redx provider config', () => {
-      const redx = (config.logistics.providers as unknown as Record<string, Record<string, unknown>>).redx;
-      expect(redx).toBeDefined();
-      expect(redx.apiUrl).toBeDefined();
-      expect(typeof redx.isSandbox).toBe('boolean');
-    });
+  it('every present RedX config has apiKey + apiUrl + isSandbox flag', () => {
+    const redx = config.logistics.providers.redx;
+    if (!redx) return; // not configured in this env
+    expect(typeof redx.apiKey).toBe('string');
+    expect(redx.apiKey.length).toBeGreaterThan(0);
+    expect(typeof redx.apiUrl).toBe('string');
+    expect(typeof redx.isSandbox).toBe('boolean');
+  });
 
-    it('should default to redx provider', () => {
-      expect(config.logistics.defaultProvider).toBe('redx');
-    });
+  it('every present Pathao config has clientId/secret/username/password', () => {
+    const pathao = config.logistics.providers.pathao;
+    if (!pathao) return;
+    expect(pathao.clientId.length).toBeGreaterThan(0);
+    expect(pathao.clientSecret.length).toBeGreaterThan(0);
+    expect(pathao.username.length).toBeGreaterThan(0);
+    expect(pathao.password.length).toBeGreaterThan(0);
+  });
 
-    it('should have isSandbox boolean flag', () => {
-      const redx = (config.logistics.providers as unknown as Record<string, Record<string, unknown>>).redx;
-      expect(typeof redx.isSandbox).toBe('boolean');
-    });
+  it('every present Steadfast config has apiKey + apiSecret', () => {
+    const sf = config.logistics.providers.steadfast;
+    if (!sf) return;
+    expect(sf.apiKey.length).toBeGreaterThan(0);
+    expect(sf.apiSecret.length).toBeGreaterThan(0);
   });
 });

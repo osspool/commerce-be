@@ -1,9 +1,11 @@
 import { createError } from '@fastify/error';
 import mongoose, { type HydratedDocument, type Types } from 'mongoose';
-import userRepository from './user.repository.js';
+import pino from 'pino';
 import customerRepository from '#resources/sales/customers/customer.repository.js';
 import type { IUser } from './user.model.js';
+import userRepository from './user.repository.js';
 
+const log = pino({ name: 'auth' });
 const NotFoundError = createError('NOT_FOUND', '%s', 404);
 
 /**
@@ -52,7 +54,11 @@ interface UserOrganization {
 /** Normalize BA member.role to string[] (BA stores as string or string[]) */
 function normalizeMemberRoles(role: unknown): string[] {
   if (Array.isArray(role)) return role.map(String);
-  if (typeof role === 'string') return role.split(',').map((r) => r.trim()).filter(Boolean);
+  if (typeof role === 'string')
+    return role
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
   return ['viewer'];
 }
 
@@ -72,7 +78,7 @@ export async function linkCustomerOnRegistration(user: BAUser): Promise<void> {
       email: user.email,
     });
   } catch (error) {
-    console.error('[auth] Failed to link customer on registration:', (error as Error).message);
+    log.error({ err: error }, 'Failed to link customer on registration');
   }
 }
 

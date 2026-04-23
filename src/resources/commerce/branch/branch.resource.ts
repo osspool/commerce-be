@@ -6,16 +6,16 @@
  */
 
 import { defineResource } from '@classytic/arc';
+import permissions from '#config/permissions.js';
 import { createAdapter } from '#shared/adapter.js';
+import { toArcSchemas } from '#shared/event-helpers.js';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
+import branchController from './branch.controller.js';
 import Branch from './branch.model.js';
 import branchRepository from './branch.repository.js';
-import branchController from './branch.controller.js';
-import permissions from '#config/permissions.js';
 import branchSchemas, { branchSchemaOptions } from './branch.schemas.js';
 import { events } from './events.js';
-import { toArcSchemas } from '#shared/event-helpers.js';
 
 const branchResource = defineResource({
   name: 'branch',
@@ -38,14 +38,14 @@ const branchResource = defineResource({
   schemaOptions: branchSchemaOptions,
   customSchemas: toArcSchemas(branchSchemas),
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/code/:code',
       summary: 'Get branch by code',
       handler: 'getByCode',
       permissions: permissions.branches.getByCode,
-      wrapHandler: false,
+      raw: true,
       schema: {
         params: {
           type: 'object',
@@ -62,7 +62,7 @@ const branchResource = defineResource({
       summary: 'Get default branch (auto-creates if none exists)',
       handler: 'getDefault',
       permissions: permissions.branches.getDefault,
-      wrapHandler: false,
+      raw: true,
     },
     {
       method: 'POST',
@@ -70,7 +70,7 @@ const branchResource = defineResource({
       summary: 'Set branch as default',
       handler: 'setDefault',
       permissions: permissions.branches.setDefault,
-      wrapHandler: false,
+      raw: true,
       schema: {
         params: {
           type: 'object',

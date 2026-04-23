@@ -1,52 +1,59 @@
-import Transaction from './transaction.model.js';
+/**
+ * Transaction Schemas — field rules and filtering for Arc's pipeline.
+ *
+ * The Mongoose model is owned by @classytic/revenue v2.
+ * This file only defines Arc-specific presentation rules.
+ */
+
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+import type { Model } from 'mongoose';
 
 export const transactionSchemaOptions = {
   strictAdditionalProperties: true,
   fieldRules: {
+    publicId: { immutable: true },
     customerId: { immutable: true },
-    orderId: { immutable: true },
     sourceId: { immutable: true },
     sourceModel: { immutable: true },
     flow: { immutable: true },
     type: { immutable: true },
-    category: { immutable: true },
     gateway: { systemManaged: true },
     webhook: { systemManaged: true },
     verifiedAt: { systemManaged: true },
     verifiedBy: { systemManaged: true },
+    hold: { systemManaged: true },
+    splits: { systemManaged: true },
+    commission: { systemManaged: true },
     metadata: { systemManaged: true },
   },
   create: {
-    optionalOverrides: {
-      type: true,
-      status: true,
-    },
+    optionalOverrides: { type: true, status: true },
   },
   query: {
-    allowedPopulate: ['customerId', 'orderId', 'sourceId'],
+    allowedPopulate: ['relatedTransactionId', 'branch', 'handledBy'],
     filterableFields: {
+      publicId: { type: 'string' },
       customerId: { type: 'string' },
-      orderId: { type: 'string' },
       sourceId: { type: 'string' },
       sourceModel: { type: 'string' },
       flow: { type: 'string' },
       type: { type: 'string' },
       method: { type: 'string' },
-      category: { type: 'string' },
       status: { type: 'string' },
       date: { type: 'string', format: 'date-time' },
+      source: { type: 'string' },
+      branch: { type: 'string' },
     },
   },
   filter: {
     selectForRole: {
-      user: '-webhook.payload -metadata',
-      admin: '-webhook.payload',
+      user: '-webhook -metadata -gateway.verificationData',
+      admin: '-webhook.data',
     },
   },
 };
 
-const { query: _query, ...transactionCrudOptions } = transactionSchemaOptions;
-const crudSchemas = buildCrudSchemasFromModel(Transaction, transactionCrudOptions);
-
-export default crudSchemas;
+export function buildTransactionCrudSchemas(model: Model<any>): Partial<ReturnType<typeof buildCrudSchemasFromModel>> {
+  const { query: _query, ...crudOptions } = transactionSchemaOptions;
+  return buildCrudSchemasFromModel(model, crudOptions);
+}

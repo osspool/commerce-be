@@ -1,4 +1,4 @@
-import mongoose, { Schema, type HydratedDocument } from 'mongoose';
+import mongoose, { type HydratedDocument, Schema } from 'mongoose';
 
 // ============================================
 // INTERFACE
@@ -66,7 +66,6 @@ notificationSchema.set('toJSON', { virtuals: true });
 notificationSchema.set('toObject', { virtuals: true });
 
 const InAppNotification =
-  mongoose.models.InAppNotification ||
-  mongoose.model<IInAppNotification>('InAppNotification', notificationSchema);
+  mongoose.models.InAppNotification || mongoose.model<IInAppNotification>('InAppNotification', notificationSchema);
 
 export default InAppNotification;

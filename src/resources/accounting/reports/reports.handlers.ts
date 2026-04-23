@@ -4,16 +4,19 @@
  * Thin Fastify handlers that delegate to the @classytic/ledger engine.
  * All math/parsing lives in reports.utils.ts and is unit-tested separately.
  */
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import { accounting } from '../accounting.engine.js';
+
+import { generatePartnerLedger } from '@classytic/ledger';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import type mongoose from 'mongoose';
+import { Account, accounting, JournalEntry } from '../accounting.engine.js';
 import {
-  parseDateParams,
-  toObjectId,
+  type BudgetRow,
   enrichBudgetVsActual,
+  type GLAccount,
+  parseDateParams,
   projectGeneralLedger,
   type ReportQuery,
-  type GLAccount,
-  type BudgetRow,
+  toObjectId,
 } from './reports.utils.js';
 
 type Req = FastifyRequest<{ Querystring: ReportQuery }> & {
@@ -74,13 +77,84 @@ export async function getGeneralLedger(req: Req) {
   };
 }
 
+// ─── A/P and A/R subsidiary-ledger reports (ledger 0.7) ────────────────────
+
+const BUCKETS = [
+  { label: 'Current', minDays: 0, maxDays: 31 },
+  { label: '31-60', minDays: 31, maxDays: 61 },
+  { label: '61-90', minDays: 61, maxDays: 91 },
+  { label: '90+', minDays: 91, maxDays: Infinity },
+];
+
+type AgingReq = FastifyRequest<{ Querystring: { asOfDate?: string; accountCode?: string } }>;
+
+async function resolveAccountIdByCode(code: string) {
+  const acc = await Account.findOne({ accountTypeCode: code }).select('_id').lean();
+  if (!acc) throw new Error(`Account ${code} not found — run /accounting/accounts/seed`);
+  return acc._id as mongoose.Types.ObjectId;
+}
+
+function agingHandler(type: 'payable' | 'receivable', defaultCode: string) {
+  return async (req: AgingReq) => {
+    const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
+    const code = req.query.accountCode || defaultCode;
+    const accountId = await resolveAccountIdByCode(code);
+    const result = await accounting.reports.agedBalance({
+      asOfDate,
+      type,
+      accountIds: [accountId],
+      contactField: 'journalItems.partnerId',
+      dueDateField: 'journalItems.maturityDate',
+      buckets: BUCKETS,
+    });
+    return { success: true, data: result };
+  };
+}
+
+export const getApAging = agingHandler('payable', '2111');
+export const getArAging = agingHandler('receivable', '1141');
+
+type PartnerLedgerReq = FastifyRequest<{
+  Querystring: {
+    partnerId: string;
+    controlAccountCode?: string;
+    startDate: string;
+    endDate: string;
+  };
+}>;
+
+export async function getPartnerLedger(req: PartnerLedgerReq, reply: FastifyReply) {
+  const { partnerId, controlAccountCode, startDate, endDate } = req.query;
+  if (!partnerId || !startDate || !endDate) {
+    return reply.status(400).send({
+      success: false,
+      message: 'partnerId, startDate, and endDate are required',
+    });
+  }
+  const code = controlAccountCode || '2111';
+  const controlAccountId = await resolveAccountIdByCode(code);
+  const result = await generatePartnerLedger(
+    {
+      AccountModel: Account as never,
+      JournalEntryModel: JournalEntry as never,
+    } as never,
+    {
+      controlAccountId,
+      partnerId,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      includeMatched: true,
+      buckets: BUCKETS,
+    } as never,
+  );
+  return { success: true, data: result };
+}
+
 export async function getBudgetVsActual(req: Req, reply: FastifyReply) {
   // biome-ignore lint/suspicious/noExplicitAny: optional method on engine
   const reports = accounting.reports as any;
   if (!reports.budgetVsActual) {
-    return reply
-      .status(400)
-      .send({ success: false, message: 'Budget reports not available in this mode' });
+    return reply.status(400).send({ success: false, message: 'Budget reports not available in this mode' });
   }
 
   const params = buildReportParams(req, { accountIds: req.query.accountIds });

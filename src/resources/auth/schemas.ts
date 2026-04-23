@@ -1,5 +1,6 @@
-import User from './user.model.js';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
+import type { JsonSchema } from '@classytic/repo-core/schema';
+import User from './user.model.js';
 
 /**
  * User Schemas
@@ -43,7 +44,7 @@ export const userSchemaOptions = {
   },
 };
 
-export const userCreateBody = crudSchemas.createBody;
-export const userUpdateBody = crudSchemas.updateBody;
-export const userGetParams = crudSchemas.params;
-export const userListQuery = crudSchemas.listQuery;
+export const userCreateBody: JsonSchema = crudSchemas.createBody;
+export const userUpdateBody: JsonSchema = crudSchemas.updateBody;
+export const userGetParams: JsonSchema = crudSchemas.params;
+export const userListQuery: JsonSchema = crudSchemas.listQuery;

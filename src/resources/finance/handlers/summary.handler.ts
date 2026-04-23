@@ -1,5 +1,5 @@
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import Transaction from '#resources/transaction/transaction.model.js';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { getTransactionModel } from '#shared/revenue/engine.js';
 
 interface FinanceAggRow {
   dateKey: string;
@@ -202,7 +202,7 @@ export async function getFinanceSummary(
     },
   ];
 
-  const rows = await Transaction.aggregate(pipeline);
+  const rows = await getTransactionModel().aggregate(pipeline);
   const data = buildFinanceSummary(rows as FinanceAggRow[]);
   return reply.send({ success: true, data });
 }

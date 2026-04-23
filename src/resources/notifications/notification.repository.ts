@@ -1,6 +1,6 @@
 import { Repository } from '@classytic/mongokit';
-import InAppNotification from './notification.model.js';
 import type { IInAppNotification } from './notification.model.js';
+import InAppNotification from './notification.model.js';
 
 interface ListOptions {
   page?: number;

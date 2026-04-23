@@ -4,8 +4,8 @@
  * Events for product review lifecycle.
  */
 
-import { defineEvent } from '@classytic/arc/events';
 import type { EventDefinition } from '@classytic/arc';
+import { defineEvent } from '@classytic/arc/events';
 import { eventRegistry } from '#shared/event-registry.js';
 
 // --- Payload Interfaces ---

@@ -8,10 +8,10 @@
  * for high-frequency barcode scans at checkout.
  */
 import type { FlowContext } from '@classytic/flow';
-import { getFlowEngine } from './flow-engine.js';
-import { buildFlowContext, skuRefFromProduct, DEFAULT_LOCATION } from './context-helpers.js';
 import { createDefaultLoader } from '#lib/utils/lazy-import.js';
 import branchRepository from '#resources/commerce/branch/branch.repository.js';
+import { buildFlowContext, DEFAULT_LOCATION, skuRefFromProduct } from './context-helpers.js';
+import { getFlowEngine } from './flow-engine.js';
 
 const loadProductRepository = createDefaultLoader('#resources/catalog/products/product.repository.js');
 
@@ -258,16 +258,17 @@ class PosLookupService {
 
     const quants = await flow.repositories.quant.findMany({ locationId: DEFAULT_LOCATION }, ctx);
 
+    const LOW_STOCK_THRESHOLD = 10;
     let totalItems = 0;
     let totalQuantity = 0;
-    const lowStockCount = 0;
+    let lowStockCount = 0;
     let outOfStockCount = 0;
 
     for (const q of quants) {
       totalItems++;
       totalQuantity += q.quantityOnHand;
       if (q.quantityOnHand <= 0) outOfStockCount++;
-      // Note: reorderPoint not stored on StockQuant — would need metadata or separate config
+      else if (q.quantityOnHand <= LOW_STOCK_THRESHOLD) lowStockCount++;
     }
 
     return { totalItems, totalQuantity, lowStockCount, outOfStockCount };

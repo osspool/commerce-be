@@ -9,7 +9,7 @@ import analyticsSchemas from './analytics.schemas.js';
  * No database model - aggregates data from multiple sources.
  * This demonstrates Arc's flexibility for service-oriented resources.
  *
- * Pattern: disableDefaultRoutes + additionalRoutes + controller with custom methods
+ * Pattern: disableDefaultRoutes + routes + controller with custom methods
  */
 export default defineResource({
   name: 'analytics',
@@ -31,7 +31,7 @@ export default defineResource({
   disableDefaultRoutes: true,
 
   // Custom analytics endpoints
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/dashboard',
@@ -39,7 +39,7 @@ export default defineResource({
       summary: 'Get ecommerce dashboard analytics',
       description: 'Comprehensive analytics including customer stats, orders, revenue, and trends',
       permissions: analyticsActions.overview,
-      wrapHandler: false,
+      raw: true,
       schema: {
         querystring: analyticsSchemas.dashboardQuery,
         response: {
@@ -49,7 +49,7 @@ export default defineResource({
               success: { type: 'boolean' },
               data: {
                 type: 'object',
-                additionalProperties: true, // ✅ Allow any properties in data
+                additionalProperties: true,
               },
             },
           },

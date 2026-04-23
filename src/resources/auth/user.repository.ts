@@ -1,6 +1,6 @@
 import { Repository } from '@classytic/mongokit';
-import User from './user.model.js';
 import type { IUser } from './user.model.js';
+import User from './user.model.js';
 
 /**
  * User Repository

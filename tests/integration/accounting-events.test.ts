@@ -152,7 +152,7 @@ async function insertTransaction(overrides: Record<string, unknown> = {}) {
   };
 
   const doc = { ...defaults, ...overrides };
-  await db.collection('transactions').insertOne(doc);
+  await db.collection('revenue_transactions').insertOne(doc);
   return { txnId, orderId, doc };
 }
 
@@ -307,7 +307,7 @@ describe('Enterprise Mode — Event Flow Equivalence', () => {
     const branchOid = new mongoose.Types.ObjectId(ctx.orgId);
 
     // Insert enterprise-scale POS transactions
-    await db.collection('transactions').insertMany([
+    await db.collection('revenue_transactions').insertMany([
       {
         _id: new mongoose.Types.ObjectId(),
         flow: 'inflow', status: 'verified', amount: 250000, tax: 37500,
@@ -454,7 +454,7 @@ describe('accounting:order.paid — Online Order Events', () => {
     const txnId = new mongoose.Types.ObjectId();
     const db = mongoose.connection.db!;
 
-    await db.collection('transactions').insertOne({
+    await db.collection('revenue_transactions').insertOne({
       _id: txnId,
       flow: 'inflow',
       status: 'verified',
@@ -618,7 +618,7 @@ describe('POS Day-Close Events', () => {
       const branchOid = new mongoose.Types.ObjectId(ctx.orgId);
 
       // Insert POS transactions for the test date (BD timezone)
-      await db.collection('transactions').insertMany([
+      await db.collection('revenue_transactions').insertMany([
         {
           _id: new mongoose.Types.ObjectId(),
           flow: 'inflow', status: 'verified', amount: 50000, tax: 7500,
@@ -713,7 +713,7 @@ describe('POS Day-Close Events', () => {
       const db = mongoose.connection.db!;
       const branchOid = new mongoose.Types.ObjectId(ctx.orgId);
 
-      await db.collection('transactions').insertOne({
+      await db.collection('revenue_transactions').insertOne({
         _id: new mongoose.Types.ObjectId(),
         flow: 'inflow', status: 'verified', amount: 75000, tax: 0,
         method: 'cash', source: 'pos', branch: branchOid, branchCode: 'STD-001',
@@ -813,7 +813,7 @@ describe('Posting Contracts — Pure Function Tests', () => {
       const revenueItem = posting.items.find((i) => i.accountCode === '4111')!;
       expect(revenueItem.credit).toBe(100000);
 
-      const vatItem = posting.items.find((i) => i.accountCode === '2131')!;
+      const vatItem = posting.items.find((i) => i.accountCode === '2132')!;
       expect(vatItem.credit).toBe(15000);
 
       const totalDebit = posting.items.reduce((s, i) => s + i.debit, 0);
@@ -926,7 +926,7 @@ describe('Posting Contracts — Pure Function Tests', () => {
       const revenueCredit = posting.items.find((i) => i.accountCode === '4111');
       expect(revenueCredit?.credit).toBe(850000);
 
-      const vatCredit = posting.items.find((i) => i.accountCode === '2131');
+      const vatCredit = posting.items.find((i) => i.accountCode === '2132');
       expect(vatCredit?.credit).toBe(150000);
 
       // Balance
@@ -948,7 +948,7 @@ describe('Posting Contracts — Pure Function Tests', () => {
       });
 
       expect(posting.items.length).toBe(2);
-      const vatItem = posting.items.find((i) => i.accountCode === '2131');
+      const vatItem = posting.items.find((i) => i.accountCode === '2132');
       expect(vatItem).toBeUndefined();
     });
 
@@ -1180,7 +1180,7 @@ describe('Full Revenue → Ledger Integration', () => {
   async function createRevenueTransaction(overrides: Record<string, unknown> = {}) {
     const txnId = new mongoose.Types.ObjectId();
     const orderId = new mongoose.Types.ObjectId();
-    await db().collection('transactions').insertOne({
+    await db().collection('revenue_transactions').insertOne({
       _id: txnId,
       flow: 'inflow',
       status: 'verified',
@@ -1224,7 +1224,7 @@ describe('Full Revenue → Ledger Integration', () => {
         '1111', // Cash in Hand
         '1112', // Bank Account — Current
         '4111', // Domestic Sales Revenue
-        '2131', // VAT Payable
+        '2132', // VAT Output Payable
       ];
 
       const missing: string[] = [];
@@ -1384,7 +1384,7 @@ describe('Full Revenue → Ledger Integration', () => {
 
       const account = await db().collection('accounts').findOne({ _id: vatItem!.account });
       expect(account).not.toBeNull();
-      expect(account!.accountTypeCode).toBe('2131');
+      expect(account!.accountTypeCode).toBe('2132');
     });
   });
 
@@ -1467,7 +1467,7 @@ describe('Full Revenue → Ledger Integration', () => {
       );
       expect(vatItem).toBeDefined();
       const vatAccount = await db().collection('accounts').findOne({ _id: vatItem!.account });
-      expect(vatAccount!.accountTypeCode).toBe('2131');
+      expect(vatAccount!.accountTypeCode).toBe('2132');
     });
   });
 
@@ -1481,7 +1481,7 @@ describe('Full Revenue → Ledger Integration', () => {
       const branchOid = new mongoose.Types.ObjectId(ctx.orgId);
 
       // 3 POS transactions: 2 cash, 1 bkash
-      await db().collection('transactions').insertMany([
+      await db().collection('revenue_transactions').insertMany([
         {
           _id: new mongoose.Types.ObjectId(),
           flow: 'inflow', status: 'verified', amount: 100000, tax: 15000,
@@ -1606,7 +1606,7 @@ describe('Full Revenue → Ledger Integration', () => {
         _id: new mongoose.Types.ObjectId(dayCloseEntryId!),
       });
 
-      const vatAccountId = await getAccountId('2131');
+      const vatAccountId = await getAccountId('2132');
       expect(vatAccountId).not.toBeNull();
 
       const vatItem = entry!.journalItems.find(
@@ -1804,7 +1804,7 @@ describe('Full Revenue → Ledger Integration', () => {
 
     it('transaction without orderId should reference the Transaction itself', async () => {
       const txnId = new mongoose.Types.ObjectId();
-      await db().collection('transactions').insertOne({
+      await db().collection('revenue_transactions').insertOne({
         _id: txnId,
         flow: 'inflow',
         status: 'verified',
@@ -1900,7 +1900,7 @@ describe('accounting:purchase.paid — Purchase Events', () => {
       updatedAt: new Date(),
     };
     const doc = { ...defaults, ...overrides };
-    await db().collection('purchases').insertOne(doc);
+    await db().collection('purchase_orders').insertOne(doc);
     return { purchaseId, supplierId, doc };
   }
 
@@ -1998,7 +1998,7 @@ describe('accounting:purchase.paid — Purchase Events', () => {
     });
 
     if (entry?.sourceRef) {
-      expect(entry.sourceRef.sourceModel).toBe('Purchase');
+      expect(entry.sourceRef.sourceModel).toBe('PurchaseOrder');
       expect(entry.sourceRef.sourceId.toString()).toBe(purchaseId.toString());
     }
   });
@@ -2141,7 +2141,7 @@ describe('accounting:transaction.refunded — Refund Events', () => {
     const txnId = new mongoose.Types.ObjectId();
     const orderId = new mongoose.Types.ObjectId();
 
-    await db().collection('transactions').insertOne({
+    await db().collection('revenue_transactions').insertOne({
       _id: txnId,
       flow: 'outflow',
       status: 'refunded',
@@ -2187,7 +2187,7 @@ describe('accounting:transaction.refunded — Refund Events', () => {
 
   it('should debit Sales Revenue (4111) and credit Cash (1111) for cash refund', async () => {
     const txnId = new mongoose.Types.ObjectId();
-    await db().collection('transactions').insertOne({
+    await db().collection('revenue_transactions').insertOne({
       _id: txnId,
       flow: 'outflow', status: 'refunded',
       amount: 100000, tax: 0, method: 'cash', source: 'web',
@@ -2220,7 +2220,7 @@ describe('accounting:transaction.refunded — Refund Events', () => {
 
   it('should include VAT reversal line when tax > 0', async () => {
     const txnId = new mongoose.Types.ObjectId();
-    await db().collection('transactions').insertOne({
+    await db().collection('revenue_transactions').insertOne({
       _id: txnId,
       flow: 'outflow', status: 'refunded',
       amount: 115000, tax: 15000, method: 'bkash', source: 'web',
@@ -2246,7 +2246,7 @@ describe('accounting:transaction.refunded — Refund Events', () => {
 
   it('should skip refund for transaction with no branch', async () => {
     const txnId = new mongoose.Types.ObjectId();
-    await db().collection('transactions').insertOne({
+    await db().collection('revenue_transactions').insertOne({
       _id: txnId,
       flow: 'outflow', status: 'refunded',
       amount: 50000, tax: 0, method: 'cash', source: 'web',
@@ -2555,7 +2555,7 @@ describe('Posting Contracts — Refund (Pure Functions)', () => {
     const revenueDebit = posting.items.find((i) => i.accountCode === '4111');
     expect(revenueDebit?.debit).toBe(100000);
 
-    const vatDebit = posting.items.find((i) => i.accountCode === '2131');
+    const vatDebit = posting.items.find((i) => i.accountCode === '2132');
     expect(vatDebit?.debit).toBe(15000);
 
     const bankCredit = posting.items.find((i) => i.accountCode === '1112');

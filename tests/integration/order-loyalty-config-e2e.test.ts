@@ -207,13 +207,13 @@ describe('getTierDiscountPercent (config → discount)', () => {
 
 describe('Loyalty Engine redemption (config → limits)', () => {
   it('rejects redemption below minRedeemPoints (50)', async () => {
-    const member = await engine.services.member.enroll({
+    const member = await engine.repositories.member.enroll({
       externalId: new mongoose.Types.ObjectId().toString(),
       externalType: 'customer',
       cardId: `TST-${Date.now()}-MIN`,
-    });
+    }, { actorId: 'test' });
 
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id,
       points: 30,
       description: 'test earn',
@@ -223,7 +223,7 @@ describe('Loyalty Engine redemption (config → limits)', () => {
 
     // 30 points < minRedeemPoints(50) → should reject
     await expect(
-      engine.services.redemption.reserve({
+      engine.repositories.redemption.reserve({
         memberId: member._id,
         pointsToRedeem: 30,
         orderTotal: 1000,
@@ -234,13 +234,13 @@ describe('Loyalty Engine redemption (config → limits)', () => {
   });
 
   it('allows redemption at exactly minRedeemPoints (50)', async () => {
-    const member = await engine.services.member.enroll({
+    const member = await engine.repositories.member.enroll({
       externalId: new mongoose.Types.ObjectId().toString(),
       externalType: 'customer',
       cardId: `TST-${Date.now()}-EXA`,
-    });
+    }, { actorId: 'test' });
 
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id,
       points: 100,
       description: 'test earn',
@@ -249,7 +249,7 @@ describe('Loyalty Engine redemption (config → limits)', () => {
     }, { actorId: 'test' });
 
     // 50 points = minRedeemPoints(50) → should succeed
-    const reservation = await engine.services.redemption.reserve({
+    const reservation = await engine.repositories.redemption.reserve({
       memberId: member._id,
       pointsToRedeem: 50,
       orderTotal: 1000,
@@ -262,13 +262,13 @@ describe('Loyalty Engine redemption (config → limits)', () => {
   });
 
   it('caps redemption at maxRedeemPercent (50%) of order', async () => {
-    const member = await engine.services.member.enroll({
+    const member = await engine.repositories.member.enroll({
       externalId: new mongoose.Types.ObjectId().toString(),
       externalType: 'customer',
       cardId: `TST-${Date.now()}-CAP`,
-    });
+    }, { actorId: 'test' });
 
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id,
       points: 50000,
       description: 'whale earn',
@@ -279,7 +279,7 @@ describe('Loyalty Engine redemption (config → limits)', () => {
     // Order 1000 BDT, maxRedeemPercent=50% → max discount = 500 BDT
     // At conversionRate=10 (10 points = 1 BDT) → max 5000 points redeemable
     // Try to redeem 20000 points (would be 2000 BDT = 200% of order)
-    const reservation = await engine.services.redemption.reserve({
+    const reservation = await engine.repositories.redemption.reserve({
       memberId: member._id,
       pointsToRedeem: 20000,
       orderTotal: 1000,
@@ -293,13 +293,13 @@ describe('Loyalty Engine redemption (config → limits)', () => {
   });
 
   it('conversionRate (pointsPerBdt) controls point-to-BDT conversion', async () => {
-    const member = await engine.services.member.enroll({
+    const member = await engine.repositories.member.enroll({
       externalId: new mongoose.Types.ObjectId().toString(),
       externalType: 'customer',
       cardId: `TST-${Date.now()}-CVR`,
-    });
+    }, { actorId: 'test' });
 
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id,
       points: 500,
       description: 'earn for conversion test',
@@ -308,7 +308,7 @@ describe('Loyalty Engine redemption (config → limits)', () => {
     }, { actorId: 'test' });
 
     // Redeem 100 points at rate 10 points/BDT → 10 BDT discount
-    const reservation = await engine.services.redemption.reserve({
+    const reservation = await engine.repositories.redemption.reserve({
       memberId: member._id,
       pointsToRedeem: 100,
       orderTotal: 5000,
@@ -328,11 +328,11 @@ describe('Loyalty Engine redemption (config → limits)', () => {
 describe('Full lifecycle with config values', () => {
   it('enrollment → earn (config rate) → redeem (config limits) → verify balance', async () => {
     // 1. Enroll
-    const member = await engine.services.member.enroll({
+    const member = await engine.repositories.member.enroll({
       externalId: new mongoose.Types.ObjectId().toString(),
       externalType: 'customer',
       cardId: `TST-${Date.now()}-FULL`,
-    });
+    }, { actorId: 'test' });
     expect(member.status).toBe('active');
     expect(member.balance.current).toBe(0);
 
@@ -346,7 +346,7 @@ describe('Full lifecycle with config values', () => {
     expect(pointsToEarn).toBe(75);
 
     // 3. Award points via engine (same as POS controller does)
-    await engine.services.ledger.earnPoints({
+    await engine.repositories.pointTransaction.earnPoints({
       memberId: member._id,
       points: pointsToEarn,
       description: 'POS order test',
@@ -355,12 +355,12 @@ describe('Full lifecycle with config values', () => {
     }, { actorId: 'cashier' });
 
     // 4. Verify balance
-    const updated = await engine.services.member.getById(member._id);
+    const updated = await engine.repositories.member.getById(member._id, { throwOnNotFound: false });
     expect(updated!.balance.current).toBe(75);
     expect(updated!.balance.lifetime).toBe(75);
 
     // 5. Redeem points (75 > minRedeemPoints=50, so allowed)
-    const reservation = await engine.services.redemption.reserve({
+    const reservation = await engine.repositories.redemption.reserve({
       memberId: member._id,
       pointsToRedeem: 75,
       orderTotal: 3000,
@@ -374,10 +374,10 @@ describe('Full lifecycle with config values', () => {
     expect(reservation.pointsReserved).toBe(75);
 
     // 6. Confirm redemption
-    await engine.services.redemption.confirm(reservation._id, { actorId: 'cashier' });
+    await engine.repositories.redemption.confirm(reservation._id, { actorId: 'cashier' });
 
     // 7. Verify final balance = 0
-    const final = await engine.services.member.getById(member._id);
+    const final = await engine.repositories.member.getById(member._id, { throwOnNotFound: false });
     expect(final!.balance.current).toBe(0);
     expect(final!.balance.lifetime).toBe(75); // Lifetime doesn't decrease
   });
@@ -390,8 +390,8 @@ describe('Full lifecycle with config values', () => {
 describe('PlatformConfig seeded for loyalty plugin', () => {
   it('engine is functional (proves config was read at init)', () => {
     expect(engine).toBeTruthy();
-    expect(engine.services.member).toBeTruthy();
-    expect(engine.services.ledger).toBeTruthy();
-    expect(engine.services.redemption).toBeTruthy();
+    expect(engine.repositories.member).toBeTruthy();
+    expect(engine.repositories.pointTransaction).toBeTruthy();
+    expect(engine.repositories.redemption).toBeTruthy();
   });
 });

@@ -1,5 +1,5 @@
 // src/config/sections/app.config.ts
-import { parseIntEnv, parseDelimitedString, parseBoolean } from '../utils.js';
+import { parseBoolean, parseDelimitedString, parseIntEnv } from '../utils.js';
 
 export interface BetterAuthConfig {
   secret: string | undefined;

@@ -69,7 +69,7 @@ async function insertTransaction(overrides: Record<string, unknown> = {}) {
     updatedAt: new Date(),
     ...overrides,
   };
-  await db.collection('transactions').insertOne(doc);
+  await db.collection('revenue_transactions').insertOne(doc);
   return { txnId, doc };
 }
 
@@ -151,7 +151,7 @@ beforeEach(async () => {
   const db = mongoose.connection.db!;
   await db.collection('day_close_states').deleteMany({});
   await db.collection('journalentries').deleteMany({});
-  await db.collection('transactions').deleteMany({});
+  await db.collection('revenue_transactions').deleteMany({});
 
   const { clearCache } = await import('../../src/resources/accounting/posting/day-close-state.service.js');
   clearCache();

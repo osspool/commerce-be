@@ -9,7 +9,7 @@
 
 import { defineResource } from '@classytic/arc';
 import { requireAuth } from '@classytic/arc/permissions';
-import { JOURNAL_TYPES, getCustomJournalTypes, getJournalType } from '@classytic/ledger';
+import { getCustomJournalTypes, getJournalType, JOURNAL_TYPES } from '@classytic/ledger';
 
 const journalTypeResource = defineResource({
   name: 'journal-type',
@@ -20,13 +20,13 @@ const journalTypeResource = defineResource({
   disableDefaultRoutes: true,
   skipValidation: true,
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET' as const,
       path: '/',
       summary: 'List all journal types',
       permissions: requireAuth(),
-      wrapHandler: false,
+      raw: true,
       handler: async () => {
         const builtIn = Object.values(JOURNAL_TYPES);
         const custom = getCustomJournalTypes();
@@ -48,7 +48,7 @@ const journalTypeResource = defineResource({
       path: '/:code',
       summary: 'Get journal type by code',
       permissions: requireAuth(),
-      wrapHandler: false,
+      raw: true,
       handler: async (req: any, reply: any) => {
         const { code } = req.params;
         const journalType = getJournalType(code);

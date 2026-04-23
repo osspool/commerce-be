@@ -1,5 +1,6 @@
-import { branchSchema } from './branch.model.js';
 import { buildCrudSchemasFromMongooseSchema } from '@classytic/mongokit/utils';
+import type { CrudSchemas } from '@classytic/repo-core/schema';
+import { branchSchema } from './branch.model.js';
 
 /**
  * Branch CRUD Schemas with Field Rules
@@ -20,7 +21,7 @@ interface SchemaOptions {
   };
 }
 
-const crudSchemas = buildCrudSchemasFromMongooseSchema(branchSchema, {
+const crudSchemas: CrudSchemas = buildCrudSchemasFromMongooseSchema(branchSchema, {
   strictAdditionalProperties: true,
   fieldRules: {
     // isDefault is managed by the system for first branch

@@ -6,20 +6,18 @@
  * All endpoints are user-scoped (current user only).
  */
 
-import { defineResource } from '@classytic/arc';
 import type { ArcRequest } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import permissions from '#config/permissions.js';
+import { events } from './events.js';
 import notificationRepository from './notification.repository.js';
 import { listQuerySchema, markReadParamsSchema } from './notification.schemas.js';
-import { setSseManager } from './notification.dispatch.js';
-import { events } from './events.js';
-import type { FastifyInstance, FastifyReply } from 'fastify';
 
 function getUserScope(req: ArcRequest): { userId: string; organizationId: string } {
   const userId = req.user?.id as string;
   const organizationId =
-    (req.scope as { organizationId?: string })?.organizationId ||
-    (req.headers['x-organization-id'] as string);
+    (req.scope as { organizationId?: string })?.organizationId || (req.headers['x-organization-id'] as string);
   return { userId, organizationId: String(organizationId) };
 }
 
@@ -35,20 +33,14 @@ export default defineResource({
     get: permissions.notifications.view,
   },
 
-  onRegister: (fastify: FastifyInstance) => {
-    if (fastify.sseManager) {
-      setSseManager(fastify.sseManager);
-    }
-  },
-
-  additionalRoutes: [
+  routes: [
     // ── GET / — List notifications for current user ──
     {
       method: 'GET',
       path: '/',
       summary: 'List my notifications',
       permissions: permissions.notifications.view,
-      wrapHandler: false,
+      raw: true,
       schema: { querystring: listQuerySchema },
       handler: async (req: ArcRequest, reply: FastifyReply) => {
         const { userId, organizationId } = getUserScope(req);
@@ -64,7 +56,7 @@ export default defineResource({
       path: '/unread-count',
       summary: 'Get unread notification count',
       permissions: permissions.notifications.view,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: ArcRequest, reply: FastifyReply) => {
         const { userId, organizationId } = getUserScope(req);
         const count = await notificationRepository.countUnread(organizationId, userId);
@@ -78,7 +70,7 @@ export default defineResource({
       path: '/:id/read',
       summary: 'Mark notification as read',
       permissions: permissions.notifications.view,
-      wrapHandler: false,
+      raw: true,
       schema: { params: markReadParamsSchema },
       handler: async (req: ArcRequest, reply: FastifyReply) => {
         const { userId, organizationId } = getUserScope(req);
@@ -95,7 +87,7 @@ export default defineResource({
       path: '/read-all',
       summary: 'Mark all notifications as read',
       permissions: permissions.notifications.view,
-      wrapHandler: false,
+      raw: true,
       handler: async (req: ArcRequest, reply: FastifyReply) => {
         const { userId, organizationId } = getUserScope(req);
         const modifiedCount = await notificationRepository.markAllRead(organizationId, userId);
@@ -109,7 +101,7 @@ export default defineResource({
       path: '/stream',
       summary: 'SSE notification stream',
       permissions: permissions.notifications.stream,
-      wrapHandler: false,
+      raw: true,
       // preAuth promotes query params to headers before Arc's auth runs.
       // EventSource API cannot set custom headers — query params are the standard SSE auth pattern.
       preAuth: [

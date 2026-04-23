@@ -6,16 +6,16 @@
  */
 
 import { defineResource } from '@classytic/arc';
+import permissions from '#config/permissions.js';
 import { createAdapter } from '#shared/adapter.js';
+import { toArcSchemas } from '#shared/event-helpers.js';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
+import { events } from './events.js';
+import reviewController from './review.controller.js';
 import Review from './review.model.js';
 import reviewRepository from './review.repository.js';
-import reviewController from './review.controller.js';
-import permissions from '#config/permissions.js';
 import reviewCrudSchemas, { reviewSchemaOptions } from './review.schemas.js';
-import { events } from './events.js';
-import { toArcSchemas } from '#shared/event-helpers.js';
 
 const reviewResource = defineResource({
   name: 'review',
@@ -31,14 +31,14 @@ const reviewResource = defineResource({
   schemaOptions: reviewSchemaOptions,
   customSchemas: toArcSchemas(reviewCrudSchemas),
 
-  additionalRoutes: [
+  routes: [
     {
       method: 'GET',
       path: '/my/:productId',
       summary: 'Get my review for product',
       handler: 'getMyReview',
       permissions: permissions.reviews.getMyReview,
-      wrapHandler: false,
+      raw: true,
     },
   ],
 

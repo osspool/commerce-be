@@ -1,4 +1,4 @@
-import mongoose, { Schema, type HydratedDocument, type Model } from 'mongoose';
+import mongoose, { type HydratedDocument, type Model, Schema } from 'mongoose';
 import { InventoryCounter } from '../../flow/counter-bridge.js';
 
 export const StockRequestStatus = Object.freeze({

@@ -10,10 +10,10 @@
  *   GET /live    - Liveness probe (is process alive?)
  */
 
-import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import http from 'node:http';
 import mongoose from 'mongoose';
-import logger from '#core/utils/logger.js';
+import logger from '#lib/utils/logger.js';
 
 interface HealthStatus {
   status: 'healthy' | 'unhealthy';

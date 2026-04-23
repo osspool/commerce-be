@@ -12,9 +12,9 @@
  */
 
 import mongoose from 'mongoose';
-import logger from '#core/utils/logger.js';
 import config from '#config/index.js';
 import { initializeBackgroundRuntime } from '#core/factories/background-runtime.js';
+import logger from '#lib/utils/logger.js';
 
 interface WorkerOptions {
   enableEventHandlers?: boolean;

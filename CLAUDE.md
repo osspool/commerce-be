@@ -4,9 +4,9 @@
 
 ## Stack
 
-- **Fastify** via Arc 2.6.3 (`@classytic/arc`) — resource-oriented REST
+- **Fastify** via Arc 2.8 (`@classytic/arc`) — resource-oriented REST
 - **MongoDB** via MongoKit 3.4 (`@classytic/mongokit`) — repository pattern + Mongoose
-- **Better Auth 1.5.6** — bearer tokens, org-as-branch, `x-organization-id` scoping
+- **Better Auth 1.6.2** — bearer tokens, org-as-branch, `x-organization-id` scoping
 - **@classytic/flow** — WMS kernel, mode-gated (`FLOW_MODE=simple|standard|enterprise`)
 - **Vitest** — tests with MongoMemoryServer, Arc's `setupBetterAuthOrg` helper
 
@@ -42,23 +42,77 @@ src/
 
 ## Resource Pattern
 
+### Standard resource (has its own Mongoose model + MongoKit repository)
+
+Arc auto-generates CRUD (list/get/create/update/delete) from the adapter.
+Only override controller methods when business logic requires it (e.g. custom create with document numbering).
+Use `routes` for truly custom endpoints (stats, export, etc.).
+Use `actions` for state transitions (Stripe-style `POST /:id/action`).
+
 ```typescript
-const myResource = defineResource({
+import { defineResource } from '@classytic/arc';
+import { QueryParser } from '@classytic/mongokit';
+import { createAdapter } from '#shared/adapter.js';
+import permissions from '#config/permissions.js';
+
+export default defineResource({
   name: 'my-resource',
-  prefix: '/inventory/my-resource',
+  prefix: '/my-resources',
+  audit: true,
+  adapter: createAdapter(MyModel, myRepository),
+  queryParser: new QueryParser({ maxLimit: 100, allowedFilterFields: ['status'] }),
+  permissions: {
+    list: permissions.myModule.view,
+    get: permissions.myModule.view,
+    create: permissions.myModule.manage,
+    update: permissions.myModule.manage,
+    delete: requireRoles('admin'),
+  },
+  // Declarative state transitions → POST /:id/action
+  actions: {
+    approve: {
+      handler: async (id, data, req) => { ... },
+      permissions: permissions.myModule.manage,
+    },
+  },
+  // Only truly custom routes — NOT reimplemented CRUD
+  routes: [
+    { method: 'GET', path: '/stats', permissions: permissions.myModule.view,
+      raw: true, handler: async (req, reply) => { ... } },
+  ],
+});
+```
+
+**What you get for free**: pagination, filtering, sorting, field validation, body sanitization,
+audit trail, hooks (before/after lifecycle), org-scoping, OpenAPI docs, MCP tools.
+
+### Flow-wrapper resource (delegates to @classytic/flow engine)
+
+Use `disableDefaultRoutes: true` ONLY when the resource has no own model (wraps Flow/ledger/promo).
+
+```typescript
+export default defineResource({
+  name: 'warehouse-node',
+  prefix: '/inventory/warehouses',
   disableDefaultRoutes: true,
-  additionalRoutes: [
-    { method: 'GET', path: '/', permissions: permissions.inventory.view, wrapHandler: false,
-      schema: mySchemas.list,
+  routes: [
+    { method: 'GET', path: '/', permissions: requireAuth(), raw: true,
       handler: async (req, reply) => {
-        const ctx = getFlowContext(req);
-        const data = await flow().repositories.myRepo.list(ctx);
-        return reply.send({ success: true, data });
+        const data = await flow().repositories.node.list(getFlowContext(req));
+        reply.send({ success: true, data });
       },
     },
   ],
 });
 ```
+
+### Do NOT
+- Use `disableDefaultRoutes: true` when you have a model + repository — use the adapter instead
+- Use `raw: true` for CRUD routes — this bypasses Arc's entire pipeline (audit, hooks, permissions, pagination)
+- Reimplement GET /, GET /:id, POST /, PATCH /:id as raw Fastify handlers — Arc generates these
+- Write barrel `index.ts` re-export files — import directly from source
+- Use `additionalRoutes` or `wrapHandler` — deprecated in Arc 2.8, use `routes` + `raw: true`
+- Use `onRegister` + `createActionRouter` — use declarative `actions` on `defineResource()`
 
 ## Testing
 

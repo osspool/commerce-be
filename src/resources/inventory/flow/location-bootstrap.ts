@@ -7,10 +7,11 @@
  *
  * Idempotent — safe to call on every request (cached by bootstrappedOrgs set).
  */
-import type { Model } from 'mongoose';
+
 import type { FlowEngine, LocationType } from '@classytic/flow';
+import type { Model } from 'mongoose';
+import { ADJUSTMENT_LOCATION, CUSTOMER_LOCATION, DEFAULT_LOCATION, VENDOR_LOCATION } from './context-helpers.js';
 import { getFlowEngine } from './flow-engine.js';
-import { DEFAULT_LOCATION, VENDOR_LOCATION, CUSTOMER_LOCATION, ADJUSTMENT_LOCATION } from './context-helpers.js';
 
 interface LocationDef {
   code: string;
@@ -36,42 +37,54 @@ export async function bootstrapLocationsForOrg(organizationId: string): Promise<
   let existing = 0;
 
   // First, ensure a default node exists
-  let node = await flow.repositories.node.findDefault({
-    organizationId,
-    actorId: 'system',
-  });
+  let node = await flow.repositories.node.getByQuery(
+    { isDefault: true },
+    { organizationId, throwOnNotFound: false, lean: true },
+  );
 
   if (!node) {
-    node = await flow.repositories.node.create({
-      organizationId,
-      code: 'DEFAULT',
-      name: 'Default Warehouse',
-      type: 'warehouse',
-      status: 'active',
-      isDefault: true,
-    });
+    node = await flow.repositories.node.create(
+      {
+        organizationId,
+        code: 'DEFAULT',
+        name: 'Default Warehouse',
+        type: 'warehouse',
+        status: 'active',
+        isDefault: true,
+      } as Record<string, unknown>,
+      { organizationId },
+    );
   }
 
   const nodeId = String(node._id);
 
   for (const def of LOCATION_DEFS) {
-    const exists = await flow.repositories.location.findByCode(def.code, nodeId, { organizationId, actorId: 'system' });
+    const exists = await flow.repositories.location.getByQuery(
+      { code: def.code, nodeId },
+      { organizationId, throwOnNotFound: false },
+    );
 
     if (exists) {
       existing++;
       continue;
     }
 
-    await flow.repositories.location.create({
-      organizationId,
-      nodeId,
-      code: def.code,
-      name: def.name,
-      type: def.type,
-      status: 'active',
-      allowNegativeStock: def.allowNegativeStock,
-      allowReservations: def.code === DEFAULT_LOCATION,
-    });
+    // System locations are virtual (vendor/customer/adjustment) or the default stock bin.
+    // They are not physically scanned on receipt — leave `barcode` unset so the partial
+    // unique index on `barcode` doesn't reject user-assigned scannable codes later.
+    await flow.repositories.location.create(
+      {
+        organizationId,
+        nodeId,
+        code: def.code,
+        name: def.name,
+        type: def.type,
+        status: 'active',
+        allowNegativeStock: def.allowNegativeStock,
+        allowReservations: def.code === DEFAULT_LOCATION,
+      },
+      { organizationId },
+    );
     created++;
   }
 

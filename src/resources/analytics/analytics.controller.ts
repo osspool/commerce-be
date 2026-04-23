@@ -1,11 +1,23 @@
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import { BaseController } from '@classytic/arc';
-import Transaction from '#resources/transaction/transaction.model.js';
-import Customer from '#resources/sales/customers/customer.model.js';
-import Order from '#resources/sales/orders/order.model.js';
-import { ORDER_STATUS, PAYMENT_STATUS } from '#resources/sales/orders/order.enums.js';
+/**
+ * Analytics Controller
+ *
+ * Ecommerce dashboard analytics built on top of `@classytic/order`. All
+ * order reads go directly through the engine's Mongoose model (bypassing
+ * the multi-tenant plugin) because the dashboard is a super-admin view
+ * that aggregates across every branch.
+ *
+ * Status vocabulary aligned with `@classytic/order`:
+ *   - non-cancelled = `status NOT IN ('canceled', 'refunded')`
+ *   - "completed" for AOV = `status IN ('delivered', 'completed', 'fulfilled')`
+ *     AND `paymentState.chargeStatus = 'full'`
+ */
 
-// Dummy repository for analytics (no actual data storage)
+import { BaseController, type RepositoryLike } from '@classytic/arc';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import Customer from '#resources/sales/customers/customer.model.js';
+import { ensureOrderEngine } from '#resources/sales/orders/order.engine.js';
+import { getTransactionModel } from '#shared/revenue/engine.js';
+
 const dummyRepository = {
   getAll: async () => ({ data: [], total: 0 }),
   getById: async (_id: string) => null,
@@ -26,13 +38,13 @@ interface AggResult {
   total?: number;
 }
 
-/**
- * Analytics Controller
- * Ecommerce dashboard analytics (single-tenant)
- */
 class AnalyticsController extends BaseController {
   constructor() {
-    super(dummyRepository);
+    // Analytics is a read-only aggregation surface with no real repository.
+    // `dummyRepository.delete` returns `Promise<null>` rather than
+    // `Promise<DeleteResult>` — the cast bridges that structural gap. All
+    // analytics routes bypass BaseController's CRUD entirely.
+    super(dummyRepository as unknown as RepositoryLike<unknown>);
     this.getDashboard = this.getDashboard.bind(this);
   }
 
@@ -47,18 +59,24 @@ class AnalyticsController extends BaseController {
     const periodDays = period === '7d' ? 7 : 30;
     const periodStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
 
-    // Revenue query helper (use flow: 'inflow' for revenue)
+    // Revenue query helper
     const revenueMatch = (dateRange?: Record<string, unknown>) => ({
       flow: 'inflow',
       status: { $in: ['verified', 'completed'] },
       ...(dateRange || {}),
     });
 
-    // Order query helper
+    // @classytic/order states that count as "active" (not cancelled/refunded)
+    const CANCELLED_STATES = ['canceled', 'refunded'];
+    const COMPLETED_STATES = ['delivered', 'completed', 'fulfilled'];
+
     const orderMatch = (dateRange?: Record<string, unknown>) => ({
-      status: { $ne: ORDER_STATUS.CANCELLED },
+      status: { $nin: CANCELLED_STATES },
       ...(dateRange || {}),
     });
+
+    const engine = await ensureOrderEngine();
+    const Order = engine.models.Order;
 
     const [
       totalCustomers,
@@ -72,7 +90,7 @@ class AnalyticsController extends BaseController {
       periodRevenueAgg,
       revenueByCategory,
       revenueByMethod,
-      avgOrderValue,
+      avgOrderValueAgg,
     ] = await Promise.all([
       Customer.countDocuments(),
       Customer.countDocuments({ createdAt: { $gte: dayStart, $lt: dayEnd } }),
@@ -80,21 +98,24 @@ class AnalyticsController extends BaseController {
       Order.countDocuments(orderMatch({ createdAt: { $gte: dayStart, $lt: dayEnd } })),
       Order.countDocuments(orderMatch({ createdAt: { $gte: periodStart } })),
       Order.aggregate([{ $match: orderMatch() }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
-      Transaction.aggregate([{ $match: revenueMatch() }, { $group: { _id: null, sum: { $sum: '$amount' } } }]),
-      Transaction.aggregate([
+      getTransactionModel().aggregate([
+        { $match: revenueMatch() },
+        { $group: { _id: null, sum: { $sum: '$amount' } } },
+      ]),
+      getTransactionModel().aggregate([
         { $match: revenueMatch({ createdAt: { $gte: dayStart, $lt: dayEnd } }) },
         { $group: { _id: null, sum: { $sum: '$amount' } } },
       ]),
-      Transaction.aggregate([
+      getTransactionModel().aggregate([
         { $match: revenueMatch({ createdAt: { $gte: periodStart } }) },
         { $group: { _id: null, sum: { $sum: '$amount' } } },
       ]),
-      Transaction.aggregate([
+      getTransactionModel().aggregate([
         { $match: revenueMatch({ createdAt: { $gte: periodStart } }) },
         { $group: { _id: '$type', total: { $sum: '$amount' }, count: { $sum: 1 } } },
         { $sort: { total: -1 } },
       ]),
-      Transaction.aggregate([
+      getTransactionModel().aggregate([
         { $match: revenueMatch({ createdAt: { $gte: periodStart } }) },
         { $group: { _id: '$method', total: { $sum: '$amount' }, count: { $sum: 1 } } },
         { $sort: { total: -1 } },
@@ -102,15 +123,14 @@ class AnalyticsController extends BaseController {
       Order.aggregate([
         {
           $match: {
-            status: { $in: [ORDER_STATUS.CONFIRMED, ORDER_STATUS.SHIPPED, ORDER_STATUS.DELIVERED] },
-            'currentPayment.status': PAYMENT_STATUS.VERIFIED,
+            status: { $in: COMPLETED_STATES },
+            'paymentState.chargeStatus': 'full',
           },
         },
-        { $group: { _id: null, avg: { $avg: '$totalAmount' } } },
+        { $group: { _id: null, avg: { $avg: '$totals.grandTotal.amount' } } },
       ]),
     ]);
 
-    // Format orders by status
     const statusBreakdown: Record<string, number> = {};
     (ordersByStatus as AggResult[]).forEach((item) => {
       if (item._id) statusBreakdown[item._id] = item.count || 0;
@@ -123,7 +143,7 @@ class AnalyticsController extends BaseController {
           totalCustomers,
           totalOrders,
           totalRevenue: (totalRevenueAgg as AggResult[])[0]?.sum || 0,
-          averageOrderValue: Math.round((avgOrderValue as AggResult[])[0]?.avg || 0),
+          averageOrderValue: Math.round((avgOrderValueAgg as AggResult[])[0]?.avg || 0),
         },
         today: {
           newCustomers: todaysCustomers,
@@ -137,12 +157,14 @@ class AnalyticsController extends BaseController {
         },
         orders: {
           byStatus: {
-            pending: statusBreakdown[ORDER_STATUS.PENDING] || 0,
-            processing: statusBreakdown[ORDER_STATUS.PROCESSING] || 0,
-            confirmed: statusBreakdown[ORDER_STATUS.CONFIRMED] || 0,
-            shipped: statusBreakdown[ORDER_STATUS.SHIPPED] || 0,
-            delivered: statusBreakdown[ORDER_STATUS.DELIVERED] || 0,
-            cancelled: statusBreakdown[ORDER_STATUS.CANCELLED] || 0,
+            pending: statusBreakdown.pending || 0,
+            processing: statusBreakdown.processing || 0,
+            confirmed: statusBreakdown.confirmed || 0,
+            fulfilled: statusBreakdown.fulfilled || 0,
+            delivered: statusBreakdown.delivered || 0,
+            completed: statusBreakdown.completed || 0,
+            canceled: statusBreakdown.canceled || 0,
+            refunded: statusBreakdown.refunded || 0,
           },
         },
         revenue: {

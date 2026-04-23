@@ -1,4 +1,7 @@
 // src/config/utils.ts
+import { arcLog } from '@classytic/arc/logger';
+
+const log = arcLog('config-utils');
 
 /**
  * Parses a value as a boolean (case-insensitive 'true').
@@ -34,7 +37,7 @@ export function parseDelimitedString(value: string | undefined | null, delimiter
 export function requiredEnv(envVar: string): string {
   if (!process.env[envVar]) {
     const errorMsg = `Required environment variable ${envVar} is missing.`;
-    console.error(`ERROR: ${errorMsg}`);
+    log.error(errorMsg);
     throw new Error(errorMsg);
   }
   return process.env[envVar] as string;
@@ -45,6 +48,6 @@ export function requiredEnv(envVar: string): string {
  */
 export function warnIfMissing(envVar: string): void {
   if (!process.env[envVar]) {
-    console.warn(`${envVar} is not set. Functionality related to this variable may not work.`);
+    log.warn(`${envVar} is not set. Functionality related to this variable may not work.`);
   }
 }

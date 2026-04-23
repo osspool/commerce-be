@@ -4,8 +4,8 @@
  * Events emitted by the archive module for lifecycle tracking.
  */
 
-import { defineEvent } from '@classytic/arc/events';
 import type { EventDefinition } from '@classytic/arc';
+import { defineEvent } from '@classytic/arc/events';
 import { eventRegistry } from '#shared/event-registry.js';
 
 // --- Payload Interfaces ---

@@ -10,11 +10,11 @@ import { createAdapter } from '#shared/adapter.js';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { slugLookup } from '#shared/presets.js';
 import { queryParser } from '#shared/query-parser.js';
+import { events } from './events.js';
+import sizeGuideController from './size-guide.controller.js';
 import SizeGuide from './size-guide.model.js';
 import sizeGuideRepository from './size-guide.repository.js';
-import sizeGuideController from './size-guide.controller.js';
 import sizeGuideSchemas from './size-guide.schemas.js';
-import { events } from './events.js';
 
 const sizeGuideResource = defineResource({
   name: 'size-guide',
