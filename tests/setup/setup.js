@@ -3,8 +3,7 @@ import mongoose from 'mongoose';
 import { beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
 // Ensure common env vars exist before app/config modules are imported in tests
-process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-123456789';
-process.env.COOKIE_SECRET = process.env.COOKIE_SECRET || 'test-cookie-secret-key-1234567890123456';
+process.env.BETTER_AUTH_SECRET = process.env.BETTER_AUTH_SECRET || 'test-better-auth-secret-at-least-32-chars';
 process.env.REDX_API_KEY = process.env.REDX_API_KEY || 'test-redx-key';
 
 let mongoServer;

@@ -11,12 +11,6 @@ export interface AppSectionConfig {
   port: number;
   url: string;
   frontendUrl: string;
-  jwtSecret: string | undefined;
-  jwtRefresh: string | undefined;
-  sessionSecret: string | undefined;
-  cookieSecret: string | undefined;
-  jwtExpiresIn: string;
-  jwtRefreshExpiresIn: string;
   deviceWebhookSecret: string | undefined;
   disableCronJobs: boolean | undefined;
   trackProductViews: boolean;
@@ -56,12 +50,6 @@ const appConfig: AppConfigSection = {
     port: parseIntEnv(process.env.PORT, 8050),
     url: process.env.APP_URL || `http://localhost:${process.env.PORT || 8050}`,
     frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
-    jwtSecret: process.env.JWT_SECRET,
-    jwtRefresh: process.env.JWT_REFRESH_SECRET,
-    sessionSecret: process.env.SESSION_SECRET,
-    cookieSecret: process.env.COOKIE_SECRET,
-    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '3d',
-    jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
     deviceWebhookSecret: process.env.DEVICE_WEBHOOK_SECRET,
     disableCronJobs: parseBoolean(process.env.DISABLE_CRON_JOBS),
     // Feature flags (keep simple: 0 = disabled, 1 = enabled)

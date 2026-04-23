@@ -76,12 +76,7 @@ class Config {
 
   validateCoreEnvs(): void {
     // MONGO_URI is now checked directly in db.js
-
-    // Use warnIfMissing for non-critical but important variables
-    warnIfMissing('JWT_SECRET');
-    // Google Sheets key validation is handled within google.config.js now
-
-    // Other specific validations are handled within their respective config section files
+    warnIfMissing('BETTER_AUTH_SECRET');
   }
 
   get config(): AppConfig {

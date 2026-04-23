@@ -29,7 +29,7 @@ function restoreEnv(snap: Record<string, string | undefined>): void {
 }
 
 describe('createApplication', () => {
-  const OUTER_ENV_KEYS = ['JWT_SECRET', 'MONGO_URI', 'JWT_REFRESH_SECRET', 'COOKIE_SECRET', 'NODE_ENV'];
+  const OUTER_ENV_KEYS = ['BETTER_AUTH_SECRET', 'MONGO_URI', 'NODE_ENV'];
   let outerSnap: Record<string, string | undefined>;
 
   beforeEach(() => {
@@ -37,10 +37,8 @@ describe('createApplication', () => {
     // Ensure boot-level env validation has what it needs. Individual tests
     // can still delete a key after this to drive a fail-fast scenario.
     process.env.NODE_ENV = 'test';
-    process.env.JWT_SECRET = 'a-valid-jwt-secret-at-least-32-characters';
+    process.env.BETTER_AUTH_SECRET = 'a-valid-better-auth-secret-at-least-32-chars';
     process.env.MONGO_URI = 'mongodb://localhost:27017/test';
-    process.env.JWT_REFRESH_SECRET = 'a-valid-refresh-secret-at-least-32-chars';
-    process.env.COOKIE_SECRET = 'a-valid-cookie-secret-key-1234567890123456';
 
     vi.clearAllMocks();
     createArcAppOptions.mockReturnValue({ resourceDir: 'src/resources' });
@@ -75,11 +73,11 @@ describe('createApplication', () => {
   });
 
   describe('env validation at boot', () => {
-    it('fails fast when JWT_SECRET is missing — DB is never contacted', async () => {
-      delete process.env.JWT_SECRET;
+    it('fails fast when BETTER_AUTH_SECRET is missing — DB is never contacted', async () => {
+      delete process.env.BETTER_AUTH_SECRET;
 
       const { createApplication } = await import('../src/app.js');
-      await expect(createApplication()).rejects.toThrow(/JWT_SECRET/);
+      await expect(createApplication()).rejects.toThrow(/BETTER_AUTH_SECRET/);
       expect(connectDatabase).not.toHaveBeenCalled();
     });
 

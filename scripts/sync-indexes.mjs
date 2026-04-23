@@ -99,11 +99,8 @@ async function main() {
   // Set env defaults the engines expect
   process.env.NODE_ENV ??= 'production';
   process.env.FLOW_MODE ??= 'simple';
-  process.env.BETTER_AUTH_SECRET ??= 'sync-indexes-dummy';
+  process.env.BETTER_AUTH_SECRET ??= 'sync-indexes-dummy-better-auth-secret-32chars';
   process.env.BETTER_AUTH_URL ??= 'http://localhost:0';
-  process.env.JWT_SECRET ??= 'sync-indexes-dummy-jwt-secret-32chars';
-  process.env.JWT_REFRESH_SECRET ??= 'sync-indexes-dummy-refresh-32chars';
-  process.env.COOKIE_SECRET ??= 'sync-indexes-dummy-cookie-32chars000';
 
   try {
     const { ensureOrderEngine } = await import('../src/resources/sales/orders/order.engine.js');

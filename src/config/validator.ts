@@ -43,10 +43,10 @@ export interface ValidationResult {
  */
 const validationRules: ValidationRulesConfig = {
   // Required in all environments
-  required: ['JWT_SECRET', 'MONGO_URI'],
+  required: ['BETTER_AUTH_SECRET', 'MONGO_URI'],
 
   // Required in production only
-  requiredInProduction: ['CORS_ORIGIN', 'JWT_REFRESH_SECRET', 'SESSION_SECRET', 'COOKIE_SECRET'],
+  requiredInProduction: ['CORS_ORIGIN'],
 
   // Optional but recommended
   recommended: ['APP_URL', 'FRONTEND_URL', 'PORT'],
@@ -70,10 +70,7 @@ const validationRules: ValidationRulesConfig = {
 
   // Security checks
   security: {
-    JWT_SECRET: { minLength: 32 },
-    JWT_REFRESH_SECRET: { minLength: 32 },
-    SESSION_SECRET: { minLength: 32 },
-    COOKIE_SECRET: { minLength: 32 },
+    BETTER_AUTH_SECRET: { minLength: 32 },
   },
 };
 

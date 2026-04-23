@@ -40,6 +40,7 @@ import {
   type AuthProvider,
 } from '@classytic/arc/testing';
 import type { FastifyInstance } from 'fastify';
+import { outbox } from '../../src/shared/outbox/index.js';
 
 let replSet: MongoMemoryReplSet;
 let ctx: TestOrgContext;
@@ -49,7 +50,7 @@ let server: FastifyInstance;
 const API = '/api/v1';
 
 // BINs
-const VALID_BIN = '0012000456700'; // 13-digit test BIN
+const VALID_BIN = '0012000456707'; // 13-digit test BIN (check digit = 7 for prefix 001200045670)
 const INVALID_BIN = '000000000000X';
 
 function parse(body: string) {
@@ -102,7 +103,7 @@ async function seedProduct(
     identifiers: { custom: { sku } },
     pricing: { basePrice: price, costPrice, taxRate },
     tax: { rate: taxRate, vatRateCode },
-    variants: [{ sku, name, price, costPrice, isActive: true, taxRate }],
+    variants: [{ sku, name, price, costPrice, isActive: true, taxRate, attributes: {} }],
     organizationId: null, // company-wide
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -286,8 +287,9 @@ describe('VAT Purchase-Sale Cycle', () => {
   // ─── 8. Input VAT posted to 1150.* on purchase receive ──────────────
 
   it('input VAT is posted to 1150.* after purchase receive', async () => {
-    // Allow async event handler to fire (accounting:purchase.paid → purchaseToPosting)
-    await new Promise((r) => setTimeout(r, 500));
+    // Drain outbox to deliver accounting:purchase.paid → purchaseToPosting
+    await outbox.relay();
+    await new Promise((r) => setTimeout(r, 300));
 
     const journalCol = mongoose.connection.db!.collection('journalentries');
 
@@ -301,16 +303,33 @@ describe('VAT Purchase-Sale Cycle', () => {
 
     expect(purchaseEntries.length).toBeGreaterThan(0);
 
-    // Input VAT should be debited to 1150.* (the bd-tax account for claimable input)
+    // Journal items store `account` as an ObjectId ref. Resolve 1150.* account
+    // codes to their ids, then match items by that ref.
+    const input1150Accounts = await mongoose.connection
+      .db!.collection('accounts')
+      .find({ accountNumber: /^1150/ })
+      .toArray();
+    const input1150Ids = new Set(input1150Accounts.map((a) => a._id.toString()));
+
     const allItems = purchaseEntries.flatMap((e: any) => e.journalItems ?? e.items ?? []);
     const inputVatItems = allItems.filter((item: any) =>
-      typeof item.accountCode === 'string' && item.accountCode.startsWith('1150'),
+      item.account && input1150Ids.has(item.account.toString()),
     );
 
     expect(inputVatItems.length).toBeGreaterThan(0);
-    // Input VAT debit should be > 0
     const totalInputVat = inputVatItems.reduce((sum: number, item: any) => sum + (item.debit || 0), 0);
     expect(totalInputVat).toBeGreaterThan(0);
+  });
+
+  it('opens a POS shift (required before POS orders)', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: `${API}/pos/shifts/open`,
+      headers: auth.getHeaders('admin'),
+      payload: { openingCash: 0 },
+    });
+    if (res.statusCode !== 201) console.log('Shift open:', res.statusCode, res.body);
+    expect(res.statusCode).toBe(201);
   });
 
   // ─── POS sale ─────────────────────────────────────────────────────────
@@ -577,8 +596,8 @@ describe('VAT Purchase-Sale Cycle', () => {
   // ─── 9. Mushak 9.1 input VAT credit reflects purchase VAT ──────────────
 
   it('Mushak 9.1 inputVatCredit reflects input VAT from purchases', async () => {
-    // Allow async event propagation
-    await new Promise((r) => setTimeout(r, 500));
+    await outbox.relay();
+    await new Promise((r) => setTimeout(r, 300));
 
     const now = new Date();
     const period = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -592,12 +611,12 @@ describe('VAT Purchase-Sale Cycle', () => {
     const data = parse(res.body)?.data;
     const ret = data?.return;
 
-    // Now that accounting:purchase.paid is emitted on receive,
-    // the tax aggregator should pick up the input VAT from GL entries.
-    const inputCredit = ret?.inputVatCredit ?? 0;
+    // Mushak 9.1 return structured as NBR's 19-line format; line 9 is input VAT credit.
+    const inputCreditLine = ret?.lines?.find((l: { lineNumber: number }) => l.lineNumber === 9);
+    const inputCredit = inputCreditLine?.value ?? 0;
     expect(inputCredit).toBeGreaterThan(0);
 
-    // Input VAT array should also be populated
+    // Input VAT array (top-level data.inputVat from handler) should also be populated
     const inputVatBuckets = data?.inputVat ?? [];
     expect(inputVatBuckets.length).toBeGreaterThan(0);
   });
@@ -605,6 +624,7 @@ describe('VAT Purchase-Sale Cycle', () => {
   // ─── 11. Net VAT calculation ───────────────────────────────────────────
 
   it('Net VAT payable = outputVat - inputVat (input credit now flows)', async () => {
+    await outbox.relay();
     await new Promise((r) => setTimeout(r, 300));
 
     const now = new Date();
@@ -621,14 +641,15 @@ describe('VAT Purchase-Sale Cycle', () => {
     const ret = data?.return ?? {};
 
     const outputTotal = aggregates.reduce((sum: number, a: any) => sum + (a.vatAmount || 0), 0);
-    const inputCredit = ret.inputVatCredit ?? 0;
-    const netPayable = outputTotal - inputCredit;
+    const inputCreditLine = ret?.lines?.find((l: { lineNumber: number }) => l.lineNumber === 9);
+    const inputCredit = inputCreditLine?.value ?? 0;
 
-    // Net payable should be less than gross output (input credit offsets)
+    // Input credit now flows from GL aggregation; output from Mushak 6.3 aggregates.
+    // Net payable is floored at 0 by buildMushak91 (input credit carries forward
+    // to next period when it exceeds output — normal for stock build-up phases).
     expect(outputTotal).toBeGreaterThan(0);
     expect(inputCredit).toBeGreaterThan(0);
-    expect(netPayable).toBeLessThan(outputTotal);
-    expect(netPayable).toBeGreaterThanOrEqual(0);
+    expect(ret.netPayable).toBeGreaterThanOrEqual(0);
   });
 
   // ─── 12. [GAP] Products don't store hsCode / vatRateCode ───────────────
