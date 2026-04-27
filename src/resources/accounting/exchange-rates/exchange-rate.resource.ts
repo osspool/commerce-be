@@ -5,10 +5,9 @@
  * Finance admins manage rates; the ManualRateBridge reads them.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
-import { createAdapter } from '#shared/adapter.js';
 import CurrencyExchangeRate from './exchange-rate.model.js';
 import exchangeRateRepository from './exchange-rate.repository.js';
 
@@ -24,7 +23,7 @@ export default defineResource({
   displayName: 'Exchange Rates',
   tag: 'Accounting - Exchange Rates',
   audit: true,
-  adapter: createAdapter(CurrencyExchangeRate, exchangeRateRepository),
+  adapter: createMongooseAdapter(CurrencyExchangeRate, exchangeRateRepository),
   queryParser,
   permissions: {
     list: requireRoles('admin', 'finance_admin', 'finance_manager'),

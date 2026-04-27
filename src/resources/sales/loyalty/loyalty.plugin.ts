@@ -18,6 +18,7 @@
  * | cardPrefix, cardDigits | Yes — reads per enrollment |
  */
 
+import { createMongooseAdapter } from '@classytic/arc';
 import { createLoyaltyEngine, type LoyaltyEngine } from '@classytic/loyalty';
 import fp from 'fastify-plugin';
 import mongoose from 'mongoose';
@@ -30,7 +31,7 @@ let _pending: Promise<LoyaltyEngine> | null = null;
 
 /**
  * Lazy idempotent engine initializer. Resources call this at top-level await
- * to wire `adapter: createAdapter(engine.models.X, engine.repositories.X)`.
+ * to wire `adapter: createMongooseAdapter(engine.models.X, engine.repositories.X)`.
  * Same pattern as order.engine.ts. Safe under concurrent calls.
  */
 export async function ensureLoyaltyEngine(): Promise<LoyaltyEngine> {

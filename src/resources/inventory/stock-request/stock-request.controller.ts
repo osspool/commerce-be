@@ -12,7 +12,18 @@ import stockRequestService from './stock-request.service.js';
 
 class StockRequestController extends BaseController {
   constructor() {
-    super(stockRequestRepository);
+    super(stockRequestRepository, {
+      schemaOptions: {
+        fieldRules: {
+          requestNumber: { systemManaged: true },
+          status: { systemManaged: true },
+          statusHistory: { systemManaged: true },
+          requestedBy: { systemManaged: true },
+          reviewedBy: { systemManaged: true },
+          fulfilledBy: { systemManaged: true },
+        },
+      },
+    });
   }
 
   override async create(context: IRequestContext): Promise<IControllerResponse<AnyRecord>> {

@@ -1,7 +1,6 @@
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
-import { createAdapter } from '#shared/adapter.js';
 import WithholdingCertificate from './withholding-certificate.model.js';
 import { withholdingCertificateRepository } from './withholding-certificate.repository.js';
 
@@ -13,7 +12,7 @@ const withholdingCertificateResource = defineResource({
   tag: 'Accounting',
   prefix: '/accounting/withholding-certificates',
   audit: true,
-  adapter: createAdapter(WithholdingCertificate, withholdingCertificateRepository),
+  adapter: createMongooseAdapter(WithholdingCertificate, withholdingCertificateRepository),
   queryParser: new QueryParser({
     maxLimit: 200,
     allowedFilterFields: [

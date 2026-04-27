@@ -28,6 +28,7 @@ import { createCatalogBridge } from './bridges/catalog.bridge.js';
 import { createFlowBridge } from './bridges/flow.bridge.js';
 import { createRevenueBridge } from './bridges/revenue.bridge.js';
 import type { OrderChannel } from './channel.js';
+import { resolveCustomerPriceList } from './customer-pricelist.js';
 import { ensureOrderEngine } from './order.engine.js';
 import { attachPaymentToOrder, type OrderPaymentInput } from './order-payment.js';
 import {
@@ -75,9 +76,28 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
     }
   }
 
+  // Resolve the customer's pricelist BEFORE snapshot resolution so the
+  // catalog bridge can apply pricelist rules against the base price during
+  // line resolution. Failure modes (no customer, no pricelist on customer,
+  // engine not ready) all fall through to base price — same behavior as
+  // before pricelist was wired.
+  const customerForPricelist = body.customer as { _id?: string; email?: string } | undefined;
+  const pricelistResolution = await resolveCustomerPriceList(
+    customerForPricelist,
+    ctx.organizationId,
+  );
+  if (pricelistResolution) {
+    logger.debug?.(
+      { customerId: pricelistResolution.customerId, priceListId: pricelistResolution.priceListId },
+      'Applying customer pricelist to order placement',
+    );
+  }
+
   // Resolve SKUs so we can reserve stock
   const catalogBridge = createCatalogBridge();
-  const resolvedLines = await resolveLineSkus(rawLines, catalogBridge, ctx);
+  const resolvedLines = await resolveLineSkus(rawLines, catalogBridge, ctx, {
+    priceListId: pricelistResolution?.priceListId,
+  });
   if (!resolvedLines) {
     return { status: 400, body: { success: false, error: 'Failed to resolve one or more line SKUs' } };
   }

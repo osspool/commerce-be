@@ -5,12 +5,11 @@
  * plugin boots it once per app and registers the routes.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import type { RouteDefinition } from '@classytic/arc/types';
 import type { Repository } from '@classytic/mongokit';
 import fp from 'fastify-plugin';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import { SIZE_VARIANTS } from './media.config.js';
 import MediaController from './media.controller.js';
 import { ensureMediaEngine, getMediaEngine } from './media.engine.js';
@@ -37,7 +36,7 @@ async function mediaPlugin(fastify: import('fastify').FastifyInstance) {
     tag: 'Media',
     prefix: '/media',
 
-    adapter: createAdapter(Media, repo as unknown as Repository),
+    adapter: createMongooseAdapter(Media, repo as unknown as Repository),
     controller,
     // CRUD route schemas — Arc auto-converts Zod via z.toJSONSchema().
     // Arc's CrudSchemas type is JSON-Schema-shaped, but the runtime

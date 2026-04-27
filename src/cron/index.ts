@@ -74,6 +74,12 @@ export async function initialize(): Promise<void> {
     }, ONE_HOUR),
   );
 
+  // POS stale shifts are recovered via lazy-close-on-next-open
+  // (`shift.handlers.ts:closeStaleShiftsOnRegister`) plus a manual
+  // force-close action on the oversight dashboard. No background cron
+  // — registers that get used recover automatically; permanently
+  // abandoned ones surface for explicit manager action.
+
   // Replenishment evaluation every hour (check all bootstrapped orgs for low stock)
   timers.push(
     setInterval(async () => {

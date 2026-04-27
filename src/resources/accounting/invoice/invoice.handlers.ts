@@ -121,17 +121,6 @@ export async function downloadPdf(req: Req, reply: import('fastify').FastifyRepl
     .send(result.buffer);
 }
 
-// ── Approval ─────────────────────────────────────────────────────────────────
-
-export async function getPendingApprovals(req: Req): Promise<unknown> {
-  const c = ctx(req);
-  const data = await invoice().repositories.invoices.getAll(
-    { filters: { status: 'pending_approval' } },
-    { organizationId: c.organizationId },
-  );
-  return { success: true, data };
-}
-
 // ── Batch Operations ─────────────────────────────────────────────────────────
 
 export async function batchCreate(req: Req) {

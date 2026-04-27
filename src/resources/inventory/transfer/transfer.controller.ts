@@ -15,7 +15,22 @@ import transferService from './transfer.service.js';
 
 class TransferController extends BaseController {
   constructor() {
-    super(transferRepository);
+    super(transferRepository, {
+      schemaOptions: {
+        fieldRules: {
+          documentNumber: { systemManaged: true },
+          status: { systemManaged: true },
+          totalItems: { systemManaged: true },
+          totalQuantity: { systemManaged: true },
+          totalValue: { systemManaged: true },
+          statusHistory: { systemManaged: true },
+          createdBy: { systemManaged: true },
+          approvedBy: { systemManaged: true },
+          dispatchedBy: { systemManaged: true },
+          receivedBy: { systemManaged: true },
+        },
+      },
+    });
   }
 
   override async create(context: IRequestContext): Promise<IControllerResponse<AnyRecord>> {

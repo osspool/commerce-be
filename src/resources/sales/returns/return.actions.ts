@@ -1,12 +1,13 @@
 /**
  * Return Action Registry — Stripe-style state transitions
  *
- * Registered via createActionRouter → POST /sales/returns/:id/action
+ * Wired via declarative `actions:` block → POST /sales/returns/:id/action
  * Body: { action: "approve" | "ship" | "receive" | "inspect" | "refund" | "reject" | "cancel", ... }
  */
 
 import type { RequestWithExtras } from '@classytic/arc/types';
 import permissions from '#config/permissions.js';
+import { inspectActionSchema, reasonActionSchema, shipActionSchema } from './return.schemas.js';
 import { returnService } from './return.service.js';
 
 function actorId(req: RequestWithExtras): string {
@@ -14,7 +15,8 @@ function actorId(req: RequestWithExtras): string {
 }
 
 /**
- * Arc 2.8 declarative actions — imported by return.resource.ts.
+ * Arc 2.8 declarative actions — imported by return.resource.ts. Action
+ * schemas are Zod v4; Arc auto-converts at registration.
  */
 export const returnActions = {
   approve: {
@@ -36,14 +38,7 @@ export const returnActions = {
       );
     },
     permissions: permissions.sales.returnManage,
-    schema: {
-      type: 'object',
-      properties: {
-        provider: { type: 'string', description: 'Shipping provider name' },
-        trackingNumber: { type: 'string', description: 'Reverse shipping tracking number' },
-      },
-      required: [],
-    },
+    schema: shipActionSchema,
   },
 
   receive: {
@@ -62,26 +57,7 @@ export const returnActions = {
       );
     },
     permissions: permissions.sales.returnInspect,
-    schema: {
-      type: 'object',
-      properties: {
-        results: {
-          type: 'array',
-          description: 'Per-item inspection results',
-          items: {
-            type: 'object',
-            properties: {
-              productId: { type: 'string' },
-              variantSku: { type: 'string' },
-              result: { type: 'string', enum: ['approved', 'partial', 'rejected'] },
-              refundAmount: { type: 'number' },
-            },
-            required: ['productId', 'result'],
-          },
-        },
-      },
-      required: ['results'],
-    },
+    schema: inspectActionSchema,
   },
 
   refund: {
@@ -96,11 +72,7 @@ export const returnActions = {
       return returnService.rejectReturn(id, (data.reason as string) || '', actorId(req));
     },
     permissions: permissions.sales.returnManage,
-    schema: {
-      type: 'object',
-      properties: { reason: { type: 'string', description: 'Rejection reason' } },
-      required: [],
-    },
+    schema: reasonActionSchema,
   },
 
   cancel: {
@@ -108,10 +80,6 @@ export const returnActions = {
       return returnService.cancelReturn(id, (data.reason as string) || '', actorId(req));
     },
     permissions: permissions.sales.returnManage,
-    schema: {
-      type: 'object',
-      properties: { reason: { type: 'string', description: 'Cancellation reason' } },
-      required: [],
-    },
+    schema: reasonActionSchema,
   },
 };

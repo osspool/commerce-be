@@ -28,21 +28,34 @@ import musokInvoiceRepository from './musok.repository.js';
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
-async function getSellerInfo() {
+type Seller = { bin: string; name: string; address: string; activityType: string | undefined };
+
+async function loadSeller(): Promise<Seller | null> {
   const config = await (PlatformConfig as any).getConfig();
   const vat = config.vat || {};
-  if (!vat.bin) {
-    throw Object.assign(new Error('Seller BIN not configured. Set it in Platform Config → VAT.'), {
-      statusCode: 400,
-      code: 'SELLER_BIN_MISSING',
-    });
-  }
+  if (!vat.bin) return null;
   return {
     bin: vat.bin as string,
     name: (vat.registeredName || config.platformName || 'Unknown') as string,
     address: (vat.vatCircle || 'Bangladesh') as string,
     activityType: vat.activityType as string | undefined,
   };
+}
+
+// 422 (not 400) — the request is well-formed; the system simply isn't
+// configured yet. Payload tells the UI exactly where to send the operator.
+function replySellerBinMissing(reply: FastifyReply): FastifyReply {
+  return reply.code(422).send({
+    success: false,
+    code: 'SELLER_BIN_MISSING',
+    message:
+      'Seller BIN is not configured yet. Set the company VAT registration (BIN) in Platform Config → VAT before generating Mushak forms.',
+    action: {
+      label: 'Configure VAT settings',
+      path: '/dashboard/platform-config/vat',
+      field: 'vat.bin',
+    },
+  });
 }
 
 async function resolveBranchCode(orgId: string): Promise<string> {
@@ -84,7 +97,8 @@ export async function generateMusokInvoice(req: FastifyRequest, reply: FastifyRe
     return reply.send({ success: true, data: existing, idempotent: true });
   }
 
-  const seller = await getSellerInfo();
+  const seller = await loadSeller();
+  if (!seller) return replySellerBinMissing(reply);
   const branchCode = orgId ? await resolveBranchCode(orgId) : 'HQ';
   const invoiceDate = body.date ? new Date(body.date) : new Date();
   const year = invoiceDate.getFullYear();
@@ -261,7 +275,8 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
       grossTurnover += agg.taxableBase + agg.vatAmount + agg.sdAmount;
       if (agg._id === 0) exemptTurnover += agg.taxableBase;
     }
-    const seller = await getSellerInfo();
+    const seller = await loadSeller();
+    if (!seller) return replySellerBinMissing(reply);
     const totReturn = buildMushak92({
       period: { kind: 'monthly', period },
       bin: seller.bin,
@@ -313,7 +328,8 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
   }
 
   // Also pull exempt sales from Mushak invoices (vatRate === 0 with rateCode EXEMPT)
-  const seller = await getSellerInfo();
+  const seller = await loadSeller();
+  if (!seller) return replySellerBinMissing(reply);
   const returnData = buildMushak91(period, seller.bin, vatData);
 
   return reply.send({

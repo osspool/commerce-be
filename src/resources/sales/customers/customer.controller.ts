@@ -25,6 +25,11 @@ export class CustomerController extends BaseController {
     // single-business multi-branch model. The customer doc has no
     // organizationId field; without this flag Arc's default scope check
     // denies every CRUD hit with ORG_SCOPE_DENIED.
+    //
+    // queryParser is injected automatically by `defineResource` — it reads
+    // `resolvedConfig.queryParser` and calls `controller.setQueryParser(qp)`
+    // after construction, so the resource-level mongokit parser wins over
+    // BaseController's default ArcQueryParser.
     super(service, { schemaOptions, tenantField: false });
     this.getMe = this.getMe.bind(this);
   }

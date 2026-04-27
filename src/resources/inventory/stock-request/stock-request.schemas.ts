@@ -1,162 +1,66 @@
 /**
- * Stock Request Validation Schemas
+ * Stock Request Route Schemas — Zod v4. Arc auto-converts via
+ * `z.toJSONSchema()` at registration (Fastify validation + OpenAPI).
  */
+import { z } from 'zod';
 
-const requestItemSchema = {
-  type: 'object',
-  properties: {
-    productId: { type: 'string', description: 'Product ID' },
-    variantSku: { type: 'string', nullable: true },
-    quantity: { type: 'integer', minimum: 1, description: 'Quantity requested' },
-    notes: { type: 'string' },
-  },
-  required: ['productId', 'quantity'],
-} as const;
+const priority = z.enum(['low', 'normal', 'high', 'urgent']);
 
-const approvedItemSchema = {
-  type: 'object',
-  properties: {
-    itemId: { type: 'string', description: 'Request item ID' },
-    productId: { type: 'string', description: 'Product ID (alternative to itemId)' },
-    variantSku: { type: 'string', nullable: true },
-    quantityApproved: { type: 'integer', minimum: 0, description: 'Approved quantity' },
-  },
-} as const;
+const requestItem = z
+  .object({
+    productId: z.string(),
+    variantSku: z.string().nullable().optional(),
+    quantity: z.number().min(0),
+    notes: z.string().optional(),
+  })
+  .strict();
 
-export const createRequestSchema = {
-  body: {
-    type: 'object',
-    properties: {
-      requestingBranchId: { type: 'string', description: 'Branch requesting stock' },
-      items: {
-        type: 'array',
-        items: requestItemSchema,
-        minItems: 1,
-      },
-      priority: {
-        type: 'string',
-        enum: ['low', 'normal', 'high', 'urgent'],
-        default: 'normal',
-      },
-      reason: { type: 'string', description: 'Reason for request' },
-      expectedDate: { type: 'string', format: 'date', description: 'When stock is needed' },
-      notes: { type: 'string' },
-    },
-    required: ['requestingBranchId', 'items'],
-  },
-} as const;
+const approvedItem = z
+  .object({
+    itemId: z.string().optional(),
+    productId: z.string().optional(),
+    variantSku: z.string().nullable().optional(),
+    quantityApproved: z.number().int().min(0).optional(),
+  })
+  .strict();
 
-export const approveRequestSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  body: {
-    type: 'object',
-    properties: {
-      items: {
-        type: 'array',
-        items: approvedItemSchema,
-        description: 'Items with approved quantities (optional - defaults to full request)',
-      },
-      reviewNotes: { type: 'string' },
-    },
-  },
-} as const;
+const fulfillItem = z
+  .object({
+    itemId: z.string().optional(),
+    productId: z.string().optional(),
+    variantSku: z.string().nullable().optional(),
+    quantity: z.number().int().min(0).optional(),
+  })
+  .strict();
 
-export const rejectRequestSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  body: {
-    type: 'object',
-    properties: {
-      reason: { type: 'string', description: 'Rejection reason' },
-    },
-    required: ['reason'],
-  },
-} as const;
+export const createSchema = {
+  body: z
+    .object({
+      requestingBranchId: z.string().optional(),
+      fulfillingBranchId: z.string().optional(),
+      priority: priority.optional(),
+      reason: z.string().optional(),
+      expectedDate: z.string().optional(),
+      notes: z.string().optional(),
+      items: z.array(requestItem).min(1),
+    })
+    .strict(),
+};
 
-export const fulfillRequestSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  body: {
-    type: 'object',
-    properties: {
-      documentType: {
-        type: 'string',
-        enum: ['delivery_note', 'dispatch_note', 'delivery_slip'],
-      },
-      remarks: { type: 'string' },
-      items: {
-        type: 'array',
-        description: 'Optional fulfilled quantities (defaults to approved quantities)',
-        items: {
-          type: 'object',
-          properties: {
-            itemId: { type: 'string' },
-            productId: { type: 'string' },
-            variantSku: { type: 'string', nullable: true },
-            quantity: { type: 'integer', minimum: 0 },
-          },
-        },
-      },
-    },
-  },
-} as const;
+// Action schemas — items optional on approve (defaults to full request),
+// optional on fulfill (defaults to approved quantities). Reason optional
+// on reject/cancel.
+export const approveActionSchema = z.object({
+  items: z.array(approvedItem).optional(),
+  reviewNotes: z.string().optional(),
+});
 
-export const cancelRequestSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  body: {
-    type: 'object',
-    properties: {
-      reason: { type: 'string' },
-    },
-  },
-} as const;
+export const rejectActionSchema = z.object({ reason: z.string().optional() });
 
-export const listRequestsSchema = {
-  querystring: {
-    type: 'object',
-    properties: {
-      requestingBranch: { type: 'string' },
-      fulfillingBranch: { type: 'string' },
-      status: { type: 'string' },
-      priority: { type: 'string' },
-      requestNumber: { type: 'string' },
-      startDate: { type: 'string', format: 'date' },
-      endDate: { type: 'string', format: 'date' },
-      page: { type: 'integer', minimum: 1, default: 1 },
-      limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
-      sort: { type: 'string', default: '-createdAt' },
-    },
-  },
-} as const;
+export const fulfillActionSchema = z.object({
+  documentType: z.enum(['delivery_note', 'dispatch_note', 'delivery_slip']).optional(),
+  remarks: z.string().optional(),
+  items: z.array(fulfillItem).optional(),
+});
 
-export const getRequestSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-} as const;
+export const cancelActionSchema = z.object({ reason: z.string().optional() });

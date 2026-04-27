@@ -9,23 +9,30 @@
  *   from the request context, so a 1-to-1 Mongoose-required body schema is
  *   too strict (would reject every real client). The raw handler accepts the
  *   high-level input shape and lets the repository do its job.
- * - Declarative `actions:` for FSM verbs (send, mark_viewed, accept, reject,
- *   expire, convert_to_order) routed through Arc's createActionRouter.
+ * - Declarative `actions:` block for FSM verbs (send, mark_viewed, accept,
+ *   reject, expire, convert_to_order) — Arc auto-mounts POST /:id/action.
  *
  * FSM: draft → sent → viewed → accepted → converted (terminal: rejected, expired, converted)
  * See `packages/order/src/repositories/quotation.repository.ts` for the state machine.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import type { RequestWithExtras } from '@classytic/arc/types';
+import { buildCrudSchemasFromModel } from '@classytic/mongokit';
 import { repoOptionsFromCtx } from '@classytic/order';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import permissions from '#config/permissions.js';
 import { ensureOrderEngine } from '#resources/sales/orders/order.engine.js';
-import { createAdapter } from '#shared/adapter.js';
 import { getContextFromReq } from '#shared/context.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { queryParser } from '#shared/query-parser.js';
+
+const rejectBody = z.object({ reason: z.string().optional() });
+const convertToOrderBody = z.object({
+  channel: z.string().optional(),
+  metadata: z.object({}).passthrough().optional(),
+});
 
 // Top-level await — engine is ready before resources load (same pattern as
 // order.resource.ts / fulfillment.resource.ts).
@@ -40,31 +47,42 @@ if (!orderEngine.models.Quotation || !orderEngine.repositories.quotation) {
 // systemManaged so they're omitted from the auto-generated update/list/get
 // schemas — auto-create is disabled (raw POST below) so create-side schema
 // noise doesn't matter, but update still goes through the adapter.
-const quotationAdapter = createAdapter(
-  orderEngine.models.Quotation as never,
-  orderEngine.repositories.quotation as never,
-  {
-    fieldRules: {
-      organizationId: { systemManaged: true },
-      quotationNumber: { systemManaged: true },
-      version: { systemManaged: true },
-      actorRef: { systemManaged: true },
-      actorKind: { systemManaged: true },
-      currency: { systemManaged: true },
-      totals: { systemManaged: true },
-      status: { systemManaged: true },
-      sentAt: { systemManaged: true },
-      viewedAt: { systemManaged: true },
-      acceptedAt: { systemManaged: true },
-      rejectedAt: { systemManaged: true },
-      expiredAt: { systemManaged: true },
-      convertedAt: { systemManaged: true },
-      convertedOrderId: { systemManaged: true },
-      convertedOrderNumber: { systemManaged: true },
-      rejectionReason: { systemManaged: true },
-    },
+const quotationSystemManagedFields = {
+  organizationId: { systemManaged: true },
+  quotationNumber: { systemManaged: true },
+  version: { systemManaged: true },
+  actorRef: { systemManaged: true },
+  actorKind: { systemManaged: true },
+  currency: { systemManaged: true },
+  totals: { systemManaged: true },
+  status: { systemManaged: true },
+  sentAt: { systemManaged: true },
+  viewedAt: { systemManaged: true },
+  acceptedAt: { systemManaged: true },
+  rejectedAt: { systemManaged: true },
+  expiredAt: { systemManaged: true },
+  convertedAt: { systemManaged: true },
+  convertedOrderId: { systemManaged: true },
+  convertedOrderNumber: { systemManaged: true },
+  rejectionReason: { systemManaged: true },
+};
+
+const quotationAdapter = createMongooseAdapter({
+  model: orderEngine.models.Quotation as never,
+  repository: orderEngine.repositories.quotation as never,
+  schemaGenerator: (m, arcOptions) => {
+    // Merge arc's forwarded fieldRules (e.g. orgScoped's tenant injection)
+    // with our quotation-specific system-managed set. arc 2.11's
+    // `mergeFieldRuleConstraints` post-processes the result, so bd-tax /
+    // portable constraints stay honored.
+    const forwardedRules =
+      (arcOptions as { fieldRules?: Record<string, unknown> } | undefined)?.fieldRules ?? {};
+    return buildCrudSchemasFromModel(m, {
+      ...(arcOptions as Record<string, unknown>),
+      fieldRules: { ...forwardedRules, ...quotationSystemManagedFields },
+    } as Parameters<typeof buildCrudSchemasFromModel>[1]);
   },
-);
+});
 
 const quotationResource = defineResource({
   name: 'quotation',
@@ -164,11 +182,7 @@ const quotationResource = defineResource({
           getContextFromReq(req),
         );
       },
-      schema: {
-        type: 'object',
-        properties: { reason: { type: 'string', description: 'Rejection reason' } },
-        required: [],
-      },
+      schema: rejectBody,
       permissions: permissions.orderActions.updateStatus,
     },
 
@@ -190,14 +204,7 @@ const quotationResource = defineResource({
           getContextFromReq(req),
         );
       },
-      schema: {
-        type: 'object',
-        properties: {
-          channel: { type: 'string', description: 'Override channel on created order' },
-          metadata: { type: 'object', description: 'Extra metadata for the order' },
-        },
-        required: [],
-      },
+      schema: convertToOrderBody,
       permissions: permissions.orderActions.updateStatus,
     },
   },

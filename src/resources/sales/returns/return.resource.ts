@@ -4,21 +4,20 @@
  * CRUD: list, get, create (via BaseController + MongoKit Repository)
  * Action: POST /:id/action (state transitions via returnService)
  *
- * Arc auto-generates OpenAPI schemas from the Mongoose model via createAdapter.
+ * Arc auto-generates OpenAPI schemas from the Mongoose model via createMongooseAdapter.
  * QueryParser handles list filtering/pagination/sort.
  */
 
 import type { IController } from '@classytic/arc';
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import Return from './models/return.model.js';
 import { returnActions } from './return.actions.js';
 import returnController from './return.controller.js';
 import returnRepository from './return.repository.js';
-import crudSchemas, { returnEntitySchema, returnSchemaOptions } from './return.schemas.js';
+import crudSchemas, { returnEntitySchema } from './return.schemas.js';
 
 const queryParser = new QueryParser({
   schema: Return.schema,
@@ -34,11 +33,9 @@ const returnResource = defineResource({
   tag: 'Sales - Returns',
   prefix: '/sales/returns',
 
-  adapter: createAdapter(Return, returnRepository),
+  adapter: createMongooseAdapter(Return, returnRepository),
   controller: returnController as unknown as IController,
   queryParser,
-  tenantField: false,
-  schemaOptions: returnSchemaOptions,
   customSchemas: { ...crudSchemas, entity: returnEntitySchema } as Record<string, unknown>,
 
   permissions: {

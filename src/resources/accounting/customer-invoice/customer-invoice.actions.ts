@@ -1,7 +1,7 @@
 /**
  * Customer Invoice Action Registry — Stripe-style state transitions (A/R)
  *
- * Registered via createActionRouter → POST /accounting/customer-invoices/:id/action
+ * Wired via declarative `actions:` block → POST /accounting/customer-invoices/:id/action
  * Body: { action: "post" | "receive" | "debit-note", ... }
  *
  *   - `post`        id = Order._id    → A/R invoice JE (credit-limit gate)

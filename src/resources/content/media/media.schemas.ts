@@ -7,9 +7,10 @@
  * with media-kit's domain types.
  *
  * Only request-side schemas live here; response shapes are auto-derived
- * from the Mongoose model by `buildCrudSchemasFromModel` in createAdapter().
+ * from the Mongoose model by `buildCrudSchemasFromModel` in createMongooseAdapter().
  */
 
+import { createMongooseAdapter } from '@classytic/arc';
 import { confirmUploadSchema as kitConfirmUploadSchema } from '@classytic/media-kit/schemas';
 import { z } from 'zod';
 import { BASE_FOLDERS } from './media.config.js';

@@ -17,6 +17,7 @@ import { wireShiftAggregationHook } from '#resources/sales/pos/shift-aggregation
 import { createCatalogBridge } from './bridges/catalog.bridge.js';
 import { createFlowBridge } from './bridges/flow.bridge.js';
 import { createRevenueBridge } from './bridges/revenue.bridge.js';
+import { wireOrderLoyaltyHook } from './order-loyalty-hook.js';
 import { wireOrderRevenueHook } from './order-revenue-hook.js';
 import { wireOrderStockHook } from './order-stock-hook.js';
 
@@ -126,6 +127,13 @@ export async function ensureOrderEngine(): Promise<OrderEngine> {
       // active shift's salesCount/salesTotal + per-method paymentBreakdown
       // atomically via $inc. See shift-aggregation.hook.ts.
       wireShiftAggregationHook(engine);
+
+      // Wire the order→loyalty earn bridge. When confirmPayment flips
+      // paymentState.chargeStatus to 'full' on an enrolled customer's order,
+      // we credit points based on PlatformConfig.membership × tier multiplier.
+      // Idempotent via earnPoints(idempotencyKey: order:<orderId>) so re-fires
+      // of after:update never double-credit. See order-loyalty-hook.ts.
+      wireOrderLoyaltyHook(engine);
 
       return engine;
     })();

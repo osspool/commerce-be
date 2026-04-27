@@ -1,11 +1,15 @@
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
+import { z } from 'zod';
 import crmPermissions from '#config/permissions/crm.js';
-import { createAdapter } from '#shared/adapter.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { abandonOpportunity, advanceOpportunity, loseOpportunity, winOpportunity } from './opportunity.actions.js';
 import CrmOpportunity from './opportunity.model.js';
 import crmOpportunityRepository from './opportunity.repository.js';
+
+const emptyBody = z.object({});
+const advanceBody = z.object({ stageId: z.string().optional() });
+const loseBody = z.object({ lostReasonId: z.string().optional() });
 
 const crmOpportunityResource = defineResource({
   name: 'crm-opportunity',
@@ -14,7 +18,7 @@ const crmOpportunityResource = defineResource({
   prefix: '/crm/opportunities',
   audit: true,
 
-  adapter: createAdapter(CrmOpportunity, crmOpportunityRepository),
+  adapter: createMongooseAdapter(CrmOpportunity, crmOpportunityRepository),
   presets: [orgScoped],
 
   schemaOptions: {
@@ -47,26 +51,22 @@ const crmOpportunityResource = defineResource({
     advanceToStage: {
       handler: advanceOpportunity,
       permissions: crmPermissions.opportunity.update,
-      schema: {
-        stageId: { type: 'string', description: 'Target stage id on the pipeline' },
-      },
+      schema: advanceBody,
     },
     win: {
       handler: winOpportunity,
       permissions: crmPermissions.opportunity.update,
-      schema: {},
+      schema: emptyBody,
     },
     lose: {
       handler: loseOpportunity,
       permissions: crmPermissions.opportunity.update,
-      schema: {
-        lostReasonId: { type: 'string', description: 'Required — ref to crm_loss_reasons' },
-      },
+      schema: loseBody,
     },
     abandon: {
       handler: abandonOpportunity,
       permissions: crmPermissions.opportunity.update,
-      schema: {},
+      schema: emptyBody,
     },
   },
 });

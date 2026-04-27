@@ -1,7 +1,7 @@
 /**
  * Invoice Action Registry — Stripe-style state transitions
  *
- * Registered via createActionRouter → POST /accounting/invoices/:id/action
+ * Wired via declarative `actions:` block → POST /accounting/invoices/:id/action
  * Body: { action: "post" | "cancel" | "void" | "unpost" | "record_payment" |
  *         "credit_note_full" | "credit_note_partial" | "mark_sent" |
  *         "mark_viewed" | "clone", ... }

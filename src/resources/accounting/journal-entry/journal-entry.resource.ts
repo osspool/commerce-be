@@ -8,10 +8,9 @@
  * Branch-tagged via orgScoped (organizationId from extraFields).
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireOrgMembership, requireRoles } from '@classytic/arc/permissions';
-import { QueryParser } from '@classytic/mongokit';
-import { createAdapter } from '#shared/adapter.js';
+import { buildCrudSchemasFromModel, QueryParser } from '@classytic/mongokit';
 import { orgScoped } from '#shared/presets/index.js';
 import { JournalEntry, journalEntryRepository } from '../accounting.engine.js';
 import { journalEntryActions } from './journal-entry.actions.js';
@@ -34,16 +33,22 @@ const journalEntryResource = defineResource({
   // unchanged — Mongoose still rejects null on save, and the double-entry
   // / fiscal-lock invariants fire at post() time via the ledger plugin
   // pipeline. This is the "draft now, validate at post" pattern Odoo uses.
-  adapter: createAdapter(JournalEntry, journalEntryRepository, {
-    // Soft-require fields the ledger marks `required: true` but that the FE
-    // shouldn't have to send when saving a draft:
-    //   - journalType, date: filled in later as the user completes the form
-    //   - totalDebit/totalCredit: computed by the ledger at post() time
-    //   - state: defaults to 'draft' on the server
-    // The DB-level required flags stay; only HTTP body validation is relaxed.
-    // Double-entry balance + fiscal/day-close locks fire at post() via the
-    // ledger plugin pipeline.
-    softRequiredFields: ['journalType', 'date', 'totalDebit', 'totalCredit', 'state'],
+  adapter: createMongooseAdapter({
+    model: JournalEntry,
+    repository: journalEntryRepository,
+    schemaGenerator: (m, arcOptions) =>
+      // Soft-require fields the ledger marks `required: true` but that the FE
+      // shouldn't have to send when saving a draft:
+      //   - journalType, date: filled in later as the user completes the form
+      //   - totalDebit/totalCredit: computed by the ledger at post() time
+      //   - state: defaults to 'draft' on the server
+      // The DB-level required flags stay; only HTTP body validation is relaxed.
+      // Double-entry balance + fiscal/day-close locks fire at post() via the
+      // ledger plugin pipeline.
+      buildCrudSchemasFromModel(m, {
+        ...(arcOptions as Record<string, unknown>),
+        softRequiredFields: ['journalType', 'date', 'totalDebit', 'totalCredit', 'state'],
+      } as Parameters<typeof buildCrudSchemasFromModel>[1]),
   }),
   queryParser,
   presets: [orgScoped], // branch-tagged — orgScoped handles filtering + body schema

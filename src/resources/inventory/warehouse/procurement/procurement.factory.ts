@@ -85,10 +85,10 @@ export function createProcurementResource() {
     displayName: 'Procurement Orders',
     tag: 'Warehouse - Procurement',
     prefix: '/inventory/procurement',
-    tenantField: 'organizationId',
 
     adapter: createFlowAdapter(engine.models.ProcurementOrder, engine.repositories.procurement, {
       fieldRules: {
+        organizationId: { systemManaged: true },
         // Service-assigned on create + FSM transitions
         orderNumber: { systemManaged: true },
         status: { systemManaged: true },

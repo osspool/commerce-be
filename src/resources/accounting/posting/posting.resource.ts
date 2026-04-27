@@ -1,20 +1,31 @@
 /**
- * Accounting Posting Resource
+ * Accounting Posting Resource — oversight + manual recovery for POS shift posting.
  *
- * Manual triggers for accounting day-close and backfill operations.
- * Finance admin and above only. All dates are BD local (YYYY-MM-DD in UTC+6).
+ * POS journal entries are emitted by `@classytic/pos`'s LedgerBridge at
+ * shift close. Stale shifts are recovered two ways:
+ *   1. **Lazy-close on next open** — when a cashier re-opens the register
+ *      tomorrow, `shift.handlers.ts:closeStaleShiftsOnRegister` fires
+ *      forceClose inline. Covers active registers automatically.
+ *   2. **Manual force-close** via this resource — for permanently
+ *      abandoned registers a finance admin can force-close from the
+ *      oversight dashboard.
+ *
+ * No background cron. No date-aggregator routes (`/close-day` etc. are gone).
+ *
+ * Routes:
+ *   GET  /accounting/posting/status                  — active shifts for the current branch
+ *   GET  /accounting/posting/oversight               — cross-branch active + stale roll-up
+ *   POST /accounting/posting/oversight/:shiftId/close — force-close a stale shift (finance_admin)
  */
 
 import { defineResource } from '@classytic/arc';
 import { requireOrgMembership, requireRoles } from '@classytic/arc/permissions';
 import mongoose from 'mongoose';
-import { publish } from '#lib/events/arcEvents.js';
-import { bdToday, bdYesterday, toBdDateStr } from '#lib/utils/bd-date.js';
-import { JournalEntry } from '../accounting.engine.js';
-import { postDailyPosSales } from './aggregation/daily-sales.service.js';
-import { DayCloseState } from './day-close-state.model.js';
+import { posEngine } from '#resources/sales/pos/pos.engine.js';
+import { bdToday } from '#lib/utils/bd-date.js';
 
 const branchMember = requireOrgMembership();
+const financeAdmin = requireRoles('admin', 'finance_admin');
 
 const postingResource = defineResource({
   name: 'accounting-posting',
@@ -23,164 +34,201 @@ const postingResource = defineResource({
   prefix: '/accounting/posting',
   disableDefaultRoutes: true,
 
-  actions: (await import('./day-close.actions.js')).dayCloseActions,
-  actionPermissions: requireRoles('admin', 'finance_admin'),
-
   routes: [
     {
-      method: 'POST',
-      path: '/close-day',
-      summary: 'Close POS books for a specific BD date',
-      description: 'Creates one aggregated SALES journal entry for all POS transactions. Idempotent.',
+      method: 'GET',
+      path: '/status',
+      summary: 'Active POS shifts for the current branch',
+      description:
+        'Returns every shift in an active state (open, paused, blind_closed) for the calling branch — drives the dashboard "registers open now" widget.',
       permissions: branchMember,
       raw: true,
-      schema: {
-        body: {
-          type: 'object',
-          properties: {
-            date: {
-              type: 'string',
-              pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-              description: 'BD local date (YYYY-MM-DD), defaults to yesterday',
-            },
-          },
-        },
-      },
+      // biome-ignore lint/suspicious/noExplicitAny: raw fastify handler
       handler: async (req: any, reply: any) => {
         const orgId = req.scope?.organizationId;
         if (!orgId) {
-          return reply
-            .status(400)
-            .send({ success: false, message: 'Organization context required (x-organization-id header)' });
-        }
-
-        // Schema validates date format when provided; bdYesterday() is always valid
-        const date: string = req.body?.date || bdYesterday();
-        const result = await postDailyPosSales(orgId, date);
-
-        if (result.skipped) {
-          return reply.send({
-            success: true,
-            posted: false,
-            message: result.reason || 'No POS transactions to post for this date',
-            date,
+          return reply.status(400).send({
+            success: false,
+            code: 'NO_BRANCH_CONTEXT',
+            message: 'Organization context required',
           });
         }
-
-        await publish('accounting:pos.day.close', { branchId: orgId, date });
-
+        const orgObjectId = mongoose.Types.ObjectId.isValid(orgId)
+          ? new mongoose.Types.ObjectId(orgId)
+          : orgId;
+        const shifts = await posEngine.models.Shift.find({
+          organizationId: orgObjectId,
+          state: { $in: ['open', 'paused', 'blind_closed'] },
+        })
+          .select('_id state registerId openingCashierId openedAt blindClosedAt salesCount salesTotal')
+          .lean();
         return reply.send({
           success: true,
-          posted: true,
-          journalEntryId: result.journalEntryId,
-          date,
-          message: `POS day closed for ${date}`,
+          data: { activeShifts: shifts, currentBdDate: bdToday() },
         });
       },
     },
     {
       method: 'POST',
-      path: '/backfill',
-      summary: 'Backfill journal entries for a date range',
-      description: 'Recovery tool. Processes one day at a time, skips already-posted days. Max 90 days.',
-      permissions: branchMember,
+      path: '/oversight/:shiftId/close',
+      summary: 'Force-close a stale shift (manual recovery)',
+      description:
+        'Finance-admin tool for permanently-abandoned registers — closes the shift, defaults counts to expected (zero variance), and fires the LedgerBridge so the JE still posts. Audit-logged. Not branch-scoped.',
+      permissions: financeAdmin,
       raw: true,
-      schema: {
-        body: {
-          type: 'object',
-          required: ['startDate', 'endDate'],
-          properties: {
-            startDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-            endDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-          },
-        },
-      },
+      // biome-ignore lint/suspicious/noExplicitAny: raw fastify handler
       handler: async (req: any, reply: any) => {
-        const orgId = req.scope?.organizationId;
-        if (!orgId) {
-          return reply.status(400).send({ success: false, message: 'Organization context required' });
+        const { shiftId } = req.params as { shiftId: string };
+        const body = (req.body ?? {}) as { reason?: string };
+        const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+        if (reason.length < 3) {
+          return reply.status(400).send({
+            success: false,
+            code: 'REASON_REQUIRED',
+            message: 'Reason (3+ chars) required for force-close audit trail',
+          });
         }
 
-        const { startDate, endDate } = req.body as { startDate: string; endDate: string };
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-
-        if (diffDays < 0) {
-          return reply.status(400).send({ success: false, message: 'endDate must be after startDate' });
+        const shift = await posEngine.models.Shift.findById(shiftId).lean();
+        if (!shift) {
+          return reply.status(404).send({ success: false, message: 'Shift not found' });
         }
-        if (diffDays > 90) {
-          return reply.status(400).send({ success: false, message: 'Max backfill range is 90 days' });
-        }
-
-        const results: Array<{ date: string; posted: boolean; journalEntryId?: string; skipped?: boolean }> = [];
-        const current = new Date(start);
-        while (current <= end) {
-          const dateStr = toBdDateStr(current);
-          const result = await postDailyPosSales(orgId, dateStr);
-          results.push({ date: dateStr, ...result });
-          current.setDate(current.getDate() + 1);
+        if (['closed', 'orphaned_closed'].includes((shift as { state: string }).state)) {
+          return reply.status(409).send({
+            success: false,
+            code: 'SHIFT_FINALIZED',
+            message: 'Shift is already finalized',
+          });
         }
 
-        const posted = results.filter((r) => r.posted).length;
-        const skipped = results.filter((r) => r.skipped).length;
+        const actor = (req as { user?: { _id?: unknown; id?: unknown; name?: unknown } }).user;
+        const actorId = String(actor?._id ?? actor?.id ?? 'system:manual-force-close');
+        const branchId = String((shift as { organizationId: unknown }).organizationId);
 
-        return reply.send({
-          success: true,
-          summary: { processed: results.length, posted, skipped },
-          results,
-        });
+        try {
+          const result = await posEngine.repositories.shift.forceClose(shiftId, {
+            organizationId: branchId,
+            actorId,
+          });
+          req.log.info(
+            {
+              audit: true,
+              op: 'pos.shift.force_close.manual',
+              shiftId,
+              branchId,
+              actorId,
+              reason,
+            },
+            'manual force-close',
+          );
+          return reply.send({ success: true, data: result });
+        } catch (err) {
+          req.log.error(
+            { err: (err as Error).message, shiftId, branchId },
+            'manual force-close failed',
+          );
+          return reply.status(500).send({
+            success: false,
+            message: (err as Error).message ?? 'Force-close failed',
+          });
+        }
       },
     },
     {
       method: 'GET',
       path: '/oversight',
-      summary: 'Cross-branch day-close oversight',
+      summary: 'Cross-branch shift posting roll-up',
       description:
-        'Returns per-branch lastClosedDate, days behind, and a summary for the finance director / multi-branch dashboard. Not branch-scoped.',
-      permissions: requireRoles('admin', 'finance_admin'),
+        'Per-branch counts of active and stale shifts plus a stale-shift list. Drives the finance director / multi-branch dashboard. Not branch-scoped — admin/finance_admin only.',
+      permissions: financeAdmin,
       raw: true,
+      // biome-ignore lint/suspicious/noExplicitAny: raw fastify handler
       handler: async (_req: any, reply: any) => {
         const today = bdToday();
+        // Treat anything with `businessDate < midnight UTC of today (BD)` as stale.
+        const todayUtc = new Date(`${today}T00:00:00.000Z`);
 
-        // Pull all branch states + branch metadata in two parallel queries.
-        // Branches with no DayCloseState row appear with daysBehind=null
-        // (never closed before).
         const db = mongoose.connection.db!;
-        const [states, orgs] = await Promise.all([
-          DayCloseState.find({}).select('branchId lastClosedDate').lean(),
-          db
-            .collection('organization')
-            .find({}, { projection: { _id: 1, name: 1, slug: 1 } })
-            .toArray(),
+        const orgs = await db
+          .collection('organization')
+          .find({}, { projection: { _id: 1, name: 1, slug: 1 } })
+          .toArray();
+
+        const stale = await posEngine.repositories.shift.findStaleShifts(todayUtc);
+
+        const orgsById = new Map(orgs.map((o) => [String(o._id), o]));
+
+        // Group stale by branch.
+        const staleByBranch = new Map<string, typeof stale>();
+        for (const s of stale) {
+          const k = String(s.organizationId);
+          const list = staleByBranch.get(k) ?? [];
+          list.push(s);
+          staleByBranch.set(k, list);
+        }
+
+        // Active counts per branch (any active state regardless of date).
+        const activeAgg = await posEngine.models.Shift.aggregate([
+          { $match: { state: { $in: ['open', 'paused', 'blind_closed'] } } },
+          { $group: { _id: '$organizationId', count: { $sum: 1 } } },
         ]);
+        const activeByBranch = new Map<string, number>(
+          activeAgg.map((row: { _id: unknown; count: number }) => [String(row._id), row.count]),
+        );
 
-        const stateByBranch = new Map<string, string>();
-        for (const s of states as Array<{ branchId: mongoose.Types.ObjectId; lastClosedDate: string }>) {
-          stateByBranch.set(s.branchId.toString(), s.lastClosedDate);
-        }
+        // Latest closed shift per branch — drives "lastClosedDate" + "daysBehind"
+        // on the dashboard. Mirrors the day-close watermark used by
+        // period-lock-guard.ts so finance sees the same notion of "closed".
+        const lastClosedAgg = await posEngine.models.Shift.aggregate([
+          { $match: { state: { $in: ['closed', 'orphaned_closed'] } } },
+          {
+            $group: {
+              _id: '$organizationId',
+              lastClosedAt: { $max: '$businessDate' },
+            },
+          },
+        ]);
+        const lastClosedByBranch = new Map<string, Date>(
+          lastClosedAgg.map((row: { _id: unknown; lastClosedAt: Date }) => [
+            String(row._id),
+            row.lastClosedAt,
+          ]),
+        );
 
-        function daysBetween(fromBd: string, toBd: string): number {
-          const f = new Date(`${fromBd}T00:00:00Z`).getTime();
-          const t = new Date(`${toBd}T00:00:00Z`).getTime();
-          return Math.max(0, Math.round((t - f) / (1000 * 60 * 60 * 24)));
-        }
+        // BD-local "today" as the reference for daysBehind. We compute the
+        // calendar-day difference in BD, not raw UTC ms, so a shift closed
+        // late last night BD still reports daysBehind=1 even if the wall
+        // clock shows >24h elapsed.
+        const todayBdMidnight = new Date(`${today}T00:00:00.000+06:00`);
+        const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-        const branches = orgs.map((o: any) => {
-          const id = o._id.toString();
-          const lastClosedDate = stateByBranch.get(id) ?? null;
-          const daysBehind = lastClosedDate ? daysBetween(lastClosedDate, today) : null;
+        const branches = orgs.map((o) => {
+          const id = String(o._id);
+          const lastClosedAt = lastClosedByBranch.get(id) ?? null;
+          const lastClosedDate = lastClosedAt ? lastClosedAt.toISOString().slice(0, 10) : null;
+          const daysBehind = lastClosedAt
+            ? Math.max(
+                0,
+                Math.floor(
+                  (todayBdMidnight.getTime() - new Date(`${lastClosedDate}T00:00:00.000+06:00`).getTime()) /
+                    MS_PER_DAY,
+                ),
+              )
+            : null;
           return {
             branchId: id,
-            branchName: o.name ?? o.slug ?? null,
+            // biome-ignore lint/suspicious/noExplicitAny: org collection rows are loosely typed
+            branchName: (o as any).name ?? (o as any).slug ?? null,
+            activeShifts: activeByBranch.get(id) ?? 0,
+            staleShifts: staleByBranch.get(id)?.length ?? 0,
             lastClosedDate,
             daysBehind,
-            currentBdDate: today,
           };
         });
 
-        const branchesBehind = branches.filter((b) => (b.daysBehind ?? 99) > 1).length;
-        const maxDaysBehind = branches.reduce(
+        const totalStale = stale.length;
+        const branchesWithStale = branches.filter((b) => b.staleShifts > 0).length;
+        const maxDaysBehind = branches.reduce<number>(
           (max, b) => (b.daysBehind != null && b.daysBehind > max ? b.daysBehind : max),
           0,
         );
@@ -188,70 +236,21 @@ const postingResource = defineResource({
         return reply.send({
           success: true,
           data: {
+            currentBdDate: today,
             branches,
+            staleShifts: stale.map((s) => ({
+              shiftId: String(s._id),
+              branchId: String(s.organizationId),
+              branchName: orgsById.get(String(s.organizationId))?.name ?? null,
+              registerId: s.registerId,
+              state: s.state,
+              businessDate: s.businessDate,
+            })),
             summary: {
               totalBranches: branches.length,
-              branchesBehind,
+              totalStale,
+              branchesWithStale,
               maxDaysBehind,
-              currentBdDate: today,
-            },
-          },
-        });
-      },
-    },
-    {
-      method: 'GET',
-      path: '/status',
-      summary: 'Get posting status for today and yesterday',
-      description: 'Returns whether POS books are open/closed for dashboard display.',
-      permissions: branchMember,
-      raw: true,
-      handler: async (req: any, reply: any) => {
-        const orgId = req.scope?.organizationId;
-        if (!orgId) {
-          return reply.status(400).send({ success: false, message: 'Organization context required' });
-        }
-
-        const today = bdToday();
-        const yesterday = bdYesterday();
-
-        const [todayEntry, yesterdayEntry] = await Promise.all([
-          JournalEntry.findOne({
-            organizationId: orgId,
-            idempotencyKey: `pos-daily-${orgId}-${today}`,
-          })
-            .select('_id state createdAt')
-            .lean(),
-          JournalEntry.findOne({
-            organizationId: orgId,
-            idempotencyKey: `pos-daily-${orgId}-${yesterday}`,
-          })
-            .select('_id state createdAt')
-            .lean(),
-        ]);
-
-        return reply.send({
-          success: true,
-          data: {
-            today: {
-              date: today,
-              closed: !!todayEntry,
-              entry: todayEntry
-                ? {
-                    id: (todayEntry as Record<string, unknown>)._id,
-                    state: (todayEntry as Record<string, unknown>).state,
-                  }
-                : null,
-            },
-            yesterday: {
-              date: yesterday,
-              closed: !!yesterdayEntry,
-              entry: yesterdayEntry
-                ? {
-                    id: (yesterdayEntry as Record<string, unknown>)._id,
-                    state: (yesterdayEntry as Record<string, unknown>).state,
-                  }
-                : null,
             },
           },
         });

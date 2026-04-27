@@ -1,9 +1,16 @@
 /**
- * Return Schemas — auto-generated from Mongoose model + manual action schema.
+ * Return Schemas — auto-generated from Mongoose model + manual create body
+ * (Zod v4). Arc auto-converts Zod via `z.toJSONSchema()` at registration.
+ *
+ * The model-derived shapes (params, listQuery, entitySchema) come from
+ * `buildCrudSchemasFromModel` because they need to track the Mongoose model
+ * exactly. The create body is hand-written — the request shape diverges
+ * from the model (service resolves branch/customer/returnWindow from the
+ * order).
  */
 
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
-import type { JsonSchema } from '@classytic/repo-core/schema';
+import { z } from 'zod';
 import Return from './models/return.model.js';
 
 const schemaParts = buildCrudSchemasFromModel(Return, {
@@ -25,43 +32,32 @@ const schemaParts = buildCrudSchemasFromModel(Return, {
   },
 });
 
-// Manual create schema — the request body differs from the model shape
-// (service resolves branch, customer, returnWindow from the order)
-const createBody = {
-  type: 'object',
-  required: ['orderId', 'items'],
-  additionalProperties: true,
-  properties: {
-    orderId: { type: 'string', description: 'Order ID (must be delivered)' },
-    items: {
-      type: 'array',
-      minItems: 1,
-      items: {
-        type: 'object',
-        required: ['productId', 'quantity', 'reason'],
-        properties: {
-          productId: { type: 'string' },
-          variantSku: { type: 'string' },
-          quantity: { type: 'number', minimum: 1 },
-          reason: { type: 'string', enum: ['defective', 'wrong_item', 'damaged', 'changed_mind', 'quality', 'other'] },
-        },
-      },
-    },
-    notes: { type: 'string' },
-    refundMethod: { type: 'string', enum: ['original', 'store_credit'] },
-    windowDays: { type: 'number', minimum: 1 },
-  },
-};
+const reasonEnum = z.enum(['defective', 'wrong_item', 'damaged', 'changed_mind', 'quality', 'other']);
 
-const crudSchemas: {
-  create: { body: unknown };
-  get: { params: JsonSchema };
-  list: { querystring: JsonSchema };
-} = {
+const createItem = z.object({
+  productId: z.string(),
+  variantSku: z.string().optional(),
+  quantity: z.number().min(1),
+  reason: reasonEnum,
+});
+
+// Manual create schema — request body diverges from the model shape (the
+// service resolves branch, customer, returnWindow from the order).
+const createBody = z.object({
+  orderId: z.string(),
+  items: z.array(createItem).min(1),
+  notes: z.string().optional(),
+  refundMethod: z.enum(['original', 'store_credit']).optional(),
+  windowDays: z.number().min(1).optional(),
+});
+
+const crudSchemas = {
   create: { body: createBody },
   get: { params: schemaParts.params },
   list: { querystring: schemaParts.listQuery },
 };
+
+export default crudSchemas;
 
 export const returnSchemaOptions = {
   query: {
@@ -83,41 +79,22 @@ export const returnEntitySchema = ((schemaParts as unknown as Record<string, unk
   additionalProperties: true,
 };
 
-/**
- * Action endpoint schema — Stripe pattern for state transitions.
- */
-export const actionSchema = {
-  params: {
-    type: 'object',
-    required: ['id'],
-    properties: { id: { type: 'string' } },
-  },
-  body: {
-    type: 'object',
-    required: ['action'],
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['approve', 'ship', 'receive', 'inspect', 'refund', 'reject', 'cancel'],
-      },
-      provider: { type: 'string' },
-      trackingNumber: { type: 'string' },
-      reason: { type: 'string' },
-      results: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            productId: { type: 'string' },
-            variantSku: { type: 'string' },
-            result: { type: 'string', enum: ['approved', 'partial', 'rejected'] },
-            refundAmount: { type: 'number' },
-          },
-          required: ['productId', 'result'],
-        },
-      },
-    },
-  },
-};
+// Action body schemas — Stripe pattern for state transitions. Imported
+// by return.actions.ts.
+const inspectionResult = z.object({
+  productId: z.string(),
+  variantSku: z.string().optional(),
+  result: z.enum(['approved', 'partial', 'rejected']),
+  refundAmount: z.number().optional(),
+});
 
-export default crudSchemas;
+export const shipActionSchema = z.object({
+  provider: z.string().optional(),
+  trackingNumber: z.string().optional(),
+});
+
+export const inspectActionSchema = z.object({
+  results: z.array(inspectionResult),
+});
+
+export const reasonActionSchema = z.object({ reason: z.string().optional() });

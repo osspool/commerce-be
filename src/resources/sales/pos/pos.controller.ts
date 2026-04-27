@@ -211,7 +211,17 @@ class PosController {
             payment: payments[0]
               ? {
                   gateway: payments[0].method,
-                  paymentData: { payments, reference: payments[0].reference },
+                  // Store payment amounts in paisa (minor units) — same
+                  // unit as `lines[].unitPrice` and `totals.grandTotal`.
+                  // Mixing major + minor units silently corrupts the
+                  // shift-aggregation hook's per-method JE math.
+                  paymentData: {
+                    payments: payments.map((p) => ({
+                      ...p,
+                      amount: typeof p.amount === 'number' ? Math.round(p.amount * 100) : 0,
+                    })),
+                    reference: payments[0].reference,
+                  },
                 }
               : undefined,
             metadata: {

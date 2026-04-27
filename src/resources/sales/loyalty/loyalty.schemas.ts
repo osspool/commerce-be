@@ -13,6 +13,37 @@ const ruleIdParam = z.object({ ruleId: z.string() });
 const tierIdParam = z.object({ tierId: z.string() });
 const referralIdParam = z.object({ referralId: z.string() });
 
+// ── Redemption Schemas ──
+
+const redemptionIdParam = z.object({ redemptionId: z.string() });
+
+export const redemptionSchemas = {
+  validate: {
+    body: z.object({
+      customerId: z.string().min(1).describe('Customer ID whose member balance should be checked'),
+      pointsToRedeem: z.number().positive().describe('Points the customer wants to redeem'),
+      orderTotal: z.number().positive().describe('Order total — caps the points discount'),
+    }),
+  },
+  reserve: {
+    body: z.object({
+      customerId: z.string().min(1).describe('Customer ID whose member balance should be debited'),
+      pointsToRedeem: z.number().positive().describe('Points to reserve'),
+      orderTotal: z.number().positive().describe('Order total — caps the points discount'),
+      ownerType: z
+        .string()
+        .min(1)
+        .default('order')
+        .describe('Owner kind (default: "order"). Identifies what holds the reservation.'),
+      ownerId: z.string().min(1).describe('Owner id — the order/cart/quotation that holds the reservation'),
+      expiresAt: z.string().datetime().optional().describe('Absolute expiry (ISO). Defaults to engine reservation TTL.'),
+    }),
+  },
+  byId: {
+    params: redemptionIdParam,
+  },
+};
+
 // ── Member Schemas ──
 
 export const memberSchemas = {

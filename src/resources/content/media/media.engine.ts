@@ -45,7 +45,10 @@ export function ensureMediaEngine(): Promise<MediaEngine> {
     const cfg: MediaConfig = {
       connection: mongoose.connection,
       driver,
-      tenant: { tenantFieldType: 'string' },
+      // Media library is company-wide (single-tenant, shared across branches).
+      // Disabling tenant scoping skips the multiTenantPlugin so list/update
+      // queries aren't auto-filtered by `organizationId`.
+      tenant: false,
       fileTypes: {
         allowed: IMAGE_SETTINGS.allowedMimeTypes,
         maxSize: IMAGE_SETTINGS.maxSize,

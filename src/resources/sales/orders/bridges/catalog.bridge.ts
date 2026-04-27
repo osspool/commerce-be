@@ -20,6 +20,7 @@
 
 import type { LineSnapshot, OrderCatalogBridge, OrderContext } from '@classytic/order';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
+import { getPricelistEngineOrNull } from '#resources/sales/pricelist/pricelist.plugin.js';
 
 interface ProductVariant {
   sku: string;
@@ -100,6 +101,48 @@ export function createCatalogBridge(): OrderCatalogBridge {
               .join(' / ') || undefined))
           : undefined;
 
+        // Base price from product / variant, used as the input to the
+        // pricelist resolver and as fallback when no pricelist applies.
+        const baseUnitPrice = variantPrice ?? basePrice ?? 0;
+
+        // Pricelist application — host passes `selections.priceListId` (set
+        // by placement.service.ts after resolving the customer's pricelist).
+        // Reads through @classytic/pricelist's resolver, which honors rule
+        // priority + scope + quantity thresholds + validity windows. Any
+        // failure (no pricelist, no engine, no rule match) falls cleanly
+        // back to the base price.
+        const priceListId =
+          typeof selections.priceListId === 'string' && selections.priceListId.length > 0
+            ? (selections.priceListId as string)
+            : undefined;
+
+        let resolvedUnitPrice = baseUnitPrice;
+        if (priceListId) {
+          const plEngine = getPricelistEngineOrNull();
+          if (plEngine && baseUnitPrice > 0) {
+            try {
+              const result = await plEngine.repositories.priceList.resolvePrice(
+                priceListId,
+                {
+                  productId: String(product._id),
+                  variantSku: variant?.sku,
+                  categoryId: (p.categoryId as string | undefined) ?? undefined,
+                  quantity: _quantity > 0 ? _quantity : 1,
+                  basePrice: baseUnitPrice,
+                  costPrice: variantCost ?? productCostPrice,
+                },
+                { organizationId: ctx.organizationId },
+              );
+              if (result?.ruleMatched && typeof result.price === 'number' && result.price >= 0) {
+                resolvedUnitPrice = result.price;
+              }
+            } catch {
+              // Resolver errors should never block order placement —
+              // fall through to base price.
+            }
+          }
+        }
+
         return {
           offerId,
           productId: String(product._id),
@@ -107,7 +150,7 @@ export function createCatalogBridge(): OrderCatalogBridge {
           name: (p.name as string) ?? 'Unknown',
           image: variantImage ?? (images?.[0]?.url as string | undefined),
           variantLabel,
-          unitPrice: variantPrice ?? basePrice ?? 0,
+          unitPrice: resolvedUnitPrice,
           costPrice: variantCost ?? productCostPrice,
           currency: 'BDT',
           requiresShipping: (p.productType as string) !== 'digital',

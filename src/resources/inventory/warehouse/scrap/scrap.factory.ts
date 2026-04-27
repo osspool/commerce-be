@@ -44,8 +44,6 @@ export function createScrapResource() {
     displayName: 'Inventory Write-offs',
     tag: 'Warehouse - Scrap',
     prefix: '/inventory/scrap',
-    // Arc 2.10.7 auto-injects systemManaged/preserveForElevated on this field.
-    tenantField: 'organizationId',
 
     // Adapter wires list/get/delete + body-schema generation. `update` is
     // disabled below — scraps move only via FSM verbs in `actions:`.
@@ -54,6 +52,7 @@ export function createScrapResource() {
       // create body (the service assigns scrapNumber + the FSM fields fill
       // in over time as approve/execute fires).
       fieldRules: {
+        organizationId: { systemManaged: true },
         scrapNumber: { systemManaged: true },
         status: { systemManaged: true },
         moveId: { systemManaged: true },

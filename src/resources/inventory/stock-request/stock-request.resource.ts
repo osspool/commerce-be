@@ -5,14 +5,20 @@
  * State transitions (approve/reject/fulfill/cancel) declared via the `actions`
  * block below → mounted as `POST /:id/action { action: ... }`.
  */
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import StockRequest from './models/stock-request.model.js';
 import stockRequestController from './stock-request.controller.js';
 import stockRequestRepository from './stock-request.repository.js';
+import {
+  approveActionSchema,
+  cancelActionSchema,
+  createSchema,
+  fulfillActionSchema,
+  rejectActionSchema,
+} from './stock-request.schemas.js';
 import stockRequestService from './stock-request.service.js';
 
 const queryParser = new QueryParser({
@@ -28,7 +34,7 @@ const stockRequestResource = defineResource({
   tag: 'Inventory - Stock Requests',
   prefix: '/inventory/requests',
 
-  adapter: createAdapter(StockRequest, stockRequestRepository),
+  adapter: createMongooseAdapter(StockRequest, stockRequestRepository),
   queryParser,
   controller: stockRequestController,
 
@@ -40,54 +46,10 @@ const stockRequestResource = defineResource({
     delete: requireRoles('admin'),
   },
 
-  // Tight create-body schema. The service still does the catalog lookup and
-  // sets requestNumber + requestedBy, but shape now fails at the gateway
-  // instead of deep in the service.
+  // Zod v4 — Arc auto-converts. The service still does the catalog lookup
+  // and sets requestNumber + requestedBy, but shape now fails at the gateway.
   customSchemas: {
-    create: {
-      body: {
-        type: 'object',
-        required: ['items'],
-        additionalProperties: false,
-        properties: {
-          requestingBranchId: { type: 'string' },
-          fulfillingBranchId: { type: 'string' },
-          priority: {
-            type: 'string',
-            enum: ['low', 'normal', 'high', 'urgent'],
-          },
-          reason: { type: 'string' },
-          expectedDate: { type: 'string', format: 'date-time' },
-          notes: { type: 'string' },
-          items: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['productId', 'quantity'],
-              additionalProperties: false,
-              properties: {
-                productId: { type: 'string' },
-                variantSku: { type: ['string', 'null'] },
-                quantity: { type: 'number', minimum: 0 },
-                notes: { type: 'string' },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-
-  schemaOptions: {
-    fieldRules: {
-      requestNumber: { systemManaged: true },
-      status: { systemManaged: true },
-      statusHistory: { systemManaged: true },
-      requestedBy: { systemManaged: true },
-      reviewedBy: { systemManaged: true },
-      fulfilledBy: { systemManaged: true },
-    },
+    create: { body: createSchema.body },
   },
 
   actions: {
@@ -97,7 +59,7 @@ const stockRequestResource = defineResource({
         return stockRequestService.approveRequest(id, data.items as any, data.reviewNotes as string | undefined, uid);
       },
       permissions: permissions.inventory.stockRequestApprove,
-      schema: { items: { type: 'array' }, reviewNotes: { type: 'string' } },
+      schema: approveActionSchema,
     },
     reject: {
       handler: async (id, data, req) => {
@@ -105,7 +67,7 @@ const stockRequestResource = defineResource({
         return stockRequestService.rejectRequest(id, data.reason as string | undefined, uid);
       },
       permissions: permissions.inventory.stockRequestApprove,
-      schema: { reason: { type: 'string' } },
+      schema: rejectActionSchema,
     },
     fulfill: {
       handler: async (id, data, req) => {
@@ -113,7 +75,7 @@ const stockRequestResource = defineResource({
         return stockRequestService.fulfillRequest(id, data, uid);
       },
       permissions: permissions.inventory.stockRequestFulfill,
-      schema: { items: { type: 'array' } },
+      schema: fulfillActionSchema,
     },
     cancel: {
       handler: async (id, data, req) => {
@@ -121,7 +83,7 @@ const stockRequestResource = defineResource({
         return stockRequestService.cancelRequest(id, data.reason as string | undefined, uid);
       },
       permissions: permissions.inventory.stockRequestCancel,
-      schema: { reason: { type: 'string' } },
+      schema: cancelActionSchema,
     },
   },
 

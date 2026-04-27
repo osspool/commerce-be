@@ -22,7 +22,6 @@
 import { createLockPlugin, watermarkResolver } from '@classytic/ledger/plugins';
 import type { Model } from 'mongoose';
 import mongoose from 'mongoose';
-import { DayCloseState } from './day-close-state.model.js';
 
 export const PERIOD_LOCKED = 'PERIOD_LOCKED';
 
@@ -37,17 +36,30 @@ function lazyModel(name: string): Model<unknown> {
   });
 }
 
-/** Resolve the watermark for a branch. Returns null if no branch or no close state. */
+/**
+ * Watermark = latest `businessDate` of any closed shift for this branch.
+ *
+ * After shift-driven close (replaces the legacy DayCloseState), the
+ * period lock reads directly from `pos_shifts`. A JE attempted on or
+ * before the most recently closed shift's date is blocked unless the
+ * caller goes through `journalEntryRepository.reverse()` (which sets
+ * `_ledgerInternal: true` and bypasses this guard).
+ */
 async function getWatermark(branchId: unknown): Promise<Date | null> {
   if (!branchId) return null;
-  const state = (await DayCloseState.findOne({ branchId }).select('lastClosedDate').lean()) as {
-    lastClosedDate?: string;
-  } | null;
-  if (!state?.lastClosedDate) return null;
-  // Set to end-of-day so that entries ON the closed date are blocked.
-  // Watermark semantics: entryDate > watermark → pass. If we used T00:00Z,
-  // an entry at T12:00Z on the same day would slip through.
-  return new Date(`${state.lastClosedDate}T23:59:59.999Z`);
+  const Shift = lazyModel('Shift');
+  const latest = (await Shift.findOne({
+    organizationId: branchId,
+    state: { $in: ['closed', 'orphaned_closed'] },
+  })
+    .select('businessDate')
+    .sort({ businessDate: -1 })
+    .lean()) as { businessDate?: Date } | null;
+  if (!latest?.businessDate) return null;
+  // Set to end-of-day so entries ON the closed date are blocked.
+  const d = new Date(latest.businessDate);
+  d.setUTCHours(23, 59, 59, 999);
+  return d;
 }
 
 const innerWatermark = watermarkResolver({

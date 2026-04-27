@@ -57,10 +57,10 @@ export function createStandardCostResource() {
     displayName: 'Standard Costs',
     tag: 'Warehouse - Standard Cost',
     prefix: '/inventory/standard-costs',
-    tenantField: 'organizationId',
 
     adapter: createFlowAdapter(engine.models.StandardCost, engine.repositories.standardCost, {
       fieldRules: {
+        organizationId: { systemManaged: true },
         // Server-assigned on create
         createdBy: { systemManaged: true },
         // Service defaults `effectiveFrom` when omitted; `effectiveTo` is set

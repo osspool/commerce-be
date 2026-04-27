@@ -18,7 +18,25 @@ import purchaseOrderService from './purchase-order.service.js';
 
 class PurchaseOrderController extends BaseController {
   constructor() {
-    super(purchaseOrderRepository);
+    super(purchaseOrderRepository, {
+      schemaOptions: {
+        fieldRules: {
+          invoiceNumber: { systemManaged: true },
+          status: { systemManaged: true },
+          paymentStatus: { systemManaged: true },
+          paidAmount: { systemManaged: true },
+          dueAmount: { systemManaged: true },
+          subTotal: { systemManaged: true },
+          discountTotal: { systemManaged: true },
+          taxTotal: { systemManaged: true },
+          grandTotal: { systemManaged: true },
+          statusHistory: { systemManaged: true },
+          createdBy: { systemManaged: true },
+          approvedBy: { systemManaged: true },
+          receivedBy: { systemManaged: true },
+        },
+      },
+    });
   }
 
   override async create(ctx: IRequestContext): Promise<IControllerResponse<AnyRecord>> {

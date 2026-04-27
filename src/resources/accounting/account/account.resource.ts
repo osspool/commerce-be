@@ -1,22 +1,30 @@
 /**
- * Account Resource — Chart of Accounts CRUD + Custom Actions
+ * Account Resource — Chart of Accounts CRUD + Stripe-style actions
  *
  * Top-level defineResource — auto-discovered by loadResources().
  * Engine is initialized in app.ts before loadResources, so the model is
  * available when this file is imported.
  *
  * Company-wide: tenantField:false disables Arc's default org query scoping.
+ *
+ * State transitions (`enable`, `disable`) are declarative actions exposed as
+ * `POST /:id/action { action: "enable" | "disable" }`. Bulk operations
+ * (`/seed`, `/bulk`) stay as custom raw routes because they're not id-keyed —
+ * arc's action contract is `POST /:id/action`, which doesn't fit collection-
+ * level work.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
+import type { RequestWithExtras } from '@classytic/arc/types';
 import { QueryParser } from '@classytic/mongokit';
-import { createAdapter } from '#shared/adapter.js';
 import { Account, accountRepository, JournalEntry } from '../accounting.engine.js';
 
 // Pagination cap (1000) is set on the engine's `pagination.account` config
 // in accounting.engine.ts. This QueryParser only validates query syntax.
 const queryParser = new QueryParser();
+
+const adminOnly = requireRoles('admin');
 
 const accountResource = defineResource({
   name: 'account',
@@ -25,20 +33,58 @@ const accountResource = defineResource({
   tag: 'Accounting',
   prefix: '/accounting/accounts',
 
-  adapter: createAdapter(Account, accountRepository),
+  adapter: createMongooseAdapter(Account, accountRepository),
   queryParser,
   tenantField: false,
 
   permissions: {
     list: requireAuth(),
     get: requireAuth(),
-    create: requireRoles('admin'),
-    update: requireRoles('admin'),
-    delete: requireRoles('admin'),
+    create: adminOnly,
+    update: adminOnly,
+    delete: adminOnly,
   },
 
   schemaOptions: {
     excludeFields: ['organizationId'],
+  },
+
+  actions: {
+    enable: {
+      handler: async (id: string, _data: Record<string, unknown>, _req: RequestWithExtras) => {
+        const account = await accountRepository.getById(id);
+        if (!account) {
+          throw Object.assign(new Error('Account not found'), {
+            statusCode: 404,
+            code: 'ACCOUNT_NOT_FOUND',
+          });
+        }
+        return accountRepository.update(id, { active: true });
+      },
+      permissions: adminOnly,
+    },
+    disable: {
+      handler: async (id: string, _data: Record<string, unknown>, _req: RequestWithExtras) => {
+        const account = await accountRepository.getById(id);
+        if (!account) {
+          throw Object.assign(new Error('Account not found'), {
+            statusCode: 404,
+            code: 'ACCOUNT_NOT_FOUND',
+          });
+        }
+        // Accounts are company-wide; block disable if ANY branch has journal
+        // entries referencing this account. Unscoped exists() is intentional.
+        const hasEntries = await JournalEntry.exists({ 'journalItems.account': id });
+        if (hasEntries) {
+          throw Object.assign(new Error('Cannot disable account with existing journal entries'), {
+            statusCode: 400,
+            code: 'ACCOUNT_HAS_ENTRIES',
+          });
+        }
+        return accountRepository.update(id, { active: false });
+      },
+      permissions: adminOnly,
+    },
   },
 
   routes: [
@@ -46,8 +92,9 @@ const accountResource = defineResource({
       method: 'POST' as const,
       path: '/seed',
       summary: 'Seed default BFRS chart of accounts (company-wide)',
-      permissions: requireRoles('admin'),
+      permissions: adminOnly,
       raw: true,
+      // biome-ignore lint/suspicious/noExplicitAny: bulk seed handler — no id, no body
       handler: async (_req: any, reply: any) => {
         const result = await accountRepository.seedAccounts(undefined);
         return reply.status(201).send({ success: true, data: result });
@@ -57,44 +104,14 @@ const accountResource = defineResource({
       method: 'POST' as const,
       path: '/bulk',
       summary: 'Bulk create accounts',
-      permissions: requireRoles('admin'),
+      permissions: adminOnly,
       raw: true,
+      // biome-ignore lint/suspicious/noExplicitAny: bulk-create handler with array body
       handler: async (req: any, reply: any) => {
         const { accounts } = req.body;
         const result = await accountRepository.bulkCreate(accounts, undefined);
         const status = result.summary?.created > 0 ? 201 : 200;
         return reply.status(status).send({ success: true, data: result });
-      },
-    },
-    {
-      method: 'PATCH' as const,
-      path: '/:id/enable',
-      summary: 'Enable an account',
-      permissions: requireRoles('admin'),
-      raw: true,
-      handler: async (req: any, reply: any) => {
-        const account = await accountRepository.getById(req.params.id);
-        if (!account) return reply.status(404).send({ error: 'Account not found' });
-        const doc = await accountRepository.update(req.params.id, { active: true });
-        return reply.send({ success: true, data: doc });
-      },
-    },
-    {
-      method: 'PATCH' as const,
-      path: '/:id/disable',
-      summary: 'Disable an account',
-      permissions: requireRoles('admin'),
-      raw: true,
-      handler: async (req: any, reply: any) => {
-        const account = await accountRepository.getById(req.params.id);
-        if (!account) return reply.status(404).send({ error: 'Account not found' });
-        // Accounts are company-wide; block disable if ANY branch has journal entries
-        // referencing this account. Query runs unscoped on purpose.
-        const hasEntries = await JournalEntry.exists({ 'journalItems.account': req.params.id });
-        if (hasEntries)
-          return reply.status(400).send({ error: 'Cannot disable account with existing journal entries' });
-        const doc = await accountRepository.update(req.params.id, { active: false });
-        return reply.send({ success: true, data: doc });
       },
     },
   ],

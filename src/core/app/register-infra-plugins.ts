@@ -68,10 +68,10 @@ export async function registerInfraPlugins(fastify: FastifyInstance): Promise<vo
   // owns the schema. Audit lookups filter by resource/documentId/timestamp;
   // the TTL index drops entries older than 90 days.
   //
-  // The ascending `{ timestamp: 1 }` index needs TTL options. Older deployments
-  // have an unnamed `timestamp_1` index without TTL, which blocks creation with
-  // `IndexOptionsConflict` (code 85). Drop the legacy index first if it lacks
-  // `expireAfterSeconds`, then (re)create with the canonical name + TTL.
+  // The canonical ascending `{ timestamp: 1 }` index is named `ttl_timestamp`
+  // with `expireAfterSeconds`. Any other ascending-timestamp index (e.g. the
+  // Mongo-default `timestamp_1`, or one with a different TTL value) conflicts
+  // on name/options — drop it first, then (re)create with the canonical shape.
   try {
     const existing = (await AuditModel.collection.indexes()) as Array<{
       name: string;
@@ -79,7 +79,10 @@ export async function registerInfraPlugins(fastify: FastifyInstance): Promise<vo
       expireAfterSeconds?: number;
     }>;
     const legacyTs = existing.find(
-      (ix) => ix.name !== 'ttl_timestamp' && ix.key?.timestamp === 1 && ix.expireAfterSeconds === undefined,
+      (ix) =>
+        ix.name !== 'ttl_timestamp' &&
+        ix.key?.timestamp === 1 &&
+        Object.keys(ix.key).length === 1,
     );
     if (legacyTs) {
       await AuditModel.collection.dropIndex(legacyTs.name);

@@ -1,7 +1,6 @@
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import crmPermissions from '#config/permissions/crm.js';
-import { createAdapter } from '#shared/adapter.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { cancelActivity, completeActivity } from './activity.actions.js';
 import CrmActivity from './activity.model.js';
@@ -17,7 +16,7 @@ const crmActivityResource = defineResource({
   // space for no added signal.
   audit: false,
 
-  adapter: createAdapter(CrmActivity, crmActivityRepository),
+  adapter: createMongooseAdapter(CrmActivity, crmActivityRepository),
   presets: [orgScoped],
 
   schemaOptions: {

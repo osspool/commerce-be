@@ -5,10 +5,9 @@
  * Declarative `actions:` for FSM verbs (deactivate). No raw routes.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import { queryParser } from '#shared/query-parser.js';
 import { ensureLoyaltyEngine } from './loyalty.plugin.js';
 
@@ -21,7 +20,7 @@ const earningRuleResource = defineResource({
   prefix: '/loyalty/earning-rules',
   audit: true,
 
-  adapter: createAdapter(engine.models.EarningRule as never, engine.repositories.earningRule as never),
+  adapter: createMongooseAdapter(engine.models.EarningRule as never, engine.repositories.earningRule as never),
   queryParser,
 
   permissions: {

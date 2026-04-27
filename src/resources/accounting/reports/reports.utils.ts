@@ -6,8 +6,12 @@ import mongoose from 'mongoose';
 
 export type DateOption = 'year' | 'month' | 'quarter' | 'custom';
 
+// dateValue.startDate / endDate keys are required by ledger's getDateRange()
+// — see @classytic/ledger's `case 'custom':` which destructures
+// `{ startDate: rawStart, endDate: rawEnd } = value`. Anything else throws
+// "Custom date range requires both startDate and endDate".
 export type ParsedDateParams =
-  | { dateOption: 'custom'; dateValue: { start: Date; end: Date } }
+  | { dateOption: 'custom'; dateValue: { startDate: Date; endDate: Date } }
   | { dateOption: 'month'; dateValue: Date }
   | { dateOption: 'quarter'; dateValue: { quarter: number; year: number } }
   | { dateOption: 'year'; dateValue: number };
@@ -36,7 +40,7 @@ export function parseDateParams(query: ReportQuery = {}): ParsedDateParams {
   if (dateOption === 'custom' && startDate && endDate) {
     return {
       dateOption: 'custom',
-      dateValue: { start: new Date(startDate), end: new Date(endDate) },
+      dateValue: { startDate: new Date(startDate), endDate: new Date(endDate) },
     };
   }
 

@@ -1,4 +1,4 @@
-import { BaseController } from '@classytic/arc';
+import { type AnyRecord, BaseController } from '@classytic/arc';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { IBranch } from './branch.model.js';
 import branchRepository from './branch.repository.js';
@@ -10,9 +10,18 @@ import { branchSchemaOptions } from './branch.schemas.js';
  * Extends BaseController for auto query/pagination handling.
  * Additional methods for branch-specific operations.
  */
-class BranchController extends BaseController<IBranch> {
+class BranchController extends BaseController<IBranch & AnyRecord> {
   constructor() {
-    super(branchRepository, { schemaOptions: branchSchemaOptions });
+    // tenantField: false matches the resource declaration — branch is
+    // company-wide registry, not per-org data. Arc only threads tenantField
+    // into auto-built controllers, so user-provided controllers must opt
+    // out explicitly or the BaseController default ('organizationId') wins
+    // and the list filter zeros out (branch docs don't carry that field).
+    super(branchRepository, {
+      schemaOptions: branchSchemaOptions,
+      tenantField: false,
+      cache: { staleTime: 30, gcTime: 180, tags: ['branches'] },
+    });
 
     // Bind additional methods
     this.getByCode = this.getByCode.bind(this);

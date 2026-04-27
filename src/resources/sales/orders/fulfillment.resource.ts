@@ -8,7 +8,7 @@
  * the context of an order.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { type OrderContext, repoOptionsFromCtx } from '@classytic/order';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
@@ -16,7 +16,6 @@ import { publish } from '#lib/events/arcEvents.js';
 import logger from '#lib/utils/logger.js';
 import { buildFlowContext } from '#resources/inventory/flow/context-helpers.js';
 import { getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';
-import { createAdapter } from '#shared/adapter.js';
 import { getContextFromReq } from '#shared/context.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { queryParser } from '#shared/query-parser.js';
@@ -26,7 +25,7 @@ import { ensureOrderEngine } from './order.engine.js';
 // connected by the time this module loads (both in production `createApplication`
 // and in vitest `beforeAll`), so we can eagerly build the adapter.
 const fulfillmentEngine = await ensureOrderEngine();
-const fulfillmentAdapter = createAdapter(
+const fulfillmentAdapter = createMongooseAdapter(
   fulfillmentEngine.models.Fulfillment as never,
   fulfillmentEngine.repositories.fulfillment as never,
 );

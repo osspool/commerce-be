@@ -13,6 +13,7 @@ import mongoose from 'mongoose';
 import { groups } from '#config/permissions/roles.js';
 import { requireRoles } from '#shared/permissions.js';
 import { Budget } from '../accounting.engine.js';
+import { rejectActionSchema } from './budget.schemas.js';
 
 type ActionRequest = RequestWithExtras & {
   scope: RequestWithExtras['scope'] & { organizationId?: string; userId?: string };
@@ -85,13 +86,7 @@ export const budgetActions = {
       await budget.save();
       return budget;
     },
-    schema: {
-      type: 'object',
-      properties: {
-        reason: { type: 'string', description: 'Reason for rejection' },
-      },
-      required: [],
-    },
+    schema: rejectActionSchema,
   },
 
   close: async (id: string, _data: Record<string, unknown>, req: ActionRequest) => {

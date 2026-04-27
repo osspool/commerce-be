@@ -1,106 +1,103 @@
 #!/usr/bin/env bash
 #
-# test-affected.sh — run only the vitest suites affected by changed files.
+# test-affected.sh — run only the vitest projects affected by changed files.
 #
 # Usage:
 #   ./scripts/test-affected.sh           # auto-detect from git diff
-#   ./scripts/test-affected.sh --all     # run everything (CI / pre-release)
-#   ./scripts/test-affected.sh --fast    # fast unit tests only
+#   ./scripts/test-affected.sh --all     # run every project
+#   ./scripts/test-affected.sh --fast    # unit project only
 #
-# Each suite runs as a SEPARATE PROCESS with its own MongoMemoryServer.
-# No shared state file, no race conditions, suites can run in parallel.
+# Vitest runs projects in parallel natively — no background-job juggling
+# needed here. This script just maps `git diff` to project names and hands
+# them to `vitest run --project <name>`.
 
 set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+GREEN='\033[0;32m'
 NC='\033[0m'
 
-run_suite() {
-  local name="$1"
-  local config="$2"
-  echo -e "${YELLOW}▸ Running ${name}...${NC}"
-  npx vitest run --config "$config" --reporter=dot
-  echo -e "${GREEN}✓ ${name} passed${NC}"
+run_projects() {
+  echo -e "${YELLOW}▸ vitest projects: $*${NC}"
+  local args=()
+  for name in "$@"; do
+    args+=(--project "$name")
+  done
+  npx vitest run "${args[@]}" --reporter=dot
 }
 
-# --all: run every suite (parallel where possible)
+# --all: every project (default `vitest run` with no --project flags)
 if [[ "${1:-}" == "--all" ]]; then
-  echo -e "${YELLOW}Running ALL test suites...${NC}\n"
-
-  # Fast tests first (no DB, instant)
-  run_suite "fast" "vitest.config.ts"
-
-  # DB suites in parallel (each gets own MongoMemoryServer)
-  run_suite "db:app" "vitest.shared-db-app.config.ts" &
-  PID_APP=$!
-  run_suite "db:domain" "vitest.shared-db-domain.config.ts" &
-  PID_DOMAIN=$!
-  wait $PID_APP $PID_DOMAIN
-
-  # Integration (sequential internally, but separate from above)
-  run_suite "integration" "vitest.integration.config.ts"
-  run_suite "replset" "vitest.replset.config.ts"
-
-  echo -e "\n${GREEN}All suites passed.${NC}"
+  echo -e "${YELLOW}Running ALL vitest projects...${NC}"
+  npx vitest run --reporter=dot
+  echo -e "${GREEN}All projects passed.${NC}"
   exit 0
 fi
 
-# --fast: just unit tests
+# --fast: unit project only
 if [[ "${1:-}" == "--fast" ]]; then
-  run_suite "fast" "vitest.config.ts"
+  run_projects unit
   exit 0
 fi
 
-# Auto-detect: check git diff for changed paths
 CHANGED=$(git diff --name-only HEAD 2>/dev/null || git diff --name-only 2>/dev/null || echo "")
 
 if [[ -z "$CHANGED" ]]; then
-  echo -e "${YELLOW}No changes detected. Running fast tests only.${NC}"
-  run_suite "fast" "vitest.config.ts"
+  echo -e "${YELLOW}No changes detected. Running unit project only.${NC}"
+  run_projects unit
   exit 0
 fi
 
-SUITES=()
+# Always include unit
+PROJECTS=("unit")
 
-# Always run fast tests
-SUITES+=("fast:vitest.config.ts")
-
-# Map changed paths to affected suites
+# Map changed paths to affected projects
 if echo "$CHANGED" | grep -qE "^be-prod/src/(app|core|shared|config)/"; then
-  SUITES+=("db:app:vitest.shared-db-app.config.ts")
-fi
-
-if echo "$CHANGED" | grep -qE "^be-prod/src/resources/(sales|catalog|commerce|inventory)/"; then
-  SUITES+=("db:domain:vitest.shared-db-domain.config.ts")
-  SUITES+=("integration:vitest.integration.config.ts")
-fi
-
-if echo "$CHANGED" | grep -qE "^be-prod/src/resources/accounting/"; then
-  SUITES+=("integration:vitest.integration.config.ts")
-fi
-
-if echo "$CHANGED" | grep -qE "^be-prod/src/resources/inventory/(flow|warehouse)/"; then
-  SUITES+=("replset:vitest.replset.config.ts")
+  PROJECTS+=("integration-app")
 fi
 
 if echo "$CHANGED" | grep -qE "^be-prod/src/resources/auth/"; then
-  SUITES+=("db:app:vitest.shared-db-app.config.ts")
+  PROJECTS+=("integration-app")
 fi
 
-# Deduplicate
-SUITES=($(printf '%s\n' "${SUITES[@]}" | sort -u))
+if echo "$CHANGED" | grep -qE "^be-prod/src/resources/(sales|catalog|commerce|inventory)/"; then
+  PROJECTS+=("integration-domain" "integration-shared")
+fi
 
-echo -e "${YELLOW}Affected suites (${#SUITES[@]}):${NC}"
-for s in "${SUITES[@]}"; do
-  echo "  - ${s%%:*}"
+if echo "$CHANGED" | grep -qE "^be-prod/src/resources/accounting/"; then
+  PROJECTS+=("integration-shared" "scenarios-replset")
+fi
+
+if echo "$CHANGED" | grep -qE "^be-prod/src/resources/inventory/(flow|warehouse)/"; then
+  PROJECTS+=("scenarios-replset")
+fi
+
+if echo "$CHANGED" | grep -qE "^be-prod/src/resources/(revenue|payments?)"; then
+  PROJECTS+=("scenarios-payments")
+fi
+
+if echo "$CHANGED" | grep -qE "^be-prod/src/resources/logistics/"; then
+  PROJECTS+=("scenarios-logistics")
+fi
+
+if echo "$CHANGED" | grep -qE "^be-prod/src/resources/notifications/"; then
+  PROJECTS+=("scenarios-notifications")
+fi
+
+if echo "$CHANGED" | grep -qE "^be-prod/src/resources/analytics/"; then
+  PROJECTS+=("scenarios-analytics")
+fi
+
+# Deduplicate while preserving order
+seen=()
+UNIQUE=()
+for p in "${PROJECTS[@]}"; do
+  if [[ ! " ${seen[*]-} " =~ " $p " ]]; then
+    UNIQUE+=("$p")
+    seen+=("$p")
+  fi
 done
-echo ""
 
-for s in "${SUITES[@]}"; do
-  IFS=':' read -r name config <<< "$s"
-  run_suite "$name" "$config"
-done
-
-echo -e "\n${GREEN}All affected suites passed.${NC}"
+echo -e "${YELLOW}Affected projects (${#UNIQUE[@]}): ${UNIQUE[*]}${NC}"
+run_projects "${UNIQUE[@]}"
+echo -e "${GREEN}All affected projects passed.${NC}"

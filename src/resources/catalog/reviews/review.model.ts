@@ -1,3 +1,4 @@
+import type { AnyRecord } from '@classytic/arc';
 import { arcLog } from '@classytic/arc/logger';
 import mongoose, { type HydratedDocument, Schema, type Types } from 'mongoose';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
@@ -21,7 +22,7 @@ export interface IReviewReply {
 export const REVIEW_STATUSES = ['pending', 'approved', 'rejected'] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
-export interface IReview {
+export interface IReview extends AnyRecord {
   user: Types.ObjectId;
   product: Types.ObjectId;
   order?: Types.ObjectId;

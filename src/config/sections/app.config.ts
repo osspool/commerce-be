@@ -19,6 +19,12 @@ export interface AppSectionConfig {
 export interface RateLimitConfig {
   windowMs: number;
   max: number;
+  /**
+   * Explicit override. Rate limiting is disabled by default in dev/test to
+   * keep HMR / scenario suites from starving the IP bucket, but a scenario
+   * test that asserts 429 behavior sets this to true.
+   */
+  enabled: boolean;
 }
 
 export interface CorsConfig {
@@ -59,6 +65,7 @@ const appConfig: AppConfigSection = {
   rateLimit: {
     windowMs: parseIntEnv(process.env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000), // 15 minutes
     max: parseIntEnv(process.env.RATE_LIMIT_MAX, 100), // limit each IP to 100 requests per windowMs
+    enabled: parseBoolean(process.env.RATE_LIMIT_ENABLED) ?? false,
   },
 
   cors: {

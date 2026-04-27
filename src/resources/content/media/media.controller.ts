@@ -48,7 +48,12 @@ class MediaController extends BaseController {
     // MediaRepository extends mongokit Repository<T>, which already
     // satisfies RepositoryLike. We override `delete` below to route through
     // hardDelete so storage objects are cleaned up alongside the doc.
-    super(repo, { schemaOptions: mediaSchemaOptions });
+    //
+    // `tenantField: false` — media library is company-wide (shared across
+    // every branch). Without this, BaseController defaults to
+    // `'organizationId'` and QueryResolver stamps `{organizationId: <scope>}`
+    // into list filters, excluding every row.
+    super(repo, { schemaOptions: mediaSchemaOptions, tenantField: false });
     this.repo = repo;
 
     this.create = this.create.bind(this);

@@ -1,6 +1,5 @@
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import cmsController from './cms.controller.js';
 import CMS from './cms.model.js';
 import cmsRepository from './cms.repository.js';
@@ -11,7 +10,7 @@ const cmsResource = defineResource({
   tag: 'CMS',
   prefix: '/cms',
 
-  adapter: createAdapter(CMS, cmsRepository),
+  adapter: createMongooseAdapter(CMS, cmsRepository),
   controller: cmsController,
 
   disableDefaultRoutes: true,

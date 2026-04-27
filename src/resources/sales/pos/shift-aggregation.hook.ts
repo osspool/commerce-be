@@ -17,9 +17,10 @@
  */
 
 import type { OrderEngine } from '@classytic/order';
+import type { ShiftPaymentMethod } from '@classytic/pos';
 import type { FastifyBaseLogger } from 'fastify';
-import type { ShiftPaymentMethod } from './shift.constants.js';
-import PosShift from './shift.model.js';
+import { publish as publishEvent } from '#lib/events/arcEvents.js';
+import { posEngine } from './pos.engine.js';
 
 interface PaymentLike {
   method?: string;
@@ -32,7 +33,10 @@ interface OrderCreateHookPayload {
     orderNumber?: string;
     organizationId?: { toString(): string } | string;
     channel?: string;
-    totals?: { grandTotal?: { amount?: number; currency?: string } };
+    totals?: {
+      grandTotal?: { amount?: number; currency?: string };
+      tax?: { amount?: number; currency?: string };
+    };
     payment?: {
       gateway?: string;
       paymentData?: { payments?: PaymentLike[] };
@@ -75,37 +79,89 @@ export async function applyShiftAggregation(
     return { applied: false, reason: 'no-shift-id' };
   }
 
-  // Amounts — order.totals.grandTotal is the authoritative sale figure.
-  // Order money is stored in minor units (paisa); shift fields are in major
-  // units (BDT). Divide by 100.
-  const grandTotalMinor = order.totals?.grandTotal?.amount ?? 0;
-  const salesTotal = grandTotalMinor / 100;
+  // Paisa (integer minor units) end-to-end. `totals.grandTotal.amount`
+  // and `totals.tax.amount` are paisa; `paymentData.payments[].amount` is
+  // also paisa (pos.controller stores it that way). The shift package
+  // accumulates paisa; the host's ledger bridge posts paisa via the
+  // existing accounting/posting service.
+  const grandTotalPaisa = order.totals?.grandTotal?.amount ?? 0;
+  const totalTaxPaisa = order.totals?.tax?.amount ?? 0;
+  if (grandTotalPaisa <= 0) return { applied: false, reason: 'zero-total' };
 
-  // Per-payment-method split. Payments from the POS controller are already
-  // in major units (user-entered amounts), so no division there.
+  // Per-payment-method split — paisa.
   const payments = order.payment?.paymentData?.payments ?? [];
   const perMethod = new Map<ShiftPaymentMethod, number>();
   if (payments.length > 0) {
     for (const pm of payments) {
       const key = toShiftMethod(pm.method);
       if (!key) continue;
-      perMethod.set(key, (perMethod.get(key) ?? 0) + (Number(pm.amount) || 0));
+      const amt = Number(pm.amount) || 0;
+      if (amt <= 0) continue;
+      perMethod.set(key, (perMethod.get(key) ?? 0) + amt);
     }
   } else if (order.payment?.gateway) {
     const key = toShiftMethod(order.payment.gateway);
-    if (key) perMethod.set(key, salesTotal);
+    if (key) perMethod.set(key, grandTotalPaisa);
+  } else {
+    // Defensive default — single cash bucket carrying the full grand total.
+    perMethod.set('cash', grandTotalPaisa);
+  }
+
+  // Pro-rate the order's total tax across methods using each method's
+  // share of the gross. Last bucket gets the rounding remainder so the
+  // sum of method tax stays exactly equal to totals.tax.
+  const methodEntries = Array.from(perMethod.entries());
+  const grossSum = methodEntries.reduce((s, [, a]) => s + a, 0);
+  const taxByMethod = new Map<ShiftPaymentMethod, number>();
+  if (totalTaxPaisa > 0 && grossSum > 0) {
+    let allocated = 0;
+    methodEntries.forEach(([method, amount], idx) => {
+      const isLast = idx === methodEntries.length - 1;
+      const share = isLast
+        ? totalTaxPaisa - allocated
+        : Math.floor((totalTaxPaisa * amount) / grossSum);
+      taxByMethod.set(method, share);
+      allocated += share;
+    });
   }
 
   try {
-    await PosShift.updateOne({ _id: shiftId, state: 'open' }, { $inc: { salesCount: 1, salesTotal } });
+    const ctx = {
+      organizationId:
+        typeof order.organizationId === 'string'
+          ? order.organizationId
+          : order.organizationId?.toString?.() ?? '',
+    };
 
-    for (const [method, amount] of perMethod) {
-      if (amount <= 0) continue;
-      await PosShift.updateOne(
-        { _id: shiftId, state: 'open', 'paymentBreakdown.method': method },
-        { $inc: { 'paymentBreakdown.$.salesAmount': amount } },
+    for (const [method, amount] of methodEntries) {
+      const tax = taxByMethod.get(method) ?? 0;
+      await posEngine.repositories.shift.incrementSales(
+        { shiftId, method, amount, tax },
+        ctx,
       );
     }
+
+    // Fire-and-forget downstream signal. The shift-counter the cashier sees
+    // is updated in-band above (atomic single $inc, <50ms). This event is
+    // for downstream consumers — analytics, BI, audit dashboards — that
+    // don't need real-time consistency. Published to the outbox via
+    // arcEvents so failures here don't block or fail the order.
+    publishEvent('pos:order.placed', {
+      orderId: String(order._id),
+      orderNumber: order.orderNumber,
+      organizationId: ctx.organizationId,
+      shiftId,
+      grandTotalPaisa,
+      taxPaisa: totalTaxPaisa,
+      perMethod: Object.fromEntries(methodEntries),
+      taxByMethod: Object.fromEntries(taxByMethod),
+    }).catch((err) => {
+      logger?.warn?.(
+        { err: (err as Error).message, orderId: String(order._id) },
+        'pos:order.placed publish failed (non-fatal)',
+      );
+    });
+
     return { applied: true };
   } catch (err) {
     logger?.error?.(

@@ -5,14 +5,14 @@
  * Company-wide: tenantField:false.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { denyAll, requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { closeFiscalPeriod, reopenFiscalPeriod } from '@classytic/ledger';
 import { QueryParser } from '@classytic/mongokit';
-import { createAdapter } from '#shared/adapter.js';
 import { Account, bdPack, FiscalPeriod, fiscalPeriodRepository, JournalEntry } from '../accounting.engine.js';
 
-const queryParser = new QueryParser({ maxLimit: 100 });
+// Bounded set (~12 periods/year × N years), admin-only — generous cap is fine.
+const queryParser = new QueryParser({ maxLimit: 500 });
 
 const fiscalPeriodResource = defineResource({
   name: 'fiscal-period',
@@ -21,7 +21,7 @@ const fiscalPeriodResource = defineResource({
   tag: 'Accounting',
   prefix: '/accounting/fiscal-periods',
 
-  adapter: createAdapter(FiscalPeriod, fiscalPeriodRepository),
+  adapter: createMongooseAdapter(FiscalPeriod, fiscalPeriodRepository),
   queryParser,
   tenantField: false, // company-wide
 

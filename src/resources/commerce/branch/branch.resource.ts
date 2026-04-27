@@ -5,17 +5,20 @@
  * Each branch can have its own stock levels, POS transactions, and settings.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { z } from 'zod';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import { toArcSchemas } from '#shared/event-helpers.js';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import branchController from './branch.controller.js';
 import Branch from './branch.model.js';
 import branchRepository from './branch.repository.js';
-import branchSchemas, { branchSchemaOptions } from './branch.schemas.js';
+import branchSchemas from './branch.schemas.js';
 import { events } from './events.js';
+
+const codeParams = z.object({ code: z.string() });
+const idParams = z.object({ id: z.string() });
 
 const branchResource = defineResource({
   name: 'branch',
@@ -24,18 +27,12 @@ const branchResource = defineResource({
   tag: 'Branches',
   prefix: '/branches',
 
-  adapter: createAdapter(Branch, branchRepository),
+  adapter: createMongooseAdapter(Branch, branchRepository),
   controller: branchController,
   queryParser,
 
   permissions: getResourcePermissions('branch'),
 
-  cache: {
-    staleTime: 30,
-    gcTime: 180,
-    tags: ['branches'],
-  },
-  schemaOptions: branchSchemaOptions,
   customSchemas: toArcSchemas(branchSchemas),
 
   routes: [
@@ -46,15 +43,7 @@ const branchResource = defineResource({
       handler: 'getByCode',
       permissions: permissions.branches.getByCode,
       raw: true,
-      schema: {
-        params: {
-          type: 'object',
-          properties: {
-            code: { type: 'string' },
-          },
-          required: ['code'],
-        },
-      },
+      schema: { params: codeParams },
     },
     {
       method: 'GET',
@@ -71,15 +60,7 @@ const branchResource = defineResource({
       handler: 'setDefault',
       permissions: permissions.branches.setDefault,
       raw: true,
-      schema: {
-        params: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' },
-          },
-          required: ['id'],
-        },
-      },
+      schema: { params: idParams },
     },
   ],
 

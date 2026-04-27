@@ -1,3 +1,4 @@
+import type { AnyRecord } from '@classytic/arc';
 import slugPlugin from '@classytic/mongoose-slug-plugin';
 import mongoose, { type HydratedDocument, type Model, Schema, type UpdateQuery } from 'mongoose';
 import {
@@ -47,7 +48,7 @@ export type BusinessType =
  */
 export type SezStatus = 'NONE' | 'SEZ' | 'BHTC' | 'BONDED_WAREHOUSE';
 
-export interface IBranch {
+export interface IBranch extends AnyRecord {
   slug?: string;
   code: string;
   name: string;

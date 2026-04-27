@@ -6,27 +6,26 @@
  *   SOURCE            TRIGGER                        JOURNAL TYPE      TIMING
  *   ──────────────────────────────────────────────────────────────────────────────
  *   Online order      accounting:order.paid           ECOM_SALES       immediate per-order
- *   POS sale          accounting:day.auto-close        POS_SALES        aggregated per-branch per-day
- *   POS explicit      accounting:pos.day.close         POS_SALES        manual trigger
+ *   POS sale          (shift-close, via @classytic/pos LedgerBridge)   POS_SALES   per-shift
  *   Purchase          accounting:purchase.paid         PURCHASES        immediate per-purchase
  *   COGS              accounting:order.fulfilled       INVENTORY        immediate per-order
  *   Refund            accounting:transaction.refunded  ECOM_SALES rev.  immediate per-refund
  *   Inventory adj.    accounting:inventory.adjusted    INVENTORY        immediate per-adjustment
  *
- * Day-close triggers:
- *   a) Smart hook: onRequest detects bdDate > lastClosedDate → fires accounting:day.auto-close
- *   b) Explicit: POST /accounting/posting/close-day (manager closes shift)
- *   c) Backfill: POST /accounting/posting/backfill (recovery for missed days)
+ * POS posting is shift-driven (industry standard — Odoo, Square, Lightspeed,
+ * Dynamics 365 Retail all converge on session/shift as the unit of close).
+ * The legacy date-aggregator (`accounting:day.auto-close` / `pos.day.close`)
+ * was deleted along with `daily-sales.service.ts`. See the package's
+ * `LedgerBridge.onShiftClosed` — implemented in
+ * `posting/contracts/shift.contract.ts`.
  */
 
 import { withRetry } from '@classytic/arc/events';
 import mongoose from 'mongoose';
 import config from '#config/index.js';
 import { subscribe } from '#lib/events/arcEvents.js';
-import { nextBdDate } from '#lib/utils/bd-date.js';
 import logger from '#lib/utils/logger.js';
 import { getTransactionModel } from '#shared/revenue/engine.js';
-import { postDailyPosSales } from './posting/aggregation/daily-sales.service.js';
 import { type CodCancellationData, codCancellationToPosting } from './posting/contracts/cod-cancellation.contract.js';
 import { type CodPlacementData, codPlacementToPosting } from './posting/contracts/cod-placement.contract.js';
 import { type CodSettlementData, codSettlementToPosting } from './posting/contracts/cod-settlement.contract.js';
@@ -42,12 +41,6 @@ import { type PurchaseData, purchaseToPosting } from './posting/contracts/purcha
 import { type RefundData, refundToPosting } from './posting/contracts/refund.contract.js';
 import { type SalesTransactionData, salesTransactionToPosting } from './posting/contracts/sales.contract.js';
 import { vendorBillToPosting } from './posting/contracts/vendor-bill.contract.js';
-import {
-  getLastClosedDate,
-  markDayClosed,
-  releaseLock,
-  tryAcquireCloseLock,
-} from './posting/day-close-state.service.js';
 import { createPosting, ensureCompanyAccounts } from './posting/posting.service.js';
 
 // ─── Register Handlers ──────────────────────────────────────────────────────
@@ -186,79 +179,10 @@ export function registerAccountingEventHandlers(): void {
     ),
   );
 
-  // ── 2. Smart auto-close → iterate unclosed days and aggregate POS ──
-  // Fired by the onRequest hook when it detects lastClosedDate < yesterday.
-  // Uses 3-layer deduplication: L1 in-process Set, L2 MongoDB lock, L3 idempotency key.
-  subscribe(
-    'accounting:day.auto-close',
-    withRetry(
-      async (event: unknown) => {
-        const { branchId, toDate } = (event as { payload: { branchId: string; toDate: string } }).payload;
-        if (!branchId || !toDate) return;
-
-        // L2: atomic distributed lock — only one instance closes
-        const acquired = await tryAcquireCloseLock(branchId);
-        if (!acquired) {
-          logger.debug({ branchId }, 'Day-close lock held by another process, skipping');
-          return;
-        }
-
-        try {
-          if (config.accounting.autoSeedAccounts) {
-            await ensureCompanyAccounts();
-          }
-
-          const lastClosed = await getLastClosedDate(branchId);
-          let date = lastClosed ? nextBdDate(lastClosed) : toDate;
-
-          let closedCount = 0;
-          while (date <= toDate) {
-            const result = await postDailyPosSales(branchId, date);
-            if (!result.skipped) closedCount++;
-            date = nextBdDate(date);
-          }
-
-          await markDayClosed(branchId, toDate);
-          if (closedCount > 0) {
-            logger.info({ branchId, toDate, closedCount }, 'Auto day-close completed');
-          }
-        } catch (err) {
-          await releaseLock(branchId);
-          throw err; // withRetry will handle
-        }
-      },
-      {
-        maxRetries: 3,
-        backoffMs: 3000,
-        name: 'accounting:day.auto-close',
-        onDead: (event) => {
-          logger.error({ event }, 'accounting:day.auto-close exhausted retries — manual close required');
-        },
-      },
-    ),
-  );
-
-  // ── 3. POS day explicitly closed → aggregate and post ──
-  subscribe(
-    'accounting:pos.day.close',
-    withRetry(
-      async (event: unknown) => {
-        const { branchId, date } = (event as { payload: { branchId: string; date: string } }).payload;
-        const result = await postDailyPosSales(branchId, date);
-        if (result.skipped) {
-          logger.info({ branchId, date, reason: result.reason }, 'POS day-close: nothing to post');
-        }
-      },
-      {
-        maxRetries: 3,
-        backoffMs: 2000,
-        name: 'accounting:pos.day.close',
-        onDead: (event) => {
-          logger.error({ event }, 'accounting:pos.day.close handler exhausted retries');
-        },
-      },
-    ),
-  );
+  // POS day-close subscribers were removed — POS posting is now driven
+  // by the @classytic/pos LedgerBridge at shift close. The previous
+  // `accounting:day.auto-close` and `accounting:pos.day.close` handlers
+  // duplicated that posting via the date-based aggregator.
 
   // ── 4. Purchase paid → immediate journal entry ──
   subscribe(

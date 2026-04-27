@@ -9,6 +9,9 @@
 export type WebhookRateLimit = { max: number; timeWindow: string } | false;
 
 export function buildWebhookRateLimit(): WebhookRateLimit {
-  if (process.env.NODE_ENV === 'test') return false;
-  return { max: 60, timeWindow: '1 minute' };
+  // Tests can force-enable the limit to assert 429 behavior.
+  if (process.env.NODE_ENV === 'test' && process.env.RATE_LIMIT_ENABLED !== 'true') return false;
+  const max = Number(process.env.RATE_LIMIT_MAX ?? 60);
+  const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000);
+  return { max, timeWindow: `${windowMs}ms` };
 }

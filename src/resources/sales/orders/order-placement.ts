@@ -60,6 +60,17 @@ export interface ResolvedLine {
   snapshot: LineSnapshot;
 }
 
+export interface ResolveLinesOptions {
+  /**
+   * Customer's pricelist id (resolved upstream from `customer.priceListId`).
+   * Passed through `selections` to the catalog bridge so its resolver can
+   * apply pricelist rules against the base/variant price. When absent or
+   * the rule doesn't match, the snapshot keeps the base price — same
+   * behavior orders had before pricelist was wired through.
+   */
+  priceListId?: string;
+}
+
 /**
  * Resolve SKU + full snapshot for each line via the catalog bridge.
  *
@@ -71,6 +82,7 @@ export async function resolveLineSkus(
   lines: OrderLineInput[],
   catalogBridge: OrderCatalogBridge,
   ctx: OrderContext,
+  options: ResolveLinesOptions = {},
 ): Promise<ResolvedLine[] | null> {
   const resolved: ResolvedLine[] = [];
 
@@ -95,10 +107,18 @@ export async function resolveLineSkus(
     // the variant's canonical Flow skuRef (= variant.sku). Otherwise
     // variant products collapse to the product-level SKU and every
     // reservation / validate-stock call against a variant returns zero.
+    //
+    // `priceListId` rides on the same `selections` bag so the bridge can
+    // delegate to the pricelist resolver without the OrderContext having
+    // to grow a customer field (the @classytic/order interface is fixed).
+    const selections: Record<string, unknown> = {};
+    if (line.variantSku) selections.variantSku = line.variantSku;
+    if (options.priceListId) selections.priceListId = options.priceListId;
+
     const snap = await catalogBridge.resolveSnapshot(
       line.offerId,
       line.quantity,
-      line.variantSku ? { variantSku: line.variantSku } : {},
+      selections,
       ctx,
     );
     if (!snap?.sku) return null;

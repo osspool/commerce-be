@@ -20,6 +20,8 @@ import { registerInvoiceEventHandlers } from './invoice.events.js';
 import { buildInvoiceResource } from './invoice.resource.js';
 import { initializeInvoiceEngine } from './invoice-engine.js';
 import { registerInvoiceToOrderBridge } from './invoice-to-order.events.js';
+import { buildPaymentTermResource } from './payment-term.resource.js';
+import { buildRecurringInvoiceResource } from './recurring-invoice.resource.js';
 
 async function invoicePlugin(fastify: FastifyInstance): Promise<void> {
   if (!config.invoice.engine) return;
@@ -29,6 +31,20 @@ async function invoicePlugin(fastify: FastifyInstance): Promise<void> {
   if (engine.models?.Invoice && engine.repositories?.invoices) {
     const fullResource = await buildInvoiceResource(engine.models.Invoice, engine.repositories.invoices);
     await fastify.register(fullResource.toPlugin());
+  }
+
+  // Sibling resources extracted from invoice.resource.ts — top-level CRUD
+  // via createMongooseAdapter, no more raw routes hidden under /invoices/*.
+  if (engine.models?.PaymentTerm && engine.repositories?.paymentTerms) {
+    const paymentTermResource = buildPaymentTermResource(engine.models.PaymentTerm, engine.repositories.paymentTerms);
+    await fastify.register(paymentTermResource.toPlugin());
+  }
+  if (engine.models?.RecurringInvoice && engine.repositories?.recurringInvoices) {
+    const recurringResource = buildRecurringInvoiceResource(
+      engine.models.RecurringInvoice,
+      engine.repositories.recurringInvoices,
+    );
+    await fastify.register(recurringResource.toPlugin());
   }
 
   fastify.log.info(

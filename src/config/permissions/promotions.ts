@@ -10,6 +10,20 @@ export interface PromotionPermissions {
     delete: PermissionCheck;
     transition: PermissionCheck;
   };
+  rules: {
+    list: PermissionCheck;
+    get: PermissionCheck;
+    create: PermissionCheck;
+    update: PermissionCheck;
+    delete: PermissionCheck;
+  };
+  rewards: {
+    list: PermissionCheck;
+    get: PermissionCheck;
+    create: PermissionCheck;
+    update: PermissionCheck;
+    delete: PermissionCheck;
+  };
   vouchers: {
     list: PermissionCheck;
     get: PermissionCheck;
@@ -31,6 +45,23 @@ const promotions: PromotionPermissions = {
     update: platformAdminOnly(),
     delete: platformAdminOnly(),
     transition: platformAdminOnly(),
+  },
+  // Rules and rewards are program sub-resources — same authority as program
+  // edits. Mirrors `programs.*` deliberately so a single role change covers
+  // the whole promo authoring surface.
+  rules: {
+    list: platformAdminOnly(),
+    get: platformAdminOnly(),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
+  },
+  rewards: {
+    list: platformAdminOnly(),
+    get: platformAdminOnly(),
+    create: platformAdminOnly(),
+    update: platformAdminOnly(),
+    delete: platformAdminOnly(),
   },
   vouchers: {
     list: platformAdminOnly(),

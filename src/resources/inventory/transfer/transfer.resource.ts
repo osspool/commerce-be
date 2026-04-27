@@ -5,14 +5,20 @@
  * State transitions (approve/dispatch/in-transit/receive/cancel) via declarative actions.
  * Only truly custom routes (stats, export) are in routes.
  */
-import { defineResource } from '@classytic/arc';
-import { requireAuth, requireRoles } from '@classytic/arc/permissions';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import Transfer from './models/transfer.model.js';
 import transferController from './transfer.controller.js';
 import transferRepository from './transfer.repository.js';
+import {
+  cancelActionSchema,
+  createSchema,
+  dispatchActionSchema,
+  receiveActionSchema,
+  updateSchema,
+} from './transfer.schemas.js';
 import transferService from './transfer.service.js';
 
 const queryParser = new QueryParser({
@@ -28,7 +34,7 @@ const transferResource = defineResource({
   tag: 'Inventory - Transfers',
   prefix: '/inventory/transfers',
 
-  adapter: createAdapter(Transfer, transferRepository),
+  adapter: createMongooseAdapter(Transfer, transferRepository),
   queryParser,
   controller: transferController,
 
@@ -40,88 +46,12 @@ const transferResource = defineResource({
     delete: requireRoles('admin'),
   },
 
-  // Tight create-body schema. Service still resolves senderBranchId default
-  // and normalizes per-line metadata (productName, variant lookup, etc.) but
-  // shape is enforced at the gateway. `update` keeps the same item-array
-  // schema for consistency.
+  // Zod v4 bodies — Arc auto-converts to JSON Schema at registration. Service
+  // still resolves senderBranchId default and normalizes per-line metadata
+  // (productName, variant lookup, etc.) but shape is enforced at the gateway.
   customSchemas: {
-    create: {
-      body: {
-        type: 'object',
-        required: ['receiverBranchId', 'items'],
-        additionalProperties: false,
-        properties: {
-          senderBranchId: { type: 'string' },
-          receiverBranchId: { type: 'string' },
-          documentType: {
-            type: 'string',
-            enum: ['delivery_note', 'dispatch_note', 'delivery_slip'],
-          },
-          remarks: { type: 'string' },
-          items: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['productId', 'quantity'],
-              additionalProperties: false,
-              properties: {
-                productId: { type: 'string' },
-                variantSku: { type: ['string', 'null'] },
-                quantity: { type: 'number', minimum: 0 },
-                cartonNumber: { type: 'string' },
-                sourceLocationId: { type: 'string' },
-                destinationLocationId: { type: 'string' },
-              },
-            },
-          },
-        },
-      },
-    },
-    update: {
-      body: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          remarks: { type: 'string' },
-          documentType: {
-            type: 'string',
-            enum: ['delivery_note', 'dispatch_note', 'delivery_slip'],
-          },
-          items: {
-            type: 'array',
-            items: {
-              type: 'object',
-              required: ['productId', 'quantity'],
-              additionalProperties: false,
-              properties: {
-                productId: { type: 'string' },
-                variantSku: { type: ['string', 'null'] },
-                quantity: { type: 'number', minimum: 0 },
-                cartonNumber: { type: 'string' },
-                sourceLocationId: { type: 'string' },
-                destinationLocationId: { type: 'string' },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-
-  schemaOptions: {
-    fieldRules: {
-      documentNumber: { systemManaged: true },
-      status: { systemManaged: true },
-      totalItems: { systemManaged: true },
-      totalQuantity: { systemManaged: true },
-      totalValue: { systemManaged: true },
-      statusHistory: { systemManaged: true },
-      createdBy: { systemManaged: true },
-      approvedBy: { systemManaged: true },
-      dispatchedBy: { systemManaged: true },
-      receivedBy: { systemManaged: true },
-    },
+    create: { body: createSchema.body },
+    update: { body: updateSchema.body },
   },
 
   actions: {
@@ -138,15 +68,9 @@ const transferResource = defineResource({
         return transferService.dispatchTransfer(id, (data.transport || data) as any, uid);
       },
       permissions: permissions.inventory.transferDispatch,
-      // Transport details are optional — callers can skip for simple
-      // point-to-point transfers. Use the full JSON Schema form with an
-      // empty `required` array so AJV accepts the payload when transport
-      // is omitted (legacy field-map form treats every field as required).
-      schema: {
-        type: 'object',
-        properties: { transport: { type: 'object', description: 'Transport details' } },
-        required: [],
-      },
+      // Transport details are optional — simple point-to-point transfers
+      // can omit them entirely.
+      schema: dispatchActionSchema,
     },
     'in-transit': {
       handler: async (id, _data, req) => {
@@ -162,11 +86,7 @@ const transferResource = defineResource({
       },
       permissions: permissions.inventory.transferReceive,
       // items optional — omitted means "receive everything in the dispatch".
-      schema: {
-        type: 'object',
-        properties: { items: { type: 'array', description: 'Received items with quantities' } },
-        required: [],
-      },
+      schema: receiveActionSchema,
     },
     cancel: {
       handler: async (id, data, req) => {
@@ -174,11 +94,7 @@ const transferResource = defineResource({
         return transferService.cancelTransfer(id, data.reason as string | undefined, uid);
       },
       permissions: permissions.inventory.transferCancel,
-      schema: {
-        type: 'object',
-        properties: { reason: { type: 'string', description: 'Cancellation reason' } },
-        required: [],
-      },
+      schema: cancelActionSchema,
     },
   },
 

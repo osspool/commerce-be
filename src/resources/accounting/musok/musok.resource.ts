@@ -6,7 +6,7 @@
  * State transitions (cancel) via declarative actions.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
 import {
   monthlyReturnParamsSchema,
@@ -15,7 +15,7 @@ import {
   validateBinParamsSchema,
 } from '@classytic/bd-tax';
 import { QueryParser } from '@classytic/mongokit';
-import { createAdapter } from '#shared/adapter.js';
+import { z } from 'zod';
 import { orgScoped } from '#shared/presets/index.js';
 import {
   cancelMusokInvoice,
@@ -40,7 +40,7 @@ const musokResource = defineResource({
   prefix: '/accounting/musok',
   audit: true,
 
-  adapter: createAdapter(MusokInvoice, musokInvoiceRepository),
+  adapter: createMongooseAdapter(MusokInvoice, musokInvoiceRepository),
   queryParser,
   presets: [orgScoped],
 
@@ -66,17 +66,11 @@ const musokResource = defineResource({
     },
   },
 
-  // State transition — Stripe pattern. Arc's action schema uses a field
-  // descriptor shape rather than a Zod object (different from routes.schema).
-  // The canonical Zod contract (`cancelMusokActionSchema`) is still exported
-  // from bd-vat for SDK / frontend use; this descriptor mirrors it.
   actions: {
     cancel: {
       handler: async (id, data) => cancelMusokInvoice(id, data),
       permissions: requireRoles('admin', 'finance_admin'),
-      schema: {
-        reason: { type: 'string', description: 'Cancellation reason' },
-      },
+      schema: z.object({ reason: z.string().optional() }),
     },
   },
 

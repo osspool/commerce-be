@@ -1,11 +1,18 @@
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
+import { z } from 'zod';
 import crmPermissions from '#config/permissions/crm.js';
-import { createAdapter } from '#shared/adapter.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { convertLead, disqualifyLead, markLeadContacted, nurtureLead, qualifyLead } from './lead.actions.js';
 import CrmLead from './lead.model.js';
 import crmLeadRepository from './lead.repository.js';
+
+// `.loose()` matches the comment below: "additionalProperties is permissive".
+// Zod v4 defaults objects to strict in JSON Schema output, so without this the
+// AJV `oneOf` validator rejects extras (e.g. convert payload's `amount`).
+const emptyBody = z.object({}).loose();
+const disqualifyBody = z.object({ reason: z.string().optional() }).loose();
+const convertBody = z.object({ pipelineId: z.string().optional() }).loose();
 
 /**
  * Lead lifecycle transitions (`new → contacted → qualified → converted`,
@@ -24,7 +31,7 @@ const crmLeadResource = defineResource({
   prefix: '/crm/leads',
   audit: true,
 
-  adapter: createAdapter(CrmLead, crmLeadRepository),
+  adapter: createMongooseAdapter(CrmLead, crmLeadRepository),
   presets: [orgScoped],
 
   // `fullName` is client-provided. `status` / `statusHistory` / `score` and
@@ -54,31 +61,27 @@ const crmLeadResource = defineResource({
     markContacted: {
       handler: markLeadContacted,
       permissions: crmPermissions.lead.update,
-      schema: {},
+      schema: emptyBody,
     },
     qualify: {
       handler: qualifyLead,
       permissions: crmPermissions.lead.update,
-      schema: {},
+      schema: emptyBody,
     },
     disqualify: {
       handler: disqualifyLead,
       permissions: crmPermissions.lead.update,
-      schema: {
-        reason: { type: 'string', description: 'Why the lead is being disqualified' },
-      },
+      schema: disqualifyBody,
     },
     nurture: {
       handler: nurtureLead,
       permissions: crmPermissions.lead.update,
-      schema: {},
+      schema: emptyBody,
     },
     convert: {
       handler: convertLead,
       permissions: crmPermissions.lead.update,
-      schema: {
-        pipelineId: { type: 'string', description: 'Target pipeline id' },
-      },
+      schema: convertBody,
     },
   },
 });

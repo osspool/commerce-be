@@ -53,14 +53,13 @@ export function createReturnOrderResource() {
     displayName: 'Customer Returns (RMA)',
     tag: 'Warehouse - Returns',
     prefix: '/inventory/returns',
-    // Arc 2.10.7 auto-injects systemManaged/preserveForElevated on this field.
-    tenantField: 'organizationId',
 
     adapter: createFlowAdapter(engine.models.ReturnOrder, engine.repositories.returnOrder, {
       // Server-managed lifecycle fields — Arc must not require them in the
       // create body. Matches the `*At`/`*By` timestamps the service fills
       // during FSM transitions.
       fieldRules: {
+        organizationId: { systemManaged: true },
         returnNumber: { systemManaged: true },
         status: { systemManaged: true },
         createdBy: { systemManaged: true },

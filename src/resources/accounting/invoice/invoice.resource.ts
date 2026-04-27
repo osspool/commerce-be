@@ -5,33 +5,25 @@
  * QueryParser gives free filtering by status, moveType, partnerId, paymentStatus.
  *
  * State transitions (post, cancel, void, record_payment, credit_note, etc.)
- * handled by createActionRouter registered in accounting.plugin.ts.
+ * via the declarative `actions:` block — Arc auto-mounts POST /:id/action.
  *
  * Only custom routes (aging, receipt, dunning, recurring, document) are hand-wired.
  * Feature-gated: INVOICE_ENGINE env var.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
-import { QueryParser } from '@classytic/mongokit';
+import { buildCrudSchemasFromModel, QueryParser } from '@classytic/mongokit';
 import config from '#config/index.js';
-import { createAdapter } from '#shared/adapter.js';
 import {
   batchCancel,
   batchCreate,
   batchPost,
   batchRecordPayment,
-  computeInstallmentSchedule,
-  createPaymentTerm,
   createReceipt,
-  createRecurring,
   getAgingReport,
   getDocumentData,
   getOverdueInvoices,
-  getPaymentTerm,
-  getPendingApprovals,
-  listPaymentTerms,
-  listRecurring,
   processDunning,
   processRecurring,
 } from './invoice.handlers.js';
@@ -98,8 +90,14 @@ export async function buildInvoiceResource(
     // but leave the `required` array so clients may omit them. `currency`
     // defaults to BDT from the engine; the invoice numbering/status fields
     // are system-managed by the state machine and shouldn't block PATCH.
-    adapter: createAdapter(model, repo, {
-      softRequiredFields: ['currency'],
+    adapter: createMongooseAdapter({
+      model,
+      repository: repo,
+      schemaGenerator: (m, arcOptions) =>
+        buildCrudSchemasFromModel(m, {
+          ...(arcOptions as Record<string, unknown>),
+          softRequiredFields: ['currency'],
+        } as Parameters<typeof buildCrudSchemasFromModel>[1]),
     }),
     queryParser,
 
@@ -172,22 +170,9 @@ export async function buildInvoiceResource(
         raw: true,
         handler: processDunning,
       },
-      {
-        method: 'GET',
-        path: '/recurring',
-        summary: 'List recurring configs',
-        permissions: authenticated,
-        raw: true,
-        handler: listRecurring,
-      },
-      {
-        method: 'POST',
-        path: '/recurring',
-        summary: 'Create recurring config',
-        permissions: financeRoles,
-        raw: true,
-        handler: createRecurring,
-      },
+      // RecurringInvoice CRUD lives at /accounting/recurring-invoices —
+      // see recurring-invoice.resource.ts. The /process workflow trigger
+      // stays here because it fans out across active configs (not per-id).
       {
         method: 'POST',
         path: '/recurring/process',
@@ -212,15 +197,8 @@ export async function buildInvoiceResource(
         raw: true,
         handler: (await import('./invoice.handlers.js')).downloadPdf,
       },
-      // ── Approval ──
-      {
-        method: 'GET',
-        path: '/approvals/pending',
-        summary: 'List invoices pending approval',
-        permissions: financeRoles,
-        raw: true,
-        handler: getPendingApprovals,
-      },
+      // Pending approvals: use auto-CRUD list with `?approvalStatus=pending`
+      // (already in queryParser.allowedFilterFields). No custom route needed.
       // ── Batch Operations ──
       {
         method: 'POST',
@@ -254,39 +232,8 @@ export async function buildInvoiceResource(
         raw: true,
         handler: batchCancel,
       },
-      // ── Payment Terms ──
-      {
-        method: 'GET',
-        path: '/payment-terms',
-        summary: 'List payment terms',
-        permissions: authenticated,
-        raw: true,
-        handler: listPaymentTerms,
-      },
-      {
-        method: 'POST',
-        path: '/payment-terms',
-        summary: 'Create payment term',
-        permissions: financeRoles,
-        raw: true,
-        handler: createPaymentTerm,
-      },
-      {
-        method: 'GET',
-        path: '/payment-terms/:id',
-        summary: 'Get payment term by ID',
-        permissions: authenticated,
-        raw: true,
-        handler: getPaymentTerm,
-      },
-      {
-        method: 'POST',
-        path: '/payment-terms/:id/schedule',
-        summary: 'Compute installment schedule for a payment term',
-        permissions: authenticated,
-        raw: true,
-        handler: computeInstallmentSchedule,
-      },
+      // PaymentTerm CRUD + /:id/schedule live at /accounting/payment-terms —
+      // see payment-term.resource.ts.
     ],
   });
 }

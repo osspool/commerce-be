@@ -1,4 +1,5 @@
 import {
+  type AnyRecord,
   BaseController,
   type IControllerResponse,
   type IRequestContext,
@@ -22,9 +23,9 @@ interface GetMyReviewRequest extends RequestWithExtras {
 
 /**
  * Review Controller
- * Standard CRUD + custom create with verified purchase check
+ * Standard CRUD + custom create with verified purchase check.
  */
-class ReviewController extends BaseController<IReview> {
+class ReviewController extends BaseController<IReview & AnyRecord> {
   constructor() {
     super(reviewRepository, {
       schemaOptions: reviewSchemaOptions as unknown as RouteSchemaOptions,

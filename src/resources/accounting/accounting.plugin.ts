@@ -26,11 +26,6 @@ const accountingPlugin: FastifyPluginAsync = async (_fastify) => {
   // Event handlers (subscribes to commerce events for auto-posting)
   registerAccountingEventHandlers();
 
-  // Preload day-close state into in-process cache (non-blocking)
-  import('./posting/day-close-state.service.js')
-    .then(({ warmCache }) => warmCache())
-    .catch((err) => logger.warn({ err }, 'Failed to warm day-close cache'));
-
   logger.info(
     { mode: config.accounting.mode, fiscalYearStart: config.accounting.fiscalYearStartMonth },
     'Accounting bootstrap complete',

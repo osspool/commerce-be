@@ -15,12 +15,12 @@
  * Same pattern as pricelist.resource.ts and order.resource.ts.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { ArcError, handleRaw } from '@classytic/arc/utils';
-import type { CreateRewardInput, EvaluateInput, GenerateCodesInput, GenerateSingleCodeInput } from '@classytic/promo';
+import type { EvaluateInput, GenerateCodesInput, GenerateSingleCodeInput } from '@classytic/promo';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import { ensurePromoEngine } from './promo.plugin.js';
 
 // ── Top-level engine + adapter wiring ───────────────────────────────────────
@@ -29,9 +29,9 @@ import { ensurePromoEngine } from './promo.plugin.js';
 
 const promoEngine = ensurePromoEngine();
 
-const programAdapter = createAdapter(promoEngine.models.Program as never, promoEngine.repositories.program as never);
+const programAdapter = createMongooseAdapter(promoEngine.models.Program as never, promoEngine.repositories.program as never);
 
-const voucherAdapter = createAdapter(promoEngine.models.Voucher as never, promoEngine.repositories.voucher as never);
+const voucherAdapter = createMongooseAdapter(promoEngine.models.Voucher as never, promoEngine.repositories.voucher as never);
 
 function engine() {
   return promoEngine;
@@ -89,10 +89,35 @@ function promoRoute<T>(fn: (req: FastifyRequest, reply: FastifyReply) => Promise
   }, statusCode);
 }
 
+/**
+ * Same error-mapping as `promoRoute`, shaped for arc's declarative `actions:`
+ * handlers (`(id, data, req) => Promise<unknown>`). arc's action router reads
+ * `err.statusCode` + `err.code` on the thrown error — wrapping in `ArcError`
+ * gives both, with the right HTTP code for promo's domain errors.
+ */
+function promoAction<T>(
+  fn: (id: string, data: Record<string, unknown>, req: FastifyRequest) => Promise<T>,
+) {
+  return async (id: string, data: Record<string, unknown>, req: FastifyRequest): Promise<T> => {
+    try {
+      return await fn(id, data, req);
+    } catch (err) {
+      if (err instanceof ArcError) throw err;
+      const e = err as Error & { code?: string; statusCode?: number };
+      throw new ArcError(e.message, {
+        code: e.code ?? 'PROMO_ERROR',
+        statusCode: e.statusCode ?? statusForCode(e.code),
+      });
+    }
+  };
+}
+
 // ── Program Resource ────────────────────────────────────────────────────────
 // Arc auto-generates: GET /, GET /:id, POST /, PATCH /:id, DELETE /:id
 // Actions: activate, pause, archive (Stripe pattern).
-// Custom routes: composite view, sub-resource CRUD (rules, rewards).
+// Custom routes: composite view only. Rule/Reward CRUD lives at top-level
+// `/promotions/rules` and `/promotions/rewards` — see rule.resource.ts and
+// reward.resource.ts. Filter via `?programId=<id>` to scope to a program.
 
 export const programResource = defineResource({
   name: 'promo-program',
@@ -146,88 +171,14 @@ export const programResource = defineResource({
         return { ...program, rules, rewards };
       }),
     },
-    // ── Sub-resource: Rules ──
-    {
-      method: 'POST',
-      path: '/:id/rules',
-      summary: 'Add rule to program',
-      permissions: permissions.promotions.programs.update,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { id } = req.params as { id: string };
-        return engine().repositories.rule.create({
-          ...(req.body as Record<string, unknown>),
-          programId: id,
-        });
-      }, 201),
-    },
-    {
-      method: 'PUT',
-      path: '/:id/rules/:ruleId',
-      summary: 'Update rule',
-      permissions: permissions.promotions.programs.update,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { ruleId } = req.params as { id: string; ruleId: string };
-        return engine().repositories.rule.update(ruleId, req.body as Record<string, unknown>, { lean: true });
-      }),
-    },
-    {
-      method: 'DELETE',
-      path: '/:id/rules/:ruleId',
-      summary: 'Remove rule',
-      permissions: permissions.promotions.programs.update,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { ruleId } = req.params as { id: string; ruleId: string };
-        await engine().repositories.rule.delete(ruleId);
-        return { message: 'Rule removed' };
-      }),
-    },
-    // ── Sub-resource: Rewards ──
-    {
-      method: 'POST',
-      path: '/:id/rewards',
-      summary: 'Add reward to program',
-      permissions: permissions.promotions.programs.update,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { id } = req.params as { id: string };
-        return engine().repositories.reward.create({
-          ...(req.body as CreateRewardInput),
-          programId: id,
-        });
-      }, 201),
-    },
-    {
-      method: 'PUT',
-      path: '/:id/rewards/:rewardId',
-      summary: 'Update reward',
-      permissions: permissions.promotions.programs.update,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { rewardId } = req.params as { id: string; rewardId: string };
-        return engine().repositories.reward.update(rewardId, req.body as Record<string, unknown>, { lean: true });
-      }),
-    },
-    {
-      method: 'DELETE',
-      path: '/:id/rewards/:rewardId',
-      summary: 'Remove reward',
-      permissions: permissions.promotions.programs.update,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { rewardId } = req.params as { id: string; rewardId: string };
-        await engine().repositories.reward.delete(rewardId);
-        return { message: 'Reward removed' };
-      }),
-    },
   ],
 });
 
 // ── Voucher Resource ────────────────────────────────────────────────────────
 // Arc auto-generates: GET /, GET /:id
-// Custom routes: generate, validate, cancel, lookup by code.
+// Actions: cancel (Stripe pattern → POST /:id/action { action: "cancel" }).
+// Custom routes: generate, generate-single, validate-by-code, lookup-by-code
+// — none fit Arc's id-scoped CRUD/action shape.
 
 export const voucherResource = defineResource({
   name: 'promo-voucher',
@@ -239,6 +190,14 @@ export const voucherResource = defineResource({
   permissions: {
     list: permissions.promotions.vouchers.list,
     get: permissions.promotions.vouchers.get,
+  },
+  actions: {
+    cancel: {
+      handler: promoAction(async (id, _data, req) =>
+        engine().repositories.voucher.cancel(id, ctx(req)),
+      ),
+      permissions: permissions.promotions.vouchers.cancel,
+    },
   },
   routes: [
     {
@@ -289,22 +248,14 @@ export const voucherResource = defineResource({
         return data;
       }),
     },
-    {
-      method: 'POST',
-      path: '/:id/cancel',
-      summary: 'Cancel voucher',
-      permissions: permissions.promotions.vouchers.cancel,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { id } = req.params as { id: string };
-        return engine().repositories.voucher.cancel(id, ctx(req));
-      }),
-    },
   ],
 });
 
 // ── Evaluation Resource ─────────────────────────────────────────────────────
-// No model, no adapter — pure service orchestration.
+// No model, no adapter — pure service orchestration. Actions handle the
+// id-scoped state transitions (commit, rollback); the two non-id-scoped
+// routes (preview, evaluate-create) stay raw because Arc actions are
+// always `:id`-bound.
 
 export const evaluationResource = defineResource({
   name: 'promo-evaluation',
@@ -312,6 +263,30 @@ export const evaluationResource = defineResource({
   tag: 'Promotions',
   prefix: '/promotions/evaluate',
   disableDefaultRoutes: true,
+  actions: {
+    commit: {
+      handler: promoAction(async (id, data, req) => {
+        const { orderId, cartHash } = data as { orderId: string; cartHash?: string };
+        // Forward `cartHash` when the client sends it — engine throws
+        // CART_HASH_MISMATCH (→ 409) if the cart changed between evaluate
+        // and commit. Classic tamper guard; see
+        // packages/promo/src/services/evaluation.service.ts.
+        return engine().services.evaluation.commit(id, orderId, ctx(req), cartHash ? { cartHash } : {});
+      }),
+      permissions: permissions.promotions.evaluation.evaluate,
+      schema: z.object({
+        orderId: z.string(),
+        cartHash: z.string().optional(),
+      }),
+    },
+    rollback: {
+      handler: promoAction(async (id, _data, req) => {
+        await engine().services.evaluation.rollback(id, ctx(req));
+        return { message: 'Rolled back' };
+      }),
+      permissions: permissions.promotions.evaluation.evaluate,
+    },
+  },
   routes: [
     {
       method: 'POST',
@@ -331,34 +306,6 @@ export const evaluationResource = defineResource({
         async (req) => engine().services.evaluation.evaluate(req.body as EvaluateInput, ctx(req)),
         201,
       ),
-    },
-    {
-      method: 'POST',
-      path: '/:evaluationId/commit',
-      summary: 'Commit evaluation to order',
-      permissions: permissions.promotions.evaluation.evaluate,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { evaluationId } = req.params as { evaluationId: string };
-        const { orderId, cartHash } = req.body as { orderId: string; cartHash?: string };
-        // Forward `cartHash` when the client sends it — engine throws
-        // CART_HASH_MISMATCH (→ 409) if the cart changed between evaluate
-        // and commit. Classic tamper guard; see
-        // packages/promo/src/services/evaluation.service.ts.
-        return engine().services.evaluation.commit(evaluationId, orderId, ctx(req), cartHash ? { cartHash } : {});
-      }),
-    },
-    {
-      method: 'POST',
-      path: '/:evaluationId/rollback',
-      summary: 'Rollback evaluation',
-      permissions: permissions.promotions.evaluation.evaluate,
-      raw: true,
-      handler: promoRoute(async (req) => {
-        const { evaluationId } = req.params as { evaluationId: string };
-        await engine().services.evaluation.rollback(evaluationId, ctx(req));
-        return { message: 'Rolled back' };
-      }),
     },
   ],
 });

@@ -14,10 +14,9 @@ export async function registerAfterResources(fastify: FastifyInstance): Promise<
     shutdownCron();
   });
 
-  if (isFeatureEnabled('accounting') && config.accounting?.enabled && config.accounting?.mode !== 'simple') {
-    const { registerDayCloseHook } = await import('#resources/accounting/posting/day-close.hook.js');
-    registerDayCloseHook(fastify);
-  }
+  // Legacy onRequest day-close hook deleted — POS posting is now driven
+  // by `@classytic/pos`'s shift-close LedgerBridge. Stale shifts are
+  // recovered by the orphan-shift cron, not by per-request side effects.
 
   if (isInlineWorkerMode) {
     await initializeBackgroundRuntime({

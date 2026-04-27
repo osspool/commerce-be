@@ -8,15 +8,23 @@
  *    (`status[eq]=active`, `basePrice[gte]=100`), safe sort/page/limit
  *    parsing, ReDoS-guarded search, and a consistent shape across the
  *    codebase with zero duplication.
- * 2. DB-paginated product query via mongokit `getAll` → canonical
+ * 2. If `inStockOnly` / `lowStockOnly` is set, resolve the set of
+ *    skuRefs with positive stock at the branch's default location via
+ *    Flow's quant repo, and narrow the catalog filter to products whose
+ *    `_id` or `variants.sku` matches. This makes pagination counts
+ *    accurate (previously the filter ran AFTER the DB page, which
+ *    produced inflated `total` + near-empty pages).
+ * 3. DB-paginated product query via mongokit `getAll` → canonical
  *    `OffsetPaginationResult` envelope
  *    (`{ docs, page, limit, total, pages, hasNext, hasPrev }`).
- * 3. Enrich the paginated page with branch stock via catalog's
+ * 4. Enrich the paginated page with branch stock via catalog's
  *    InventoryBridge (single batch query over Flow quants, `$in`-scoped
  *    to the page's skuRefs).
- * 4. Optional in-memory `inStockOnly`/`lowStockOnly` trim of the
- *    enriched page. This distorts `docs.length` but NOT `total` — see
- *    caveat below.
+ * 5. `lowStockOnly` still refines post-enrichment because the aggregate
+ *    per-product threshold depends on the summed qty across variants,
+ *    which the pre-filter can only approximate. The working set is
+ *    already narrowed to products with some stock, so the refinement is
+ *    cheap and the over-counting on `total` is bounded.
  *
  * ### Why a raw handler, not Arc's BaseController.list
  * `/pos/products` owns three cross-cutting concerns that the
@@ -36,18 +44,17 @@
  * envelope the SDK / Fluid DataTable no longer read. `getAll` pushes
  * pagination to MongoDB via mongokit's `PaginationEngine`.
  *
- * ### Stock-filter caveat
- * `inStockOnly` / `lowStockOnly` run AFTER the DB page lands, so a page
- * may return fewer items than `limit` while `total`/`pages` still
- * reflect the catalog-level filter. Pushing stock into the aggregate
- * needs a `$lookup` over `stock_quants` with `$unwind` for variant
- * joins and per-branch `locationId` correlation — deferred until a
- * concrete perf/UX requirement justifies coupling catalog to Flow's
- * collection names.
+ * ### Why skuRef pre-filter instead of a `$lookup` on `stock_quants`
+ * A `$lookup` would couple catalog queries to Flow's collection names
+ * and require `$unwind` over variants. The skuRef pre-filter keeps the
+ * coupling at the repository-method level (Flow's public `quant.findMany`
+ * API) and typically produces a small `$in` set — on the order of the
+ * count of stocked SKUs in the branch, not the whole catalog.
  */
 
 import type { BranchStock } from '@classytic/catalog';
 import type { OffsetPaginationResult } from '@classytic/mongokit';
+import mongoose from 'mongoose';
 import { ensureCatalogEngine, getCatalogInventoryBridge } from '#resources/catalog/catalog.engine.js';
 import { queryParser } from '#shared/query-parser.js';
 
@@ -153,6 +160,58 @@ async function resolveParentCategoryFilter(
   return slugs.length === 1 ? slugs[0] : { $in: slugs };
 }
 
+/**
+ * Resolve the set of skuRefs that have any positive on-hand stock at the
+ * branch's default `stock` location. Used to push `inStockOnly` /
+ * `lowStockOnly` down to the catalog filter so pagination counts match
+ * visible rows.
+ *
+ * Scoped to `locationId='stock'` to match how `enrichWithStock` computes
+ * `branchStock.inStock` — including vendor/customer/adjustment locations
+ * would cause products to appear in-stock in the browse list while still
+ * rendering with `branchStock.inStock=false` after enrichment.
+ */
+async function resolveBranchStockSkuRefs(branchId: string): Promise<string[]> {
+  const [{ getFlowEngine }, { buildFlowContext, DEFAULT_LOCATION }] = await Promise.all([
+    import('#resources/inventory/flow/flow-engine.js'),
+    import('#resources/inventory/flow/context-helpers.js'),
+  ]);
+  const flow = getFlowEngine();
+  const ctx = buildFlowContext(branchId);
+  const quants = (await flow.repositories.quant.findMany(
+    { locationId: DEFAULT_LOCATION, quantityOnHand: { $gt: 0 } },
+    ctx,
+  )) as Array<{ skuRef: string }> | undefined;
+  if (!quants?.length) return [];
+  const uniq = new Set<string>();
+  for (const q of quants) if (q.skuRef) uniq.add(q.skuRef);
+  return [...uniq];
+}
+
+/**
+ * Build a catalog match clause that restricts products to those whose
+ * `_id` or any `variants.sku` is in the given skuRef set.
+ *
+ * `skuRef` can be a variant sku (arbitrary string like `THEAZURE-XL`) or
+ * a simple product's `_id` as a hex string. Catalog stores `_id` as
+ * `ObjectId`, so coerce the convertible subset and leave the raw-string
+ * branch for schemas that keep `_id` as a plain string.
+ */
+function buildStockPrefilterClause(skuRefs: string[]): Record<string, unknown> {
+  const oidCandidates: mongoose.Types.ObjectId[] = [];
+  for (const s of skuRefs) {
+    if (mongoose.Types.ObjectId.isValid(s)) {
+      try { oidCandidates.push(new mongoose.Types.ObjectId(s)); } catch { /* noop */ }
+    }
+  }
+  return {
+    $or: [
+      ...(oidCandidates.length ? [{ _id: { $in: oidCandidates } }] : []),
+      { 'variants.sku': { $in: skuRefs } },
+    ],
+  };
+}
+
 export async function getPosProducts(
   branchId: string,
   rawQuery: Record<string, unknown> = {},
@@ -194,6 +253,38 @@ export async function getPosProducts(
   const limit = Math.min(Math.max(1, parsedLimit), MAX_PAGE_SIZE);
   const page = Math.max(1, parsedPage);
 
+  // Push `inStockOnly` / `lowStockOnly` down to the DB by pre-resolving
+  // the branch's in-stock skuRefs. Narrows `catalog_products` via
+  // `_id $in [...]` and/or `variants.sku $in [...]` BEFORE pagination —
+  // so `total`/`pages` reflect the stock-filtered set and the visible
+  // row count matches the page size. Short-circuit when the branch has
+  // no stock at all (common after bootstrap).
+  if (pos.inStockOnly || pos.lowStockOnly) {
+    const stockSkuRefs = await resolveBranchStockSkuRefs(branchId);
+    if (stockSkuRefs.length === 0) {
+      return {
+        method: 'offset',
+        docs: [],
+        page,
+        limit,
+        total: 0,
+        pages: 0,
+        hasNext: false,
+        hasPrev: false,
+      };
+    }
+    const stockClause = buildStockPrefilterClause(stockSkuRefs);
+    // Merge under `$and` if a search `$or` is already present — top-level
+    // `$or` would otherwise be clobbered by reassignment.
+    if (filters.$or) {
+      const existingAnd = Array.isArray(filters.$and) ? (filters.$and as unknown[]) : [];
+      filters.$and = [...existingAnd, { $or: filters.$or }, stockClause];
+      delete filters.$or;
+    } else {
+      Object.assign(filters, stockClause);
+    }
+  }
+
   // `getAll` auto-detects pagination mode from params (page+limit → offset).
   // `mode: 'offset'` keeps intent explicit so the union return type narrows
   // — `ProductDocument[]` / `KeysetPaginationResult` branches are unreachable.
@@ -225,9 +316,12 @@ export async function getPosProducts(
     })) as ProductWithStock[];
   }
 
-  if (pos.inStockOnly) {
-    enrichedDocs = enrichedDocs.filter((p) => p.branchStock.inStock);
-  }
+  // `inStockOnly` is 100% handled by the DB pre-filter above.
+  // `lowStockOnly` still needs a post-pass because the aggregate
+  // per-product threshold (`qty > 0 && qty <= reorderPoint`) depends on
+  // the summed qty across variants, which the per-skuRef pre-filter can
+  // only approximate. The working set is already narrowed to products
+  // with positive stock, so this refinement is bounded.
   if (pos.lowStockOnly) {
     enrichedDocs = enrichedDocs.filter((p) => p.branchStock.lowStock);
   }

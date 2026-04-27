@@ -1,54 +1,24 @@
 /**
- * Payment Webhook Schemas
- * Request validation schemas only (JSON Schema format for Fastify validation)
+ * Payment Webhook Schemas — Zod v4. Arc auto-converts via
+ * `z.toJSONSchema()` at registration (Fastify validation + OpenAPI).
  */
+import { z } from 'zod';
 
-export const manualVerificationBody = {
-  type: 'object',
-  required: ['transactionId'],
-  properties: {
-    transactionId: {
-      type: 'string',
-      pattern: '^[0-9a-fA-F]{24}$',
-      description: 'Transaction ID to verify',
-    },
-    notes: {
-      type: 'string',
-      maxLength: 500,
-      description: 'Optional verification notes',
-    },
-  },
-} as const;
+const objectIdPattern = /^[0-9a-fA-F]{24}$/;
 
-export const manualRejectionBody = {
-  type: 'object',
-  required: ['transactionId', 'reason'],
-  properties: {
-    transactionId: {
-      type: 'string',
-      pattern: '^[0-9a-fA-F]{24}$',
-      description: 'Transaction ID to reject',
-    },
-    reason: {
-      type: 'string',
-      minLength: 3,
-      maxLength: 500,
-      description: 'Reason for rejection (e.g., invalid TrxID, fraud)',
-    },
-  },
-} as const;
+export const manualVerificationBody = z.object({
+  transactionId: z.string().regex(objectIdPattern),
+  notes: z.string().max(500).optional(),
+});
 
-export const providerParams = {
-  type: 'object',
-  required: ['provider'],
-  properties: {
-    provider: {
-      type: 'string',
-      description: 'Payment provider name (stripe, sslcommerz, bkash, nagad)',
-      examples: ['stripe', 'sslcommerz', 'bkash', 'nagad'],
-    },
-  },
-} as const;
+export const manualRejectionBody = z.object({
+  transactionId: z.string().regex(objectIdPattern),
+  reason: z.string().min(3).max(500),
+});
+
+export const providerParams = z.object({
+  provider: z.string(),
+});
 
 export default {
   manualVerificationBody,

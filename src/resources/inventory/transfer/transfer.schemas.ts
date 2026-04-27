@@ -1,213 +1,72 @@
 /**
- * Transfer Validation Schemas
+ * Transfer Route Schemas — Zod v4. Arc auto-converts via `z.toJSONSchema()`
+ * at registration (Fastify validation + OpenAPI). No manual JSON Schema.
  *
- * JSON Schema definitions for transfer API endpoints.
+ * Shape enforced at the gateway; `transfer.service` still normalizes
+ * (senderBranchId default, productName/variant lookup, totals).
  */
+import { z } from 'zod';
 
-const transferItemSchema = {
-  type: 'object',
-  properties: {
-    productId: { type: 'string', description: 'Product ID' },
-    variantSku: { type: 'string', nullable: true, description: 'Variant SKU (null for simple products)' },
-    cartonNumber: { type: 'string', description: 'Carton number reference' },
-    quantity: { type: 'integer', minimum: 1, description: 'Quantity to transfer' },
-    costPrice: { type: 'number', minimum: 0, description: 'Cost price per unit' },
-    notes: { type: 'string', description: 'Item notes' },
-    sourceLocationId: {
-      type: 'string',
-      description:
-        'Sender-branch Location _id to pull stock from. Defaults to the sender default stock bin.',
-    },
-    destinationLocationId: {
-      type: 'string',
-      description:
-        'Receiver-branch Location _id to drop stock into. Defaults to the receiver default stock bin.',
-    },
-  },
-  required: ['productId', 'quantity'],
-} as const;
+const documentType = z.enum(['delivery_note', 'dispatch_note', 'delivery_slip']);
 
-const receivedItemSchema = {
-  type: 'object',
-  properties: {
-    itemId: { type: 'string', description: 'Transfer item ID' },
-    productId: { type: 'string', description: 'Product ID (alternative to itemId)' },
-    variantSku: { type: 'string', nullable: true },
-    quantityReceived: { type: 'integer', minimum: 0, description: 'Quantity actually received' },
-    destinationLocationId: {
-      type: 'string',
-      description:
-        'Override the receiver location for this line at receive time (defaults to the line\'s planned destinationLocationId).',
-    },
-  },
-} as const;
+const transferItem = z
+  .object({
+    productId: z.string(),
+    variantSku: z.string().nullable().optional(),
+    quantity: z.number().min(0),
+    cartonNumber: z.string().optional(),
+    costPrice: z.number().min(0).optional(),
+    notes: z.string().optional(),
+    sourceLocationId: z.string().optional(),
+    destinationLocationId: z.string().optional(),
+  })
+  .strict();
 
-const transportSchema = {
-  type: 'object',
-  properties: {
-    vehicleNumber: { type: 'string' },
-    driverName: { type: 'string' },
-    driverPhone: { type: 'string' },
-    estimatedArrival: { type: 'string', format: 'date-time' },
-    notes: { type: 'string' },
-  },
-} as const;
+const receivedItem = z
+  .object({
+    itemId: z.string().optional(),
+    productId: z.string().optional(),
+    variantSku: z.string().nullable().optional(),
+    quantityReceived: z.number().int().min(0).optional(),
+    destinationLocationId: z.string().optional(),
+  })
+  .strict();
 
-// Create Transfer
-export const createTransferSchema = {
-  body: {
-    type: 'object',
-    properties: {
-      senderBranchId: {
-        type: 'string',
-        description: 'Head office branch ID (defaults to configured head office if omitted)',
-      },
-      receiverBranchId: { type: 'string', description: 'Sub-branch ID' },
-      items: {
-        type: 'array',
-        items: transferItemSchema,
-        minItems: 1,
-        description: 'Items to transfer',
-      },
-      documentType: {
-        type: 'string',
-        enum: ['delivery_note', 'dispatch_note', 'delivery_slip'],
-        default: 'delivery_note',
-      },
-      remarks: { type: 'string' },
-    },
-    required: ['receiverBranchId', 'items'],
-  },
-  response: {
-    201: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean' },
-        data: { type: 'object', additionalProperties: true },
-      },
-    },
-  },
-} as const;
+const transport = z
+  .object({
+    vehicleNumber: z.string().optional(),
+    driverName: z.string().optional(),
+    driverPhone: z.string().optional(),
+    estimatedArrival: z.string().optional(),
+    notes: z.string().optional(),
+  })
+  .strict();
 
-// Update Transfer (draft only)
-export const updateTransferSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  body: {
-    type: 'object',
-    properties: {
-      items: {
-        type: 'array',
-        items: transferItemSchema,
-        minItems: 1,
-      },
-      documentType: {
-        type: 'string',
-        enum: ['delivery_note', 'dispatch_note', 'delivery_slip'],
-      },
-      remarks: { type: 'string' },
-      transport: transportSchema,
-    },
-  },
-} as const;
+export const createSchema = {
+  body: z
+    .object({
+      senderBranchId: z.string().optional(),
+      receiverBranchId: z.string(),
+      documentType: documentType.optional(),
+      remarks: z.string().optional(),
+      items: z.array(transferItem).min(1),
+    })
+    .strict(),
+};
 
-// Dispatch Transfer
-export const dispatchSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  body: {
-    type: 'object',
-    properties: {
-      transport: transportSchema,
-    },
-  },
-} as const;
+export const updateSchema = {
+  body: z
+    .object({
+      remarks: z.string().optional(),
+      documentType: documentType.optional(),
+      items: z.array(transferItem).optional(),
+    })
+    .strict(),
+};
 
-// Receive Transfer
-export const receiveSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  body: {
-    type: 'object',
-    properties: {
-      items: {
-        type: 'array',
-        items: receivedItemSchema,
-        description: 'Items with received quantities (optional - defaults to full receipt)',
-      },
-    },
-  },
-} as const;
-
-// Cancel Transfer
-export const cancelSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-  body: {
-    type: 'object',
-    properties: {
-      reason: { type: 'string', description: 'Cancellation reason' },
-    },
-  },
-} as const;
-
-// List Transfers
-export const listTransfersSchema = {
-  querystring: {
-    type: 'object',
-    properties: {
-      senderBranch: { type: 'string' },
-      receiverBranch: { type: 'string' },
-      status: { type: 'string' },
-      documentNumber: { type: 'string' },
-      documentType: { type: 'string' },
-      startDate: { type: 'string', format: 'date' },
-      endDate: { type: 'string', format: 'date' },
-      page: { type: 'integer', minimum: 1, default: 1 },
-      limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
-      sort: { type: 'string', default: '-createdAt' },
-    },
-  },
-} as const;
-
-// Get Transfer by ID
-export const getTransferSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-    },
-    required: ['id'],
-  },
-} as const;
-
-// Get Transfer by Transfer Number
-export const getByDocumentNumberSchema = {
-  params: {
-    type: 'object',
-    properties: {
-      documentNumber: { type: 'string' },
-    },
-    required: ['documentNumber'],
-  },
-} as const;
+// Action schemas — all fields optional. Omitting `transport` = simple
+// point-to-point dispatch; omitting `items` on receive = receive everything
+// in the dispatch; omitting `reason` on cancel = no reason recorded.
+export const dispatchActionSchema = z.object({ transport: transport.optional() });
+export const receiveActionSchema = z.object({ items: z.array(receivedItem).optional() });
+export const cancelActionSchema = z.object({ reason: z.string().optional() });

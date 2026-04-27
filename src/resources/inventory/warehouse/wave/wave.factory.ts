@@ -75,10 +75,10 @@ export function createStockWaveResource() {
     displayName: 'Pick Waves',
     tag: 'Warehouse - Waves',
     prefix: '/inventory/waves',
-    tenantField: 'organizationId',
 
     adapter: createFlowAdapter(engine.models.StockWave, engine.repositories.stockWave, {
       fieldRules: {
+        organizationId: { systemManaged: true },
         status: { systemManaged: true },
         plannedAt: { systemManaged: true },
         releasedAt: { systemManaged: true },

@@ -8,12 +8,35 @@
  * for high-frequency barcode scans at checkout.
  */
 import type { FlowContext } from '@classytic/flow';
-import { createDefaultLoader } from '#lib/utils/lazy-import.js';
 import branchRepository from '#resources/commerce/branch/branch.repository.js';
+import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 import { buildFlowContext, DEFAULT_LOCATION, skuRefFromProduct } from './context-helpers.js';
 import { getFlowEngine } from './flow-engine.js';
 
-const loadProductRepository = createDefaultLoader('#resources/catalog/products/product.repository.js');
+// Catalog product lookup by barcode/SKU. Tries variant.barcode first (POS scan),
+// then variant.sku, then identifiers.custom.sku. Single-doc lookup uses
+// getByQuery so the mongokit cache plugin can short-circuit hot scans —
+// findAll/getAll are for batch and paginated lists, not single-row reads.
+async function lookupProductByCode(
+  code: string,
+): Promise<{ product: ProductLike; matchedVariant: ProductVariant | null } | null> {
+  const e = await ensureCatalogEngine();
+  const product = await e.repositories.product.getByQuery(
+    {
+      $or: [
+        { 'variants.barcode': code },
+        { 'variants.sku': code },
+        { 'identifiers.custom.sku': code },
+      ],
+    },
+    { lean: true, throwOnNotFound: false },
+  );
+  if (!product) return null;
+
+  const variants = (product.variants ?? []) as ProductVariant[];
+  const matchedVariant = variants.find((v) => v.barcode === code || v.sku === code) ?? null;
+  return { product: product as unknown as ProductLike, matchedVariant };
+}
 
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_SIZE = 1000;
@@ -117,11 +140,7 @@ class PosLookupService {
       return cached.value;
     }
 
-    const productRepository = (await loadProductRepository()) as {
-      getByBarcodeOrSku(code: string): Promise<{ product?: ProductLike; matchedVariant?: ProductVariant } | null>;
-      getById(id: string): Promise<ProductLike | null>;
-    };
-    const productResult = await productRepository.getByBarcodeOrSku(trimmedCode);
+    const productResult = await lookupProductByCode(trimmedCode);
 
     if (!productResult?.product) return null;
 
@@ -243,10 +262,10 @@ class PosLookupService {
    * Check if a skuRef (variant SKU) belongs to a product.
    */
   private async _skuRefBelongsToProduct(skuRef: string, productId: string): Promise<boolean> {
-    const productRepository = (await loadProductRepository()) as { getById(id: string): Promise<ProductLike | null> };
-    const product = await productRepository.getById(productId);
+    const e = await ensureCatalogEngine();
+    const product = await e.repositories.product.getById(productId, { throwOnNotFound: false });
     if (!product) return false;
-    return product.variants?.some((v: ProductVariant) => v.sku === skuRef) ?? false;
+    return product.variants?.some((v) => v.sku === skuRef) ?? false;
   }
 
   /**

@@ -1,7 +1,7 @@
 /**
  * Partner Action Registry — partner-level A/P + A/R actions
  *
- * Registered via createActionRouter → POST /accounting/partners/:id/action
+ * Wired via declarative `actions:` block → POST /accounting/partners/:id/action
  *   id   = supplier or customer ObjectId (string)
  *   body = { action: "open-balance", side: "supplier" | "customer", amount, asOf?, reason? }
  *

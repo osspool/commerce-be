@@ -1,7 +1,6 @@
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import crmPermissions from '#config/permissions/crm.js';
-import { createAdapter } from '#shared/adapter.js';
 import { orgScoped } from '#shared/presets/index.js';
 import CrmPipeline from './pipeline.model.js';
 import crmPipelineRepository from './pipeline.repository.js';
@@ -14,7 +13,7 @@ const crmPipelineResource = defineResource({
   prefix: '/crm/pipelines',
   audit: true,
 
-  adapter: createAdapter(CrmPipeline, crmPipelineRepository),
+  adapter: createMongooseAdapter(CrmPipeline, crmPipelineRepository),
 
   schemaOptions: {
     fieldRules: {

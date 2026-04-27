@@ -1,118 +1,48 @@
 /**
- * Size Guide JSON Schemas
- *
- * Request validation and response documentation for size guide endpoints.
+ * Size Guide Schemas — Zod v4. Arc auto-converts via `z.toJSONSchema()`
+ * at registration (Fastify validation + OpenAPI).
  */
 
-interface JsonSchemaProperty {
-  type: string;
-  minLength?: number;
-  maxLength?: number;
-  maxItems?: number;
-  minimum?: number;
-  enum?: string[];
-  format?: string;
-  pattern?: string;
-  items?: JsonSchemaProperty;
-  properties?: Record<string, JsonSchemaProperty>;
-  additionalProperties?: JsonSchemaProperty | boolean;
-  required?: string[];
-  [key: string]: unknown;
-}
+import { z } from 'zod';
 
-interface JsonSchemaObject {
-  type: string;
-  properties: Record<string, JsonSchemaProperty>;
-  required?: string[];
-  [key: string]: unknown;
-}
+const measurementUnit = z.enum(['inches', 'cm']);
 
-interface RouteSchema {
-  body: JsonSchemaObject;
-}
+const sizeSchema = z.object({
+  name: z.string().min(1).max(20),
+  // Free-form per-size measurements: keys are arbitrary measurement
+  // labels (e.g. "Chest", "Waist"), values are display strings ("38in").
+  measurements: z.record(z.string(), z.string()).optional(),
+});
 
-interface SizeGuideSchemas {
-  entity: JsonSchemaObject;
-  create: RouteSchema;
-  update: RouteSchema;
-}
+const createBody = z.object({
+  name: z.string().min(1).max(100),
+  slug: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .optional(),
+  description: z.string().max(500).optional(),
+  measurementUnit: measurementUnit.optional(),
+  measurementLabels: z.array(z.string().min(1).max(50)).max(10).optional(),
+  sizes: z.array(sizeSchema).optional(),
+  note: z.string().max(1000).optional(),
+  isActive: z.boolean().optional(),
+  displayOrder: z.number().optional(),
+});
 
-const sizeSchema: JsonSchemaProperty = {
-  type: 'object',
-  properties: {
-    name: { type: 'string', minLength: 1, maxLength: 20 },
-    measurements: {
-      type: 'object',
-      additionalProperties: { type: 'string' },
-    },
-  },
-  required: ['name'],
-};
+const updateBody = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(500).optional(),
+  measurementUnit: measurementUnit.optional(),
+  measurementLabels: z.array(z.string().min(1).max(50)).max(10).optional(),
+  sizes: z.array(sizeSchema).optional(),
+  note: z.string().max(1000).optional(),
+  isActive: z.boolean().optional(),
+  displayOrder: z.number().optional(),
+});
 
-const sizeGuideEntity: JsonSchemaObject = {
-  type: 'object',
-  properties: {
-    _id: { type: 'string' },
-    name: { type: 'string' },
-    slug: { type: 'string' },
-    description: { type: 'string' },
-    measurementUnit: { type: 'string', enum: ['inches', 'cm'] },
-    measurementLabels: { type: 'array', items: { type: 'string' } },
-    sizes: { type: 'array', items: sizeSchema },
-    note: { type: 'string' },
-    isActive: { type: 'boolean' },
-    displayOrder: { type: 'number' },
-    createdAt: { type: 'string', format: 'date-time' },
-    updatedAt: { type: 'string', format: 'date-time' },
-  },
-};
-
-const createSchema: RouteSchema = {
-  body: {
-    type: 'object',
-    properties: {
-      name: { type: 'string', minLength: 1, maxLength: 100 },
-      slug: { type: 'string', pattern: '^[a-z0-9-]+$' },
-      description: { type: 'string', maxLength: 500 },
-      measurementUnit: { type: 'string', enum: ['inches', 'cm'] },
-      measurementLabels: {
-        type: 'array',
-        items: { type: 'string', minLength: 1, maxLength: 50 },
-        maxItems: 10,
-      },
-      sizes: { type: 'array', items: sizeSchema },
-      note: { type: 'string', maxLength: 1000 },
-      isActive: { type: 'boolean' },
-      displayOrder: { type: 'number' },
-    },
-    required: ['name'],
-  },
-};
-
-const updateSchema: RouteSchema = {
-  body: {
-    type: 'object',
-    properties: {
-      name: { type: 'string', minLength: 1, maxLength: 100 },
-      description: { type: 'string', maxLength: 500 },
-      measurementUnit: { type: 'string', enum: ['inches', 'cm'] },
-      measurementLabels: {
-        type: 'array',
-        items: { type: 'string', minLength: 1, maxLength: 50 },
-        maxItems: 10,
-      },
-      sizes: { type: 'array', items: sizeSchema },
-      note: { type: 'string', maxLength: 1000 },
-      isActive: { type: 'boolean' },
-      displayOrder: { type: 'number' },
-    },
-  },
-};
-
-const schemas: SizeGuideSchemas = {
-  entity: sizeGuideEntity,
-  create: createSchema,
-  update: updateSchema,
+const schemas = {
+  create: { body: createBody },
+  update: { body: updateBody },
 };
 
 export default schemas;

@@ -5,9 +5,8 @@
  * Standard CRUD operations + custom archival workflows.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import { toArcSchemas } from '#shared/event-helpers.js';
 import { archiveActions, getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
@@ -15,7 +14,7 @@ import archiveController from './archive.controller.js';
 import Archive from './archive.model.js';
 import archiveRepository from './archive.repository.js';
 import { events } from './events.js';
-import archiveSchemas, { archiveRunQuery, archiveSchemaOptions } from './schemas.js';
+import archiveSchemas, { archiveRunQuery } from './schemas.js';
 
 const archiveResource = defineResource({
   name: 'archive',
@@ -23,12 +22,11 @@ const archiveResource = defineResource({
   tag: 'Archive',
   prefix: '/archives',
 
-  adapter: createAdapter(Archive, archiveRepository),
+  adapter: createMongooseAdapter(Archive, archiveRepository),
   controller: archiveController,
   queryParser,
 
   permissions: getResourcePermissions('archive'),
-  schemaOptions: archiveSchemaOptions,
   customSchemas: toArcSchemas(archiveSchemas),
 
   routes: [

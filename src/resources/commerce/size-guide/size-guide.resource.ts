@@ -5,8 +5,7 @@
  * Standard CRUD operations + custom slug-based lookup for public display.
  */
 
-import { defineResource } from '@classytic/arc';
-import { createAdapter } from '#shared/adapter.js';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { slugLookup } from '#shared/presets.js';
 import { queryParser } from '#shared/query-parser.js';
@@ -22,7 +21,7 @@ const sizeGuideResource = defineResource({
   tag: 'Size Guides',
   prefix: '/size-guides',
 
-  adapter: createAdapter(SizeGuide, sizeGuideRepository),
+  adapter: createMongooseAdapter(SizeGuide, sizeGuideRepository),
   controller: sizeGuideController,
   queryParser,
 

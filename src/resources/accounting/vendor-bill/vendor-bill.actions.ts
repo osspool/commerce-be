@@ -1,7 +1,7 @@
 /**
  * Vendor Bill Action Registry — Stripe-style state transitions (A/P)
  *
- * Registered via createActionRouter → POST /accounting/vendor-bills/:id/action
+ * Wired via declarative `actions:` block → POST /accounting/vendor-bills/:id/action
  * Body: { action: "post" | "pay" | "credit-note", ... }
  *
  *   - `post`     id = Purchase._id        → accrual bill JE

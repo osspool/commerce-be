@@ -1,28 +1,35 @@
 /**
  * Flow-backed Arc adapter helper.
  *
- * Thin wrapper around `createAdapter` that marks the call site as "this
- * resource's model lives in Flow's `engine.models.*`". Arc 2.10.7's
- * `defineResource` auto-injects `systemManaged: true` + `preserveForElevated`
- * on the configured `tenantField` and forwards the resolved schemaOptions to
- * the adapter's `generateSchemas(options)` — BodySanitizer AND mongokit's
- * body schema both see the rule, so the old `fieldRules: { organizationId:
- * { systemManaged: true } }` boilerplate is no longer needed here.
+ * Marks a call site as "this resource's model lives in Flow's
+ * `engine.models.*`" while delegating to arc's canonical
+ * `createMongooseAdapter`. Arc 2.11's adapter auto-merges tenant
+ * `fieldRules` onto generator output via `mergeFieldRuleConstraints`, so
+ * the old boilerplate at this layer is gone.
  *
  * Pass `options.fieldRules` for ADDITIONAL server-managed fields (e.g.
- * scrap's lifecycle columns `scrapNumber`, `moveId`, `executedAt`, etc.).
+ * scrap's lifecycle columns `scrapNumber`, `moveId`, `executedAt`, etc.) —
+ * they flow into mongokit's `buildCrudSchemasFromModel` via the inline
+ * closure below.
  */
-import type { DataAdapter } from '@classytic/arc';
-import type { Repository } from '@classytic/mongokit';
+import { createMongooseAdapter, type DataAdapter, type RepositoryLike } from '@classytic/arc';
+import { buildCrudSchemasFromModel } from '@classytic/mongokit';
 import type { Model } from 'mongoose';
-import { createAdapter } from './adapter.js';
 
 type SchemaBuilderOptions = Record<string, unknown>;
 
 export function createFlowAdapter<TDoc>(
   model: Model<TDoc>,
-  repository: Repository<TDoc> | object,
+  repository: RepositoryLike<TDoc> | object,
   options: SchemaBuilderOptions = {},
 ): DataAdapter<TDoc> {
-  return createAdapter(model, repository, options);
+  return createMongooseAdapter<TDoc>({
+    model,
+    repository: repository as RepositoryLike<TDoc>,
+    schemaGenerator: (m, arcOptions) =>
+      buildCrudSchemasFromModel(m, {
+        ...(arcOptions as Record<string, unknown>),
+        ...options,
+      } as Parameters<typeof buildCrudSchemasFromModel>[1]),
+  });
 }

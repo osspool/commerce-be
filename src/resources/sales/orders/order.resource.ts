@@ -10,13 +10,12 @@
  * - PATCH /:id/payment-state — partial subdocument update
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import type { OrderContext } from '@classytic/order';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { publish } from '#lib/events/arcEvents.js';
 import { validateCodSettlementInputs } from '#resources/accounting/posting/contracts/cod-settlement.contract.js';
-import { createAdapter } from '#shared/adapter.js';
 import { getContextFromReq } from '#shared/context.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { queryParser } from '#shared/query-parser.js';
@@ -55,7 +54,7 @@ function getAuthUserId(req: FastifyRequest): string | null {
 // what `BaseController.list/get` requires to read `.repository.getAll()`
 // synchronously during a request.
 const orderEngine = await ensureOrderEngine();
-const orderAdapter = createAdapter(orderEngine.models.Order as never, orderEngine.repositories.order as never);
+const orderAdapter = createMongooseAdapter(orderEngine.models.Order as never, orderEngine.repositories.order as never);
 
 const orderResource = defineResource({
   name: 'order',

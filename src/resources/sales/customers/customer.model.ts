@@ -350,5 +350,51 @@ customerSchema.virtual('loyalty').get(function (this: CustomerDocument) {
 customerSchema.set('toJSON', { virtuals: true });
 customerSchema.set('toObject', { virtuals: true });
 
+/**
+ * Lean-virtual backfill — runs after every find()/findOne()/findById()
+ * resolution. When the calling site uses `.lean()` (the default through
+ * mongokit's PaginationEngine, which strips virtuals), this hook walks the
+ * resolved plain objects and computes the derived display fields so SDK /
+ * FE consumers see the same shape as non-lean documents.
+ *
+ * Why this and not `mongoose-lean-virtuals`: that plugin requires the
+ * call site to pass `.lean({ virtuals: true })`. Mongokit's pagination
+ * engine passes plain `lean: true`, so the plugin path is dormant. A
+ * post-hook is contained in this file and works regardless of the
+ * upstream lean shape.
+ *
+ * Hydrated Mongoose Documents already expose virtuals through getters,
+ * so we only patch when the result is a plain object (no `$__` symbol).
+ */
+function backfillCustomerVirtuals(docs: unknown): void {
+  if (!docs) return;
+  const list = Array.isArray(docs) ? docs : [docs];
+  for (const doc of list) {
+    if (!doc || typeof doc !== 'object') continue;
+    // Hydrated Documents have an internal `$__` state object — skip them.
+    if ('$__' in (doc as Record<string, unknown>)) continue;
+    const target = doc as Record<string, unknown> & { name?: PersonName };
+    if (target.name) {
+      if (target.fullName == null) target.fullName = formatFullName(target.name);
+      if (target.displayName == null) target.displayName = formatDisplayName(target.name);
+    }
+    if (target.revenueTier == null) {
+      const stats = target.stats as { revenue?: { lifetime?: number } } | undefined;
+      const lifetime = stats?.revenue?.lifetime ?? 0;
+      target.revenueTier =
+        lifetime >= 100000 ? 'platinum' :
+        lifetime >= 50000 ? 'gold' :
+        lifetime >= 10000 ? 'silver' : 'bronze';
+    }
+  }
+}
+
+customerSchema.post(['find', 'findOne', 'findOneAndUpdate'] as never, function (
+  this: mongoose.Query<unknown, unknown>,
+  docs: unknown,
+) {
+  backfillCustomerVirtuals(docs);
+});
+
 const Customer = mongoose.models.Customer || mongoose.model<ICustomer>('Customer', customerSchema);
 export default Customer;

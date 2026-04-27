@@ -1,7 +1,6 @@
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import crmPermissions from '#config/permissions/crm.js';
-import { createAdapter } from '#shared/adapter.js';
 import { orgScoped } from '#shared/presets/index.js';
 import CrmNote from './note.model.js';
 import crmNoteRepository from './note.repository.js';
@@ -16,7 +15,7 @@ const crmNoteResource = defineResource({
   // a parallel `audit_logs` row per note is redundant and doubles storage.
   audit: false,
 
-  adapter: createAdapter(CrmNote, crmNoteRepository),
+  adapter: createMongooseAdapter(CrmNote, crmNoteRepository),
   presets: [orgScoped],
 
   schemaOptions: {

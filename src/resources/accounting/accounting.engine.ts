@@ -103,6 +103,9 @@ export const accounting = createAccountingEngine({
   // file should hardcode this.
   pagination: {
     account: { maxLimit: 1000 },
+    // Bounded set (~12 periods/year × N years), admin-only — generous cap.
+    // Default is 100 in mongokit's Repository, which clips multi-year views.
+    fiscalPeriod: { maxLimit: 500 },
   },
   // Day-close lock — blocks entries whose date falls in a closed branch
   // day. Hooks both `before:create` (manual creates + reversals) and

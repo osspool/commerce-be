@@ -5,14 +5,14 @@
  * State transitions (receive/pay/cancel) declared via the `actions` block below
  * → mounted as `POST /:id/action { action: "receive" | "pay" | "cancel" }`.
  */
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import PurchaseOrder from './models/purchase-order.model.js';
 import purchaseOrderController from './purchase-order.controller.js';
 import purchaseOrderRepository from './purchase-order.repository.js';
+import { cancelActionSchema, createSchema, payActionSchema, updateSchema } from './purchase-order.schemas.js';
 import purchaseOrderService from './purchase-order.service.js';
 
 const queryParser = new QueryParser({
@@ -28,7 +28,7 @@ const purchaseOrderResource = defineResource({
   tag: 'Inventory - Purchase Orders',
   prefix: '/inventory/purchase-orders',
 
-  adapter: createAdapter(PurchaseOrder, purchaseOrderRepository),
+  adapter: createMongooseAdapter(PurchaseOrder, purchaseOrderRepository),
   queryParser,
   // Custom controller: create/update go through purchaseOrderService
   // (item normalization, supplier lookup, total computation, invoice numbering).
@@ -43,117 +43,14 @@ const purchaseOrderResource = defineResource({
     delete: requireRoles('admin'),
   },
 
-  // Tight schemas matching the create / update payload contracts. The service
-  // still does normalization (supplier lookup, totals, invoice numbering),
-  // but invalid bodies fail at the gateway with a structured error rather
-  // than slipping through to a `createStatusError` deep in the service. Lines
-  // and payment substructure are validated as well.
+  // Zod v4 bodies — Arc auto-converts to JSON Schema at registration. The
+  // service still does normalization (supplier lookup, totals, invoice
+  // numbering), but invalid bodies fail at the gateway with a structured
+  // error rather than slipping through to a `createStatusError` deep in
+  // the service.
   customSchemas: {
-    create: {
-      body: {
-        type: 'object',
-        required: ['items'],
-        additionalProperties: false,
-        properties: {
-          supplierId: { type: 'string' },
-          branchId: { type: 'string' },
-          purchaseOrderNumber: { type: 'string' },
-          invoiceDate: { type: 'string', format: 'date-time' },
-          paymentTerms: { type: 'string', enum: ['cash', 'credit'] },
-          creditDays: { type: 'number', minimum: 0 },
-          dueDate: { type: 'string', format: 'date-time' },
-          notes: { type: 'string' },
-          autoApprove: { type: 'boolean' },
-          autoReceive: { type: 'boolean' },
-          items: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['productId'],
-              additionalProperties: false,
-              properties: {
-                productId: { type: 'string' },
-                variantSku: { type: ['string', 'null'] },
-                quantity: { type: 'number', minimum: 0 },
-                costPrice: { type: 'number', minimum: 0 },
-                discount: { type: 'number', minimum: 0 },
-                taxRate: { type: 'number', minimum: 0, maximum: 100 },
-                notes: { type: 'string' },
-                destinationLocationId: { type: 'string' },
-              },
-            },
-          },
-          payment: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              amount: { type: 'number', minimum: 0 },
-              method: { type: 'string' },
-              reference: { type: 'string' },
-              accountNumber: { type: 'string' },
-              walletNumber: { type: 'string' },
-              bankName: { type: 'string' },
-              accountName: { type: 'string' },
-              proofUrl: { type: 'string' },
-              transactionDate: { type: 'string', format: 'date-time' },
-              notes: { type: 'string' },
-            },
-          },
-        },
-      },
-    },
-    update: {
-      body: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          supplierId: { type: 'string' },
-          purchaseOrderNumber: { type: 'string' },
-          invoiceDate: { type: 'string', format: 'date-time' },
-          paymentTerms: { type: 'string', enum: ['cash', 'credit'] },
-          creditDays: { type: 'number', minimum: 0 },
-          dueDate: { type: 'string', format: 'date-time' },
-          notes: { type: 'string' },
-          items: {
-            type: 'array',
-            items: {
-              type: 'object',
-              required: ['productId'],
-              additionalProperties: false,
-              properties: {
-                productId: { type: 'string' },
-                variantSku: { type: ['string', 'null'] },
-                quantity: { type: 'number', minimum: 0 },
-                costPrice: { type: 'number', minimum: 0 },
-                discount: { type: 'number', minimum: 0 },
-                taxRate: { type: 'number', minimum: 0, maximum: 100 },
-                notes: { type: 'string' },
-                destinationLocationId: { type: 'string' },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-
-  schemaOptions: {
-    fieldRules: {
-      invoiceNumber: { systemManaged: true },
-      status: { systemManaged: true },
-      paymentStatus: { systemManaged: true },
-      paidAmount: { systemManaged: true },
-      dueAmount: { systemManaged: true },
-      subTotal: { systemManaged: true },
-      discountTotal: { systemManaged: true },
-      taxTotal: { systemManaged: true },
-      grandTotal: { systemManaged: true },
-      statusHistory: { systemManaged: true },
-      createdBy: { systemManaged: true },
-      approvedBy: { systemManaged: true },
-      receivedBy: { systemManaged: true },
-    },
+    create: { body: createSchema.body },
+    update: { body: updateSchema.body },
   },
 
   actions: {
@@ -170,18 +67,7 @@ const purchaseOrderResource = defineResource({
         return purchaseOrderService.payPurchase(id, data, uid);
       },
       permissions: permissions.inventory.purchaseOrderPay,
-      schema: {
-        amount: { type: 'number', description: 'Payment amount (BDT)' },
-        method: { type: 'string', description: 'Payment method' },
-        reference: { type: 'string', description: 'Payment reference' },
-        accountNumber: { type: 'string' },
-        walletNumber: { type: 'string' },
-        bankName: { type: 'string' },
-        accountName: { type: 'string' },
-        proofUrl: { type: 'string' },
-        transactionDate: { type: 'string', format: 'date-time' },
-        notes: { type: 'string' },
-      },
+      schema: payActionSchema,
     },
     cancel: {
       handler: async (id, data, req) => {
@@ -189,7 +75,7 @@ const purchaseOrderResource = defineResource({
         return purchaseOrderService.cancelPurchase(id, uid, data.reason as string | undefined);
       },
       permissions: permissions.inventory.purchaseOrderCancel,
-      schema: { reason: { type: 'string', description: 'Cancellation reason' } },
+      schema: cancelActionSchema,
     },
   },
 });

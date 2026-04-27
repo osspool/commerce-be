@@ -1,7 +1,7 @@
 /**
  * Journal Entry Action Registry — Stripe-style state transitions
  *
- * Registered via createActionRouter → POST /accounting/journal-entries/:id/action
+ * Wired via declarative `actions:` block → POST /accounting/journal-entries/:id/action
  * Body: { action: "post" | "reverse" | "duplicate" | "archive", ... }
  *
  * Replaces the legacy PATCH /:id/post, /:id/reverse, /:id/unpost, POST /:id/duplicate

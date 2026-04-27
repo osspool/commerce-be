@@ -8,15 +8,15 @@
  * State transitions (submit/approve/reject/close) via declarative `actions` block.
  */
 
-import { defineResource } from '@classytic/arc';
-import { QueryParser } from '@classytic/mongokit';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { buildCrudSchemasFromModel, QueryParser } from '@classytic/mongokit';
 import mongoose from 'mongoose';
 import config from '#config/index.js';
 import { groups } from '#config/permissions/roles.js';
-import { createAdapter } from '#shared/adapter.js';
 import { requireAuth, requireRoles } from '#shared/permissions.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { BUDGET_STATUS_VALUES, Budget, budgetRepository } from '../accounting.engine.js';
+import { bulkCreateSchema } from './budget.schemas.js';
 
 // Enterprise-only — `default` is null in simple mode so loadResources skips this file.
 let budgetResource: ReturnType<typeof defineResource> | null = null;
@@ -55,9 +55,15 @@ if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
     actions: (await import('./budget.actions.js')).budgetActions,
     actionPermissions: (await import('./budget.actions.js')).budgetActionPermissions,
 
-    adapter: createAdapter(Budget, budgetRepository, {
-      create: { omitFields: omitWorkflowFields },
-      update: { omitFields: omitWorkflowFields },
+    adapter: createMongooseAdapter({
+      model: Budget,
+      repository: budgetRepository,
+      schemaGenerator: (m, arcOptions) =>
+        buildCrudSchemasFromModel(m, {
+          ...(arcOptions as Record<string, unknown>),
+          create: { omitFields: omitWorkflowFields },
+          update: { omitFields: omitWorkflowFields },
+        } as Parameters<typeof buildCrudSchemasFromModel>[1]),
     }),
     queryParser,
     presets: [orgScoped],
@@ -71,30 +77,7 @@ if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
         summary: 'Bulk create budget lines for a branch',
         permissions: requireRoles(groups.platformAdmin),
         raw: true,
-        schema: {
-          body: {
-            type: 'object',
-            required: ['items'],
-            properties: {
-              items: {
-                type: 'array',
-                minItems: 1,
-                items: {
-                  type: 'object',
-                  required: ['account', 'periodStart', 'periodEnd', 'amount'],
-                  properties: {
-                    account: { type: 'string', description: 'Account ObjectId' },
-                    periodStart: { type: 'string', format: 'date', description: 'Period start (YYYY-MM-DD)' },
-                    periodEnd: { type: 'string', format: 'date', description: 'Period end (YYYY-MM-DD)' },
-                    amount: { type: 'integer', description: 'Budget amount in paisa' },
-                    label: { type: 'string' },
-                    category: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-        },
+        schema: { body: bulkCreateSchema.body },
         handler: async (req: any, reply: any) => {
           const orgId = req.scope?.organizationId;
           if (!orgId) return reply.status(400).send({ error: 'Organization context required' });

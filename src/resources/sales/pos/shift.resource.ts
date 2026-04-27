@@ -7,10 +7,9 @@
  *   pause, resume, cash-in, cash-out, blind-close, reconcile, close.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import {
   blindCloseAction,
   cashInAction,
@@ -32,7 +31,7 @@ const shiftResource = defineResource({
   prefix: '/pos/shifts',
   audit: true,
 
-  adapter: createAdapter(PosShift, posShiftRepository),
+  adapter: createMongooseAdapter(PosShift, posShiftRepository),
   queryParser: new QueryParser({
     maxLimit: 50,
     allowedFilterFields: ['state', 'openingCashierId', 'businessDate', 'closedBy'],

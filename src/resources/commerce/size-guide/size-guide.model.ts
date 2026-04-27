@@ -1,3 +1,4 @@
+import type { AnyRecord } from '@classytic/arc';
 import slugPlugin from '@classytic/mongoose-slug-plugin';
 import mongoose, { type HydratedDocument, Schema } from 'mongoose';
 
@@ -33,7 +34,7 @@ export interface ISizeEntry {
   measurements: Map<string, string>;
 }
 
-export interface ISizeGuide {
+export interface ISizeGuide extends AnyRecord {
   name: string;
   slug?: string;
   description?: string;

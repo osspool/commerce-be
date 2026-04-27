@@ -1,4 +1,4 @@
-import type { IControllerResponse, IRequestContext, RouteSchemaOptions } from '@classytic/arc';
+import type { AnyRecord, IControllerResponse, IRequestContext, RouteSchemaOptions } from '@classytic/arc';
 import { BaseController } from '@classytic/arc';
 import type { Repository } from '@classytic/mongokit';
 import * as authWorkflow from './auth.workflow.js';
@@ -24,7 +24,12 @@ interface UserProfileUpdate {
  * column. defineResource({ tenantField: false }) handles routing-level
  * scoping but the pre-built controller needs the same flag here.
  */
-export class UserController extends BaseController<IUser> {
+// IUser has Mongoose document-method overlays (hasRole/isAdmin) that break
+// under an `extends AnyRecord` index signature. Apply the intersection at
+// this call site only — arc's "last resort" from the 2.11 migration snippet,
+// acceptable here because UserController doesn't thread IUser through its
+// overrides in a way that would leak the `unknown` widening.
+export class UserController extends BaseController<IUser & AnyRecord> {
   constructor(service: Repository<IUser>, schemaOptions?: RouteSchemaOptions) {
     super(service, { schemaOptions, resourceName: 'user', tenantField: false });
   }

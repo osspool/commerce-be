@@ -6,10 +6,9 @@
  * transitions) and are exposed via those resources, not Account.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import crmPermissions from '#config/permissions/crm.js';
-import { createAdapter } from '#shared/adapter.js';
 import { orgScoped } from '#shared/presets/index.js';
 import CrmAccount from './account.model.js';
 import crmAccountRepository from './account.repository.js';
@@ -21,7 +20,7 @@ const crmAccountResource = defineResource({
   prefix: '/crm/accounts',
   audit: true,
 
-  adapter: createAdapter(CrmAccount, crmAccountRepository),
+  adapter: createMongooseAdapter(CrmAccount, crmAccountRepository),
   presets: [orgScoped],
 
   // `organizationId` is injected by the orgScoped preset post-validation —

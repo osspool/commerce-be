@@ -6,11 +6,10 @@
  * verbs: `requestChange`, `confirm`, `decline`.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { type OrderContext, repoOptionsFromCtx } from '@classytic/order';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import { getContextFromReq } from '#shared/context.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { queryParser } from '#shared/query-parser.js';
@@ -18,7 +17,7 @@ import { ensureOrderEngine } from './order.engine.js';
 
 // Top-level await — see order.resource.ts rationale.
 const orderChangeEngine = await ensureOrderEngine();
-const orderChangeAdapter = createAdapter(
+const orderChangeAdapter = createMongooseAdapter(
   orderChangeEngine.models.OrderChange as never,
   orderChangeEngine.repositories.orderChange as never,
 );

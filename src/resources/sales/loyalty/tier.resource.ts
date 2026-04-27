@@ -7,10 +7,9 @@
  * not an `actions:` verb.
  */
 
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
-import { createAdapter } from '#shared/adapter.js';
 import { queryParser } from '#shared/query-parser.js';
 import { ensureLoyaltyEngine } from './loyalty.plugin.js';
 
@@ -31,7 +30,7 @@ const tierResource = defineResource({
   prefix: '/loyalty/tiers',
   audit: true,
 
-  adapter: createAdapter(engine.models.TierDefinition as never, engine.repositories.tierDefinition as never),
+  adapter: createMongooseAdapter(engine.models.TierDefinition as never, engine.repositories.tierDefinition as never),
   queryParser,
 
   permissions: {

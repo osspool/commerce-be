@@ -1,7 +1,6 @@
-import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import crmPermissions from '#config/permissions/crm.js';
-import { createAdapter } from '#shared/adapter.js';
 import { orgScoped } from '#shared/presets/index.js';
 import CrmLossReason from './loss-reason.model.js';
 import crmLossReasonRepository from './loss-reason.repository.js';
@@ -14,7 +13,7 @@ const crmLossReasonResource = defineResource({
   prefix: '/crm/loss-reasons',
   audit: true,
 
-  adapter: createAdapter(CrmLossReason, crmLossReasonRepository),
+  adapter: createMongooseAdapter(CrmLossReason, crmLossReasonRepository),
   presets: [orgScoped],
 
   schemaOptions: {

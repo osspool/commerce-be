@@ -1,12 +1,14 @@
 /**
- * Transaction Schemas — field rules and filtering for Arc's pipeline.
+ * Transaction Schemas — field rules and filtering for Arc's pipeline,
+ * plus action and report querystring shapes (Zod v4).
  *
  * The Mongoose model is owned by @classytic/revenue v2.
- * This file only defines Arc-specific presentation rules.
+ * Arc auto-converts Zod via `z.toJSONSchema()` at registration.
  */
 
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
 import type { Model } from 'mongoose';
+import { z } from 'zod';
 
 export const transactionSchemaOptions = {
   strictAdditionalProperties: true,
@@ -57,3 +59,59 @@ export function buildTransactionCrudSchemas(model: Model<any>): Partial<ReturnTy
   const { query: _query, ...crudOptions } = transactionSchemaOptions;
   return buildCrudSchemasFromModel(model, crudOptions);
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Action and report schemas — Zod v4. Arc auto-converts at registration.
+// ──────────────────────────────────────────────────────────────────
+
+export const verifyActionSchema = z.object({
+  verifiedBy: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+export const refundActionSchema = z.object({
+  amount: z.number().min(1).optional(),
+  reason: z.string().min(3).optional(),
+});
+
+export const holdActionSchema = z.object({
+  amount: z.number().optional(),
+  reason: z.string().optional(),
+  holdUntil: z.string().optional(),
+});
+
+export const releaseActionSchema = z.object({
+  recipientId: z.string().optional(),
+  recipientType: z.string().optional(),
+  amount: z.number().optional(),
+  reason: z.string().optional(),
+});
+
+export const splitActionSchema = z.object({
+  rules: z.array(z.unknown()).optional(),
+});
+
+export const statementQuerySchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  branchId: z.string().optional(),
+  source: z.enum(['web', 'pos', 'api']).optional(),
+  status: z.string().optional(),
+  format: z.enum(['csv', 'json']).optional(),
+});
+
+export const profitLossQuerySchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
+export const categoriesReportQuerySchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  type: z.enum(['income', 'expense']).optional(),
+  limit: z.coerce.number().int().optional(),
+});
+
+export const cashFlowQuerySchema = z.object({
+  months: z.coerce.number().int().max(12).optional(),
+});
