@@ -4,7 +4,6 @@ import {
   type IControllerResponse,
   type IRequestContext,
   type RequestWithExtras,
-  type RouteSchemaOptions,
 } from '@classytic/arc';
 import type { FastifyReply } from 'fastify';
 import { BadRequestError } from '#shared/utils/errors.js';
@@ -28,7 +27,7 @@ interface GetMyReviewRequest extends RequestWithExtras {
 class ReviewController extends BaseController<IReview & AnyRecord> {
   constructor() {
     super(reviewRepository, {
-      schemaOptions: reviewSchemaOptions as unknown as RouteSchemaOptions,
+      schemaOptions: reviewSchemaOptions,
     });
     this.getMyReview = this.getMyReview.bind(this);
   }

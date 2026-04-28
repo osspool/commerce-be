@@ -19,6 +19,7 @@ import { createFlowBridge } from './bridges/flow.bridge.js';
 import { createRevenueBridge } from './bridges/revenue.bridge.js';
 import { wireOrderLoyaltyHook } from './order-loyalty-hook.js';
 import { wireOrderRevenueHook } from './order-revenue-hook.js';
+import { wireOrderLifecycleHandlers } from './lifecycle/wire-handlers.js';
 import { wireOrderStockHook } from './order-stock-hook.js';
 
 let engine: OrderEngine | null = null;
@@ -79,7 +80,17 @@ export async function ensureOrderEngine(): Promise<OrderEngine> {
         // Quotation module — enables B2B sales quote → order conversion
         // (engine.repositories.quotation + engine.models.Quotation).
         // See be-prod/src/resources/sales/quotations/quotation.resource.ts.
-        modules: { quotation: true },
+        //
+        // Blanket module — enables sales-side standing orders (B2B
+        // distributor agreements where a customer commits to N units
+        // across a cadence; each due cycle generates a fresh Order via
+        // the line template). Powers the blanket-order resource.
+        // RFQ module — purchase-side request-for-quote workflow.
+        // Enables `engine.repositories.rfq` + `engine.models.Rfq` and the
+        // `order:rfq.*` events. The `order:rfq.awarded` listener wired in
+        // `inventory/rfq/events/award-bridge.ts` turns the winning quote
+        // into a real PO via the procurement service.
+        modules: { quotation: true, blanket: true, rfq: true },
       });
 
       // ─── Idempotency: unique partial index on metadata.idempotencyKey ──
@@ -123,6 +134,20 @@ export async function ensureOrderEngine(): Promise<OrderEngine> {
       // ship. See order-stock-hook.ts.
       wireOrderStockHook(engine);
 
+      // Wire the order-FSM lifecycle handlers — the unified registry of
+      // every side-effect that fires off an order status transition:
+      //   - stock-commit       (order:fulfilled → DEFAULT → CUSTOMER move
+      //                         + reservation release)
+      //   - stock-return       (order:refunded post-shipped → reverse
+      //                         move; ADJUSTMENT on defective disposition)
+      //   - ledger-cogs-bridge (order:fulfilled → publish
+      //                         accounting:order.fulfilled with orderId)
+      //   - ledger-restock-bridge (order:refunded post-shipped non-defective
+      //                         → publish accounting:return.restocked)
+      // Each handler is a small async function with injected deps; tests
+      // call `.handle(ctx, fakeDeps)` directly. See lifecycle/handler.ts.
+      wireOrderLifecycleHandlers(engine);
+
       // Wire the order→POS-shift aggregation bridge. POS orders increment the
       // active shift's salesCount/salesTotal + per-method paymentBreakdown
       // atomically via $inc. See shift-aggregation.hook.ts.
@@ -130,9 +155,11 @@ export async function ensureOrderEngine(): Promise<OrderEngine> {
 
       // Wire the order→loyalty earn bridge. When confirmPayment flips
       // paymentState.chargeStatus to 'full' on an enrolled customer's order,
-      // we credit points based on PlatformConfig.membership × tier multiplier.
-      // Idempotent via earnPoints(idempotencyKey: order:<orderId>) so re-fires
-      // of after:update never double-credit. See order-loyalty-hook.ts.
+      // the hook calls engine.evaluateOrder which selects active EarningRule
+      // records (managed at /dashboard/loyalty/earning-rules) and credits
+      // points per matching rule. Per-rule idempotency on `${orderId}:${ruleId}`
+      // keeps after:update re-fires from double-crediting. See
+      // order-loyalty-hook.ts.
       wireOrderLoyaltyHook(engine);
 
       return engine;

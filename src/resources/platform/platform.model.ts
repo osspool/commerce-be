@@ -92,13 +92,6 @@ const vatConfigSchema = new Schema(
     vatCircle: String,
     defaultRate: { type: Number, default: 15, min: 0, max: 100 },
     pricesIncludeVat: { type: Boolean, default: true },
-    categoryRates: [
-      {
-        category: String,
-        rate: Number,
-        description: String,
-      },
-    ],
     invoice: {
       showVatBreakdown: { type: Boolean, default: true },
       prefix: { type: String, default: 'INV-' },
@@ -186,56 +179,17 @@ const logisticsSettingsSchema = new Schema(
 );
 
 /**
- * Membership Tier Schema
- */
-const membershipTierSchema = new Schema(
-  {
-    name: { type: String, required: true }, // e.g., "Silver", "Gold", "Platinum"
-    minPoints: {
-      type: Number,
-      required: true,
-      min: [0, 'minPoints cannot be negative'],
-    },
-    pointsMultiplier: {
-      type: Number,
-      default: 1,
-      min: [0.1, 'pointsMultiplier must be at least 0.1'],
-      max: [10, 'pointsMultiplier cannot exceed 10'],
-    },
-    discountPercent: {
-      type: Number,
-      default: 0,
-      min: [0, 'discountPercent cannot be negative'],
-      max: [100, 'discountPercent cannot exceed 100'],
-    },
-    color: String, // UI color code
-  },
-  { _id: false },
-);
-
-/**
  * Membership Config Schema
- * Loyalty points program configuration
+ *
+ * Kill switch + card formatting + redemption rules. Earning math (rates,
+ * tier multipliers, time-windowed promos) lives on `EarningRule` records
+ * managed via `/dashboard/loyalty/earning-rules`. Tier qualification lives
+ * on `LoyaltyTier` records managed via `/dashboard/loyalty/tiers`. Order
+ * award flow: order paid → order-loyalty-hook → engine.evaluateOrder.
  */
 const membershipConfigSchema = new Schema(
   {
     enabled: { type: Boolean, default: false },
-
-    // Points earning rules
-    pointsPerAmount: {
-      type: Number,
-      default: 1,
-      min: [1, 'pointsPerAmount must be at least 1'],
-    },
-    amountPerPoint: {
-      type: Number,
-      default: 100,
-      min: [1, 'amountPerPoint must be at least 1'],
-    },
-    roundingMode: { type: String, enum: ['floor', 'round', 'ceil'], default: 'floor' },
-
-    // Tier thresholds
-    tiers: [membershipTierSchema],
 
     // Points redemption (optional)
     redemption: {

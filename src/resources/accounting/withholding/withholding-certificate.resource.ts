@@ -1,6 +1,7 @@
 import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
-import { QueryParser } from '@classytic/mongokit';
+import { type AnyDocument, QueryParser } from '@classytic/mongokit';
+import type { Model } from 'mongoose';
 import WithholdingCertificate from './withholding-certificate.model.js';
 import { withholdingCertificateRepository } from './withholding-certificate.repository.js';
 
@@ -12,7 +13,14 @@ const withholdingCertificateResource = defineResource({
   tag: 'Accounting',
   prefix: '/accounting/withholding-certificates',
   audit: true,
-  adapter: createMongooseAdapter(WithholdingCertificate, withholdingCertificateRepository),
+  // The repo intentionally uses `Repository<AnyDocument>` (no per-field
+  // typing for this resource — query/update is index-driven). Pin the
+  // adapter's TDoc generic to match so it doesn't try to infer a stricter
+  // shape from the model.
+  adapter: createMongooseAdapter<AnyDocument>(
+    WithholdingCertificate as unknown as Model<AnyDocument>,
+    withholdingCertificateRepository,
+  ),
   queryParser: new QueryParser({
     maxLimit: 200,
     allowedFilterFields: [

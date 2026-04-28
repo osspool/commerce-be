@@ -9,6 +9,13 @@ export interface AppEngineContext {
   actorRef: string;
   actorKind: 'user' | 'session' | 'system' | 'agent' | 'cron' | 'api';
   correlationId: string;
+  /**
+   * Open index signature — `@classytic/order`'s `OrderContext` (and `cart`'s
+   * `CartContext`) both carry one to allow custom tenant-key callers
+   * (PACKAGE_RULES §9.2). Without this, `getContextFromReq(req)` fails to
+   * structurally match those types when passed to repo methods.
+   */
+  [key: string]: unknown;
 }
 
 /**

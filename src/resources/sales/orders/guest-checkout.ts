@@ -43,8 +43,10 @@ const ALLOWED_GUEST_KEYS = new Set([
 
 export interface GuestCustomerInput {
   name: string;
+  // Host policy — kernel marks both optional; we require them for the
+  // BD commerce use case: phone for COD/bKash delivery contact, email
+  // for order-confirmation and refund correspondence.
   phone: string;
-  /** Required: the order package's customerSnapshot schema mandates email. */
   email: string;
 }
 

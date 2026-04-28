@@ -52,7 +52,10 @@ export function createFlowBridge(): FlowBridge {
       const flow = getFlowEngineOrNull();
       if (!flow) throw new Error('Flow engine not initialized — inventory reservations unavailable');
 
-      const flowCtx = buildFlowContext(ctx.organizationId, ctx.actorRef);
+      // organizationId is optional on OrderContext (kernel allows custom
+      // tenant-key hosts), but in this app Arc's orgScoped preset always
+      // populates it before the order pipeline fires.
+      const flowCtx = buildFlowContext(ctx.organizationId!, ctx.actorRef);
       const expiresAt = new Date(Date.now() + RESERVATION_TTL_SEC * 1000);
       const refs: BridgeRef[] = [];
 
@@ -94,7 +97,7 @@ export function createFlowBridge(): FlowBridge {
       const flow = getFlowEngineOrNull();
       if (!flow) return;
 
-      const flowCtx = buildFlowContext(ctx.organizationId, ctx.actorRef);
+      const flowCtx = buildFlowContext(ctx.organizationId!, ctx.actorRef);
       for (const ref of refs) {
         try {
           await flow.services.reservation.release(ref.id, flowCtx);
@@ -117,7 +120,7 @@ export function createFlowBridge(): FlowBridge {
       const flow = getFlowEngineOrNull();
       if (!flow) return;
 
-      const flowCtx = buildFlowContext(ctx.organizationId, ctx.actorRef);
+      const flowCtx = buildFlowContext(ctx.organizationId!, ctx.actorRef);
       for (const ref of refs) {
         const qty = Number((ref.payload as Record<string, unknown> | undefined)?.quantity ?? 0);
         if (!qty) continue;

@@ -1,29 +1,7 @@
 import { buildCrudSchemasFromModel } from '@classytic/mongokit/utils';
 import type { CrudSchemas } from '@classytic/repo-core/schema';
+import type { RouteSchemaOptions } from '@classytic/arc';
 import Review from './review.model.js';
-
-interface FieldRule {
-  systemManaged?: boolean;
-}
-
-interface FilterableFields {
-  product: string;
-  user: string;
-  rating: string;
-  status: string;
-  isVerifiedPurchase: string;
-}
-
-interface SchemaQueryOptions {
-  allowedPopulate: string[];
-  filterableFields: FilterableFields;
-}
-
-interface SchemaOptions {
-  strictAdditionalProperties: boolean;
-  fieldRules: Record<string, FieldRule>;
-  query: SchemaQueryOptions;
-}
 
 /**
  * Review CRUD Schemas with Field Rules
@@ -39,8 +17,10 @@ const crudSchemas: CrudSchemas = buildCrudSchemasFromModel(Review, {
   },
 });
 
-// Export schema options for controller
-export const reviewSchemaOptions = {
+// Schema options for the controller. Typed against arc's canonical
+// `RouteSchemaOptions` — `allowedPopulate` and `filterableFields` ride
+// through natively (no defensive cast). See arc 2.11.2.
+export const reviewSchemaOptions: RouteSchemaOptions = {
   query: {
     allowedPopulate: ['user', 'product'],
     filterableFields: {

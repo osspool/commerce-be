@@ -1,13 +1,13 @@
 /**
  * Size Guide Resource Definition
  *
- * Size guide templates for product measurements.
- * Standard CRUD operations + custom slug-based lookup for public display.
+ * Size guide templates for product measurements. Standard CRUD only —
+ * the storefront resolves slugs client-side from the cached list, so the
+ * `/slug/:slug` preset route was unused and is intentionally not registered.
  */
 
 import { createMongooseAdapter, defineResource } from '@classytic/arc';
 import { getResourcePermissions } from '#shared/permissions.js';
-import { slugLookup } from '#shared/presets.js';
 import { queryParser } from '#shared/query-parser.js';
 import { events } from './events.js';
 import sizeGuideController from './size-guide.controller.js';
@@ -24,9 +24,6 @@ const sizeGuideResource = defineResource({
   adapter: createMongooseAdapter(SizeGuide, sizeGuideRepository),
   controller: sizeGuideController,
   queryParser,
-
-  // Preset adds: /slug/:slug route (public access)
-  presets: [slugLookup],
 
   permissions: getResourcePermissions('sizeGuide'),
   customSchemas: {

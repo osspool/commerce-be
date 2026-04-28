@@ -169,7 +169,28 @@ export async function bootScenarioApp(opts: {
     auth,
     orgId,
     teardown: async () => {
-      try { await app.close(); } catch { /* already closed */ }
+      try {
+        await app.close();
+      } catch {
+        /* already closed */
+      }
+
+      // Drain in-flight microtasks before disconnecting Mongo. Even with
+      // every `emitDomainEvent` / `wrapWithSchema` / `withRetry` chain
+      // properly awaited, the order package's emit fan-out can leave one
+      // tick of work in the microtask queue (deferred subscriber
+      // continuations, retry-timer callbacks scheduled by `withRetry`'s
+      // `setTimeout(..., 0)` jitter, mongoose's internal post-write
+      // serializers). Disconnecting Mongo before that final tick lands
+      // surfaces as `Operation interrupted because client was closed`
+      // out of `OrderEventRepository.append` — a misleading shape since
+      // the test already passed and no production caller is waiting on
+      // the result.
+      //
+      // 50ms is enough to let setImmediate + a pending timer or two
+      // resolve without slowing the suite measurably.
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
       if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
       await replSet.stop();
     },

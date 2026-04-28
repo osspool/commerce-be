@@ -1,5 +1,6 @@
 import { buildCrudSchemasFromMongooseSchema } from '@classytic/mongokit/utils';
 import type { CrudSchemas } from '@classytic/repo-core/schema';
+import type { RouteSchemaOptions } from '@classytic/arc';
 import { branchSchema } from './branch.model.js';
 
 /**
@@ -10,17 +11,6 @@ import { branchSchema } from './branch.model.js';
  * The Branch model is a strict:false stub on the `organization` collection,
  * which would produce empty schemas with no properties.
  */
-
-interface FilterableFields {
-  [key: string]: string;
-}
-
-interface SchemaOptions {
-  query: {
-    filterableFields: FilterableFields;
-  };
-}
-
 const crudSchemas: CrudSchemas = buildCrudSchemasFromMongooseSchema(branchSchema, {
   strictAdditionalProperties: true,
   fieldRules: {
@@ -28,8 +18,10 @@ const crudSchemas: CrudSchemas = buildCrudSchemasFromMongooseSchema(branchSchema
   },
 });
 
-// Export schema options for controller
-export const branchSchemaOptions: SchemaOptions = {
+// Schema options for the controller. Typed against arc's canonical
+// `RouteSchemaOptions` so `filterableFields` (and any future
+// `allowedPopulate` / `allowedLookups`) are structurally locked in.
+export const branchSchemaOptions: RouteSchemaOptions = {
   query: {
     filterableFields: {
       code: 'string',

@@ -97,6 +97,11 @@ export function initializeInvoiceEngine(fastifyEvents?: ArcFastifyEvents): Invoi
     mongoose: mongoose.connection,
     scope: { strategy: 'field', tenantField: 'organizationId', required: false },
     currency: 'BDT',
+    // Roll forward stale index options on boot. Mongoose's default
+    // `Model.init()` only adds missing indexes; this picks up changes to
+    // `partialFilterExpression`, `unique`, `sparse` etc. on indexes that
+    // were created by an earlier schema version. PACKAGE_RULES §32.
+    syncIndexes: true,
     ledger: ledgerBridge,
     // Catalog bridge — enriches invoice lines from productId (name, skuRef, hsCode, uom).
     // Lines that already carry description + unitPrice are unaffected.

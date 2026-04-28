@@ -109,7 +109,7 @@ export async function attachPaymentToOrder(params: {
     if (shouldVerifyImmediately(gateway, order.channel)) {
       const result: PaymentVerificationResult = await bridge.recordImmediatePayment({
         orderId,
-        organizationId: ctx.organizationId,
+        organizationId: ctx.organizationId!,
         customerId,
         amount,
         gateway,
@@ -122,7 +122,7 @@ export async function attachPaymentToOrder(params: {
 
     const result: PaymentIntentResult = await bridge.createPaymentIntent({
       orderId,
-      organizationId: ctx.organizationId,
+      organizationId: ctx.organizationId!,
       customerId,
       amount,
       gateway,

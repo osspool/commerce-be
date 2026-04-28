@@ -60,7 +60,7 @@ async function invoicePlugin(fastify: FastifyInstance): Promise<void> {
     'Invoice engine initialized',
   );
 
-  registerInvoiceEventHandlers(fastify);
+  registerInvoiceEventHandlers();
 
   // Reverse bridge: invoice:paid → order paymentState=paid when the invoice
   // originated from an Order. See invoice-to-order.events.ts.

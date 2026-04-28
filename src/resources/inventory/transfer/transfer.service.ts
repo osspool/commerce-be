@@ -305,11 +305,19 @@ class TransferService {
       throw err;
     }
 
-    // Create outbound MoveGroup: stock → customer (virtual transit) at sender org
+    // Create outbound MoveGroup: stock → customer (virtual transit) at sender org.
+    // The `isInternalTransfer` flag lets sales / COGS reports filter these out
+    // — Flow's posting service treats CUSTOMER as a COGS destination and would
+    // otherwise count an inter-branch transfer as if it were a customer sale.
     const outboundGroup = await flow.services.moveGroup.create(
       {
         groupType: 'shipment',
-        metadata: { transferId: transfer._id.toString(), documentNumber: transfer.documentNumber },
+        metadata: {
+          transferId: transfer._id.toString(),
+          documentNumber: transfer.documentNumber,
+          isInternalTransfer: true,
+          receiverBranchId: String(transfer.receiverBranch),
+        },
         items: dispatchItems,
       },
       senderCtx,
@@ -443,12 +451,20 @@ class TransferService {
       }
     }
 
-    // Create inbound MoveGroup: vendor → stock at receiver org
+    // Create inbound MoveGroup: vendor → stock at receiver org.
+    // Tagged the same way as the outbound — receipts reports filter
+    // `isInternalTransfer: true` so cost-in from a sister branch isn't counted
+    // as a fresh PO receipt in supplier-spend dashboards.
     if (inboundItems.length > 0) {
       const inboundGroup = await flow.services.moveGroup.create(
         {
           groupType: 'receipt',
-          metadata: { transferId: transfer._id.toString(), documentNumber: transfer.documentNumber },
+          metadata: {
+            transferId: transfer._id.toString(),
+            documentNumber: transfer.documentNumber,
+            isInternalTransfer: true,
+            senderBranchId: String(transfer.senderBranch),
+          },
           items: inboundItems,
         },
         receiverCtx,

@@ -161,55 +161,159 @@ export async function requireMemberForCustomer(customerId: string, ctx: LoyaltyB
   return member;
 }
 
-// ── POS Helpers (pure config-based calculations) ──
-
-interface MembershipTier {
-  name: string;
-  minPoints: number;
-  pointsMultiplier?: number;
-  discountPercent?: number;
+/**
+ * Forecast points for an order without persisting — same algorithm as
+ * `engine.repositories.earningRule.evaluateOrder` (priority-sorted active
+ * rules → condition match → reward math → tier_bonus accumulator) minus
+ * the `earnPoints` write.
+ *
+ * Used by `POST /loyalty/preview` so checkout/POS can render "you'll earn N
+ * points" labels driven by the same rule set the engine will use at
+ * order-paid time. Replicating the algorithm host-side instead of adding it
+ * to the engine package keeps the kernel free of dry-run paths and lets us
+ * ship without a `@classytic/loyalty` re-publish.
+ */
+interface PreviewItem {
+  categoryId?: string;
+  amount: number;
+  quantity: number;
 }
 
-interface MembershipConfig {
-  enabled?: boolean;
-  amountPerPoint?: number;
+interface RuleConditions {
+  minOrderAmount?: number;
+  categories?: string[];
+  tiers?: string[];
+  dayOfWeek?: number[];
+  dateRange?: { start?: Date; end?: Date };
+}
+
+interface RuleReward {
   pointsPerAmount?: number;
-  roundingMode?: 'floor' | 'ceil' | 'round';
-  tiers?: MembershipTier[];
+  amountPerPoint?: number;
+  fixedPoints?: number;
+  multiplier?: number;
+  roundingMode?: 'floor' | 'round' | 'ceil';
+  maxPointsPerTransaction?: number;
 }
 
-/**
- * Calculate points earned for an order based on platform membership config.
- */
-export function calculatePointsForOrder(
-  orderTotal: number,
-  membershipConfig: MembershipConfig,
-  customerTier: string,
-): number {
-  if (!membershipConfig?.enabled || !orderTotal) return 0;
+interface EarningRuleLike {
+  _id: string;
+  name: string;
+  type: 'order' | 'action' | 'category' | 'tier_bonus';
+  priority: number;
+  conditions?: RuleConditions;
+  reward: RuleReward;
+}
 
-  const { amountPerPoint = 100, pointsPerAmount = 1, roundingMode = 'floor' } = membershipConfig;
-  const tierConfig = membershipConfig.tiers?.find((t) => t.name === customerTier);
-  const multiplier = tierConfig?.pointsMultiplier || 1;
+interface MemberLike {
+  tier?: string | null;
+  tierOverride?: string | null;
+}
 
-  const basePoints = (orderTotal / amountPerPoint) * pointsPerAmount;
-  const rawPoints = basePoints * multiplier;
+function applyRounding(v: number, mode?: 'floor' | 'round' | 'ceil'): number {
+  if (mode === 'ceil') return Math.ceil(v);
+  if (mode === 'round') return Math.round(v);
+  return Math.floor(v);
+}
 
-  switch (roundingMode) {
-    case 'ceil':
-      return Math.ceil(rawPoints);
-    case 'round':
-      return Math.round(rawPoints);
-    default:
-      return Math.floor(rawPoints);
+function ruleMatches(rule: EarningRuleLike, member: MemberLike, orderTotal: number): boolean {
+  const c = rule.conditions ?? {};
+  if (c.minOrderAmount && orderTotal < c.minOrderAmount) return false;
+  if (c.tiers && c.tiers.length > 0) {
+    const memberTier = member.tierOverride ?? member.tier ?? null;
+    if (!memberTier || !c.tiers.includes(memberTier)) return false;
   }
+  const now = new Date();
+  if (c.dateRange?.start && now < new Date(c.dateRange.start)) return false;
+  if (c.dateRange?.end && now > new Date(c.dateRange.end)) return false;
+  if (c.dayOfWeek && c.dayOfWeek.length > 0 && !c.dayOfWeek.includes(now.getDay())) return false;
+  return true;
 }
 
-/**
- * Get tier discount percent from platform membership config.
- */
-export function getTierDiscountPercent(customerTier: string, membershipConfig: MembershipConfig): number {
-  if (!membershipConfig?.enabled) return 0;
-  const tierConfig = membershipConfig.tiers?.find((t) => t.name === customerTier);
-  return tierConfig?.discountPercent || 0;
+function orderRulePoints(rule: EarningRuleLike, orderTotal: number): number {
+  const r = rule.reward;
+  let p = 0;
+  if (r.pointsPerAmount) p = orderTotal * r.pointsPerAmount;
+  else if (r.amountPerPoint && r.amountPerPoint > 0) p = orderTotal / r.amountPerPoint;
+  return applyRounding(p, r.roundingMode);
 }
+
+function categoryRulePoints(rule: EarningRuleLike, items: PreviewItem[]): number {
+  const c = rule.conditions ?? {};
+  const r = rule.reward;
+  if (!c.categories || c.categories.length === 0) return 0;
+  let p = 0;
+  for (const item of items) {
+    if (item.categoryId && c.categories.includes(item.categoryId)) {
+      if (r.pointsPerAmount) p += item.amount * r.pointsPerAmount;
+      else if (r.amountPerPoint) p += item.amount / r.amountPerPoint;
+    }
+  }
+  return applyRounding(p, r.roundingMode);
+}
+
+export interface PreviewResult {
+  totalPoints: number;
+  breakdown: Array<{ ruleId: string; ruleName: string; points: number }>;
+}
+
+export async function previewPointsForOrder(input: {
+  customerId: string;
+  /** Order total in BDT-major (not paisa) — caller converts at the boundary. */
+  orderTotal: number;
+  items?: PreviewItem[];
+}): Promise<PreviewResult> {
+  if (!input.orderTotal || input.orderTotal <= 0) return { totalPoints: 0, breakdown: [] };
+
+  // Kill switch
+  let enabled = false;
+  try {
+    const config = (await platformRepository.getConfig()) as { membership?: { enabled?: boolean } } | null;
+    enabled = !!config?.membership?.enabled;
+  } catch {
+    return { totalPoints: 0, breakdown: [] };
+  }
+  if (!enabled) return { totalPoints: 0, breakdown: [] };
+
+  const engine = getLoyaltyEngine();
+  const member = await engine.repositories.member.getByQuery(
+    { externalId: input.customerId, externalType: 'customer' },
+    { throwOnNotFound: false },
+  );
+  if (!member || member.status !== 'active') return { totalPoints: 0, breakdown: [] };
+
+  const rules = (await engine.repositories.earningRule.getAll({
+    filters: { status: 'active', programId: member.programId },
+    sort: { priority: 1 },
+    limit: 100,
+  })) as unknown as { docs?: EarningRuleLike[] } | EarningRuleLike[];
+
+  const ruleDocs = Array.isArray(rules) ? rules : (rules.docs ?? []);
+  const orderRules = ruleDocs
+    .filter((r) => r.type === 'order' || r.type === 'category' || r.type === 'tier_bonus')
+    .sort((a, b) => a.priority - b.priority);
+
+  const breakdown: PreviewResult['breakdown'] = [];
+  let accumulated = 0;
+  const memberLite: MemberLike = { tier: member.tier, tierOverride: member.tierOverride };
+
+  for (const rule of orderRules) {
+    if (!ruleMatches(rule, memberLite, input.orderTotal)) continue;
+    let points = 0;
+    if (rule.type === 'order') points = orderRulePoints(rule, input.orderTotal);
+    else if (rule.type === 'category' && input.items) points = categoryRulePoints(rule, input.items);
+    else if (rule.type === 'tier_bonus') {
+      const m = rule.reward.multiplier ?? 1;
+      points = Math.floor(accumulated * (m - 1));
+    }
+    if (points <= 0) continue;
+    if (rule.reward.maxPointsPerTransaction && points > rule.reward.maxPointsPerTransaction) {
+      points = rule.reward.maxPointsPerTransaction;
+    }
+    accumulated += points;
+    breakdown.push({ ruleId: String(rule._id), ruleName: rule.name, points });
+  }
+
+  return { totalPoints: accumulated, breakdown };
+}
+

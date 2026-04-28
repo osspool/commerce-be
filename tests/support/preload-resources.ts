@@ -21,16 +21,22 @@ import type { AppContext } from '../../src/core/app/context.js';
 // Eager engine imports — must run before resource modules evaluate, since
 // resource files reference exported model/repository constants at module-
 // load time.
-import '../../src/resources/accounting/accounting.engine.js';
-import { ensureCatalogEngine } from '../../src/resources/catalog/catalog.engine.js';
+//
+// Use the `#resources/...` subpath specifier (NOT the relative path) so
+// the ESM cache key matches `app.ts`'s import — otherwise tsx/vitest
+// resolves them as two different URLs, evaluates accounting.engine.ts
+// twice, and the second `registerJournalType` call throws because the
+// JournalEntry schema is already initialized from the first eval.
+import '#resources/accounting/accounting.engine.js';
+import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 
 // Engine-bound resources export `(ctx: AppContext) => ResourceLike` as their
 // default. preloadResourcesAsync only accepts ResourceLike objects (no
 // AppContext to forward), so we exclude these from the glob and invoke
 // them explicitly with the live engine bag — same flow as production's
 // `loadResources({ context })`.
-import categoryFactory from '../../src/resources/catalog/categories/category.resource.js';
-import productFactory from '../../src/resources/catalog/products/product.resource.js';
+import categoryFactory from '#resources/catalog/categories/category.resource.js';
+import productFactory from '#resources/catalog/products/product.resource.js';
 
 const resourceModules = import.meta.glob([
   '../../src/resources/**/*.resource.ts',

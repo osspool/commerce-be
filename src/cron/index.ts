@@ -1,121 +1,156 @@
-import mongoose from 'mongoose';
+/**
+ * Cron job registry — one declarative list, one factory, one boot pass.
+ *
+ * Every interval-driven background tick goes through `startCronJob()`
+ * (see `./define-job.ts`) which handles the standard scaffolding:
+ * mongo-connection guard, re-entrancy guard, named structured logging,
+ * optional jitter. Adding a new job is one entry in `jobs[]`.
+ *
+ * **POS stale shifts:** intentionally not in this list. Recovery is
+ * lazy-close-on-next-open (`shift.handlers.ts:closeStaleShiftsOnRegister`)
+ * + a manual force-close action on the oversight dashboard. No background
+ * sweep — registers that get used recover automatically; permanently
+ * abandoned shifts surface for explicit manager action.
+ *
+ * **Outbox cleanup:** also not here. The `OutboxEvent` collection has a
+ * `{ deliveredAt: 1 }` TTL index (7 days) — MongoDB auto-purges. A cron
+ * sweep would just race the TTL monitor on the same docs.
+ */
+
+import { randomUUID } from 'node:crypto';
 import logger from '#lib/utils/logger.js';
 import { registerAccountingEventHandlers } from '#resources/accounting/accounting.events.js';
-import { bootstrappedOrgs, cleanupAllOrgs, handleStockAlert } from '#resources/inventory/inventory.jobs.js';
+import {
+  bootstrappedOrgs,
+  cleanupAllOrgs,
+  handleStockAlert,
+} from '#resources/inventory/inventory.jobs.js';
+import { processBillingDue } from '#resources/payments/subscription/cron/process-billing-due.js';
+import { getCartEngine } from '#resources/sales/cart/cart.engine.js';
 import { registerLoyaltyEventHandlers } from '#resources/sales/loyalty/loyalty.events.js';
 import { getLoyaltyEngine } from '#resources/sales/loyalty/loyalty.plugin.js';
 import { outbox } from '#shared/outbox/index.js';
+import { type CronJob, type CronRunner, startCronJob } from './define-job.js';
 
 const FIVE_SECONDS = 5 * 1000;
-const FIVE_MINUTES = 5 * 60 * 1000;
-const ONE_HOUR = 60 * 60 * 1000;
-const ONE_DAY = 24 * 60 * 60 * 1000;
+const ONE_MINUTE = 60 * 1000;
+const FIVE_MINUTES = 5 * ONE_MINUTE;
+const ONE_HOUR = 60 * ONE_MINUTE;
+const ONE_DAY = 24 * ONE_HOUR;
 
-const timers: ReturnType<typeof setInterval>[] = [];
+const runners: CronRunner[] = [];
 
-function isMongoConnected(): boolean {
-  return mongoose.connection.readyState === 1;
-}
-
-export async function initialize(): Promise<void> {
-  // Register event handlers (idempotent — safe if already registered by routes.ts)
-  registerLoyaltyEventHandlers();
-  registerAccountingEventHandlers();
-
-  // Relay outbox events every 5 seconds
-  timers.push(
-    setInterval(async () => {
-      if (!isMongoConnected()) return;
-      try {
-        await outbox.relay();
-      } catch (err) {
-        logger.error({ err }, 'Outbox relay failed');
-      }
-    }, FIVE_SECONDS),
-  );
-
-  // Reservation cleanup every 5 minutes (iterates all bootstrapped orgs)
-  timers.push(
-    setInterval(async () => {
-      if (!isMongoConnected()) return;
-      try {
-        await cleanupAllOrgs();
-      } catch (err) {
-        logger.error({ err }, 'Reservation cleanup cron failed');
-      }
-    }, FIVE_MINUTES),
-  );
-
-  // Loyalty redemption cleanup every 5 minutes (release expired point reservations)
-  timers.push(
-    setInterval(async () => {
-      if (!isMongoConnected()) return;
-      try {
-        const engine = getLoyaltyEngine();
-        const released = await engine.repositories.redemption.cleanupExpired({ actorId: 'cron' });
-        if (released > 0) logger.info({ released }, 'Loyalty redemption cleanup');
-      } catch (err) {
-        logger.error({ err }, 'Loyalty redemption cleanup failed');
-      }
-    }, FIVE_MINUTES),
-  );
-
-  // Point expiration every hour (expire points past their expiresAt date)
-  timers.push(
-    setInterval(async () => {
-      if (!isMongoConnected()) return;
-      try {
-        const engine = getLoyaltyEngine();
-        const result = await engine.repositories.pointTransaction.processExpirations({ actorId: 'cron' });
-        if (result.transactionCount > 0) logger.info(result, 'Points expiration processed');
-      } catch (err) {
-        logger.error({ err }, 'Points expiration cron failed');
-      }
-    }, ONE_HOUR),
-  );
-
-  // POS stale shifts are recovered via lazy-close-on-next-open
-  // (`shift.handlers.ts:closeStaleShiftsOnRegister`) plus a manual
-  // force-close action on the oversight dashboard. No background cron
-  // — registers that get used recover automatically; permanently
-  // abandoned ones surface for explicit manager action.
-
-  // Replenishment evaluation every hour (check all bootstrapped orgs for low stock)
-  timers.push(
-    setInterval(async () => {
-      if (!isMongoConnected()) return;
+const jobs: ReadonlyArray<CronJob> = [
+  {
+    name: 'outbox.relay',
+    intervalMs: FIVE_SECONDS,
+    run: async () => {
+      await outbox.relay();
+    },
+  },
+  {
+    name: 'inventory.reservation.cleanup',
+    intervalMs: FIVE_MINUTES,
+    run: async () => {
+      await cleanupAllOrgs();
+    },
+  },
+  {
+    name: 'loyalty.redemption.cleanup',
+    intervalMs: FIVE_MINUTES,
+    run: async () => {
+      const released = await getLoyaltyEngine().repositories.redemption.cleanupExpired({
+        actorId: 'cron',
+      });
+      if (released > 0) logger.info({ released }, 'Loyalty redemption cleanup');
+    },
+  },
+  {
+    name: 'loyalty.point.expiration',
+    intervalMs: ONE_HOUR,
+    run: async () => {
+      const result = await getLoyaltyEngine().repositories.pointTransaction.processExpirations({
+        actorId: 'cron',
+      });
+      if (result.transactionCount > 0) logger.info(result, 'Points expiration processed');
+    },
+  },
+  {
+    name: 'inventory.replenishment',
+    intervalMs: ONE_HOUR,
+    run: async () => {
+      // Per-org loop — one org failing must not abort the whole tick.
       for (const orgId of bootstrappedOrgs) {
         try {
           await handleStockAlert({ data: { organizationId: orgId } });
         } catch (err) {
-          logger.error({ err, organizationId: orgId }, 'Replenishment evaluation failed for org');
+          logger.error(
+            { err, organizationId: orgId },
+            'Replenishment evaluation failed for org',
+          );
         }
       }
-    }, ONE_HOUR),
-  );
-
-  // Daily tier re-evaluation (upgrade/downgrade members based on lifetime points)
-  timers.push(
-    setInterval(async () => {
-      if (!isMongoConnected()) return;
-      try {
-        const engine = getLoyaltyEngine();
-        const result = await engine.repositories.tierDefinition.evaluateAll({ actorId: 'cron' });
-        logger.info(result, 'Daily tier evaluation');
-      } catch (err) {
-        logger.error({ err }, 'Tier evaluation cron failed');
+    },
+  },
+  {
+    name: 'loyalty.tier.evaluation',
+    intervalMs: ONE_DAY,
+    jitterMs: 10 * ONE_MINUTE,
+    run: async () => {
+      const result = await getLoyaltyEngine().repositories.tierDefinition.evaluateAll({
+        actorId: 'cron',
+      });
+      logger.info(result, 'Daily tier evaluation');
+    },
+  },
+  {
+    name: 'subscription.billing.due',
+    intervalMs: ONE_HOUR,
+    jitterMs: 5 * ONE_MINUTE,
+    run: async () => {
+      const result = await processBillingDue();
+      if (result.billed > 0 || result.failed > 0) {
+        logger.info(result, 'Subscription billing tick');
       }
-    }, ONE_DAY),
-  );
+    },
+  },
+  {
+    name: 'cart.checkout.sweep',
+    intervalMs: ONE_DAY,
+    jitterMs: 10 * ONE_MINUTE,
+    run: async () => {
+      // Cart engine boots `multiTenant: false`, so the tenant filter is
+      // off; `organizationId` here is unused but type-required.
+      const { count } = await getCartEngine().repositories.checkout.expireStaleOpenCheckouts(
+        ONE_DAY,
+        {
+          organizationId: '',
+          actorRef: 'system:cron:cart-sweep',
+          actorKind: 'session',
+          correlationId: randomUUID(),
+          skipTenant: true,
+        },
+      );
+      if (count > 0) logger.info({ expired: count }, 'Abandoned checkouts swept');
+    },
+  },
+];
 
-  logger.info('Cron jobs and event handlers initialized');
+export async function initialize(): Promise<void> {
+  // Register event handlers (idempotent — safe if already registered by routes.ts).
+  registerLoyaltyEventHandlers();
+  registerAccountingEventHandlers();
+
+  for (const job of jobs) {
+    runners.push(startCronJob(job, logger));
+  }
+
+  logger.info({ jobs: jobs.map((j) => j.name) }, 'Cron jobs and event handlers initialized');
 }
 
 export function shutdown(): void {
-  for (const timer of timers) {
-    clearInterval(timer);
-  }
-  timers.length = 0;
+  for (const runner of runners) runner.stop();
+  runners.length = 0;
   logger.info('Cron jobs stopped');
 }
 

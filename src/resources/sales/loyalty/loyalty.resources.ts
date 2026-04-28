@@ -209,6 +209,28 @@ export const memberResource = defineResource({
         });
       }),
     },
+    {
+      method: 'POST',
+      path: '/preview',
+      summary: 'Forecast points for an order without persisting (dry-run of evaluateOrder)',
+      permissions: permissions.customers.get,
+      raw: true,
+      handler: loyaltyRoute(async (req: FastifyRequest) => {
+        const body = req.body as {
+          customerId?: string;
+          orderTotal?: number;
+          items?: Array<{ categoryId?: string; amount: number; quantity: number }>;
+        };
+        if (!body?.customerId || typeof body.orderTotal !== 'number') {
+          throw new ArcError('customerId and orderTotal required', { code: 'BAD_REQUEST', statusCode: 400 });
+        }
+        return bridge.previewPointsForOrder({
+          customerId: body.customerId,
+          orderTotal: body.orderTotal,
+          items: body.items,
+        });
+      }),
+    },
   ],
 });
 

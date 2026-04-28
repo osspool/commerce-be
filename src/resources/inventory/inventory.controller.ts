@@ -10,6 +10,7 @@
 
 import { BaseController } from '@classytic/arc';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { publish } from '#lib/events/arcEvents.js';
 import { createModuleLoader } from '#lib/utils/lazy-import.js';
 import logger from '#lib/utils/logger.js';
 import { filterCostPriceByRole } from '#resources/catalog/products/product.utils.js';
@@ -252,6 +253,21 @@ class InventoryController extends BaseController {
 
     const results: { success: AdjustmentSuccessResult[]; failed: AdjustmentFailResult[] } = { success: [], failed: [] };
 
+    // Per-adjustment cost-of-goods-adjusted records, used after the moves
+    // commit to publish `accounting:inventory.adjusted` so the shrinkage
+    // journal posts (Dr 6703 / Cr 1165 for losses, mirror for gains). The
+    // amount is `|delta| × source-quant.unitCost` captured BEFORE the move
+    // — Flow's posting service consumes the cost during `adjustInSingleTxn`
+    // so we can't read it back from the move metadata cleanly.
+    interface AdjustmentJournalRecord {
+      productId: string;
+      variantSku?: string | null;
+      type: 'loss' | 'gain';
+      amountPaisa: number;
+      reason?: string;
+    }
+    const journalRecords: AdjustmentJournalRecord[] = [];
+
     // Resolve the top-level location up-front so a bad ID fails the
     // request before we touch any item. Per-item overrides are resolved
     // lazily inside `processOne` (a bad override only fails that row).
@@ -299,6 +315,24 @@ class InventoryController extends BaseController {
         // shorter transaction span.
         const current = await flow.services.quant.getAvailability({ skuRef, locationId: locationCode }, ctx);
         const currentQty = current.quantityOnHand;
+        // Pre-move unit cost in PAISA. Two sources, two units to normalize:
+        //   1. Flow quant breakdown — `unitCost` is BDT major (set by
+        //      receive-items-into-stock as a bare number). Multiply ×100.
+        //   2. `defaultProductCostLookup` — already returns paisa. Use as-is.
+        // Fallback to (2) only when Flow has no breakdown for this skuRef
+        // at the queried location (cost not seeded yet).
+        let preMoveUnitCostPaisa = 0;
+        const flowUnitCost = current.breakdowns?.[0]?.unitCost;
+        if (typeof flowUnitCost === 'number' && flowUnitCost > 0) {
+          preMoveUnitCostPaisa = Math.round(flowUnitCost * 100);
+        }
+        if (preMoveUnitCostPaisa <= 0 && adj.productId) {
+          const { defaultProductCostLookup } = await import(
+            '#resources/sales/orders/lifecycle/handlers/_cost-resolver.js'
+          );
+          const fallback = await defaultProductCostLookup(adj.productId, adj.variantSku ?? undefined).catch(() => null);
+          if (fallback && fallback > 0) preMoveUnitCostPaisa = fallback;
+        }
 
         let newQuantity: number;
         if (adjMode === 'set') {
@@ -342,6 +376,20 @@ class InventoryController extends BaseController {
         );
 
         results.success.push({ productId: adj.productId, variantSku: adj.variantSku, newQuantity });
+
+        // Queue an accounting:inventory.adjusted record. Amount is in paisa
+        // (matching the CogsData / posting contracts convention). Skipped
+        // when there's no cost basis on the source quant — the
+        // inventory-adjusted handler already early-returns on `amount === 0`,
+        // but we keep the record so the dashboard / debug log has a trail.
+        const amountPaisa = preMoveUnitCostPaisa * Math.abs(delta);
+        journalRecords.push({
+          productId: adj.productId,
+          variantSku: adj.variantSku ?? null,
+          type: delta < 0 ? 'loss' : 'gain',
+          amountPaisa,
+          reason: adj.reason || adj.notes || reason || notes,
+        });
       } catch (error) {
         results.failed.push({ ...adj, error: (error as Error).message });
       }
@@ -367,6 +415,27 @@ class InventoryController extends BaseController {
         actorName: String((user as Record<string, unknown>)?.name || 'Staff'),
         triggeredBy: String(user?._id || ''),
       });
+    }
+
+    // Publish the per-line shrinkage / surplus events the accounting
+    // handler subscribes to — drives the proper INVENTORY journal entry
+    // (Dr 6703 / Cr 1165 for losses, mirror for gains). Each record gets
+    // a stable `adjustmentId` derived from the productId+sku+timestamp so
+    // the posting service's idempotency key (`adj-<id>`) is unique.
+    if (journalRecords.length > 0) {
+      const adjustedAt = new Date().toISOString();
+      for (let i = 0; i < journalRecords.length; i++) {
+        const r = journalRecords[i];
+        if (r.amountPaisa <= 0) continue;
+        await publish('accounting:inventory.adjusted', {
+          adjustmentId: `${r.productId}-${r.variantSku ?? 'simple'}-${Date.now()}-${i}`,
+          type: r.type,
+          amount: r.amountPaisa,
+          date: adjustedAt,
+          reason: r.reason,
+          branchId: String(branch._id),
+        });
+      }
     }
 
     // Expense transaction for inventory loss

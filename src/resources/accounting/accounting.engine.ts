@@ -50,13 +50,41 @@ export const BUDGET_STATUS_VALUES = ['draft', 'submitted', 'approved', 'rejected
 
 // ─── Custom journal types — registered before engine creation ──────────────
 // (the JournalEntry schema reads the type enum at construction time)
+//
+// Wrapped in `safeRegisterJournalType` because tsx + vitest can re-evaluate
+// this module under a different ESM specifier (subpath `#resources/...` vs
+// relative `../accounting.engine.js`), producing two distinct module
+// records for the same file. The ledger package's `_frozen` flag is
+// process-global, so the second evaluation's raw `registerJournalType()`
+// call throws "Cannot register journal types after schema initialization"
+// even though the registration is identical to the first. The guard
+// converts that into a no-op so module re-evaluation is idempotent.
+//
+// Production (single eval) behaviour is unchanged — types register on
+// the first call, the schema freezes after `createAccountingEngine`,
+// and any subsequent registration would still throw if it attempted a
+// new type that wasn't there before.
 
-registerJournalType('POS_SALES', {
+function safeRegisterJournalType(code: string, def: { code: string; name: string; description: string }): void {
+  try {
+    registerJournalType(code, def);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Re-evaluation: schema already frozen from the first eval. Same
+    // code is being re-registered — silently no-op.
+    if (message.includes('after schema initialization')) return;
+    // Genuine misuse — code mismatch, missing fields, override of a
+    // built-in type. Re-throw so the developer sees it.
+    throw err;
+  }
+}
+
+safeRegisterJournalType('POS_SALES', {
   code: 'POS_SALES',
   name: 'POS Sales Journal',
   description: 'Point-of-sale transactions aggregated by day per branch',
 });
-registerJournalType('ECOM_SALES', {
+safeRegisterJournalType('ECOM_SALES', {
   code: 'ECOM_SALES',
   name: 'E-Commerce Sales Journal',
   description: 'Online order transactions posted per-order',
@@ -67,17 +95,17 @@ registerJournalType('ECOM_SALES', {
 //   ECOM_SALES_COD_SETTLEMENT — settlement: Dr 1112 Bank + Dr 6423 Commission + Dr 6702 Writeoff | Cr 1141
 //   ECOM_SALES_COD_REVERSAL   — cancel-before-settle: mirror of placement
 // See be-prod/src/resources/accounting/posting/contracts/cod-*.contract.ts.
-registerJournalType('ECOM_SALES_COD', {
+safeRegisterJournalType('ECOM_SALES_COD', {
   code: 'ECOM_SALES_COD',
   name: 'COD Placement Journal',
   description: 'Cash-on-delivery order placement — A/R debited, reclassified on settlement',
 });
-registerJournalType('ECOM_SALES_COD_SETTLEMENT', {
+safeRegisterJournalType('ECOM_SALES_COD_SETTLEMENT', {
   code: 'ECOM_SALES_COD_SETTLEMENT',
   name: 'COD Settlement Journal',
   description: 'COD reconciliation — Bank + Commission + optional Writeoff, clears A/R',
 });
-registerJournalType('ECOM_SALES_COD_REVERSAL', {
+safeRegisterJournalType('ECOM_SALES_COD_REVERSAL', {
   code: 'ECOM_SALES_COD_REVERSAL',
   name: 'COD Cancellation Reversal',
   description: 'Contra of COD placement when order is cancelled before settlement',
@@ -97,6 +125,10 @@ export const accounting = createAccountingEngine({
   audit: { trackActor: true },
   strictness: { immutable: true, requireActor: true },
   idempotency: true,
+  // Single-company-multi-branch — accounts/fiscal periods are company-wide,
+  // but every JE carries the originating branch ID for partition reports.
+  // The schema declaration lives below in `schemaOptions.journalEntry`.
+  journalEntryOrgField: 'organizationId',
   // Repository pagination caps. Mongokit's Repository.list defaults to
   // maxLimit=100, which clips the BD chart of accounts (~150+ rows). Set
   // here so every consumer of the engine sees the same cap — no resource
@@ -143,11 +175,27 @@ export const accounting = createAccountingEngine({
           sourceModel: { type: String, default: null },
           sourceId: { type: String, default: null },
         },
+        /** Free-form provenance the host attaches per posting. Today the COGS
+         * pipeline tags `{ costMissing, affectedLines }` here so the admin
+         * "missing cost" view can `find({ 'metadata.costMissing': true })`
+         * without joining out to a separate audit collection. Schema-less by
+         * design — different posting sources stamp whatever they need. */
+        metadata: {
+          type: mongoose.Schema.Types.Mixed,
+          default: null,
+        },
       },
       extraIndexes: [
         { fields: { 'sourceRef.sourceId': 1 }, options: { sparse: true } },
         {
           fields: { organizationId: 1, 'sourceRef.sourceModel': 1, date: -1 },
+          options: { sparse: true },
+        },
+        // Drives the "cost data missing" admin view — finance grepts
+        // these to identify which products need backfill. Sparse so it
+        // only indexes entries that actually carry the flag.
+        {
+          fields: { 'metadata.costMissing': 1, date: -1 },
           options: { sparse: true },
         },
       ],

@@ -1,8 +1,11 @@
 import config from '#config/index.js';
 import logger from '#lib/utils/logger.js';
 import { registerAccountingEventHandlers } from '#resources/accounting/accounting.events.js';
+import { registerFlowProcurementAccountingBridge } from '#resources/accounting/events/handlers/flow-procurement-received.bridge.js';
 import { registerInventoryEventHandlers } from '#resources/inventory/inventory.handlers.js';
 import { registerNotificationEventHandlers } from '#resources/notifications/notification.handlers.js';
+import { registerRfqAwardBridge } from '#resources/sales/rfq/events/award-bridge.js';
+import { registerProcurementBridge as registerSupplierPerformanceProcurementBridge } from '#resources/inventory/supplier-performance/events/procurement-bridge.js';
 import cronManager from '../../cron/index.js';
 
 interface BackgroundRuntimeOptions {
@@ -25,6 +28,9 @@ async function initializeEventHandlers(): Promise<void> {
       registerInventoryEventHandlers();
       registerAccountingEventHandlers();
       registerNotificationEventHandlers();
+      registerRfqAwardBridge();
+      registerSupplierPerformanceProcurementBridge();
+      registerFlowProcurementAccountingBridge();
 
       logger.info('Event handlers registered');
       eventHandlersInitialized = true;

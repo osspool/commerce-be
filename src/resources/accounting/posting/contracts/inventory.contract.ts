@@ -60,6 +60,11 @@ export interface CogsData {
   orderId: string;
   costAmount: number; // paisa
   date: Date;
+  /** Forwarded onto the journal entry. The COGS pipeline tags
+   *  `{ costMissing: true, affectedLines: [...] }` when cost couldn't be
+   *  resolved; the entry still posts with zero amounts so finance has an
+   *  audit trail of every shipment. */
+  metadata?: Record<string, unknown>;
 }
 
 export function cogsToPosting(data: CogsData, options: { autoPost?: boolean } = {}): PostingInput {
@@ -74,6 +79,7 @@ export function cogsToPosting(data: CogsData, options: { autoPost?: boolean } = 
     idempotencyKey: `cogs-${data.orderId}`,
     sourceRef: { sourceModel: 'Order', sourceId: data.orderId },
     autoPost: options.autoPost ?? true,
+    ...(data.metadata ? { metadata: data.metadata } : {}),
   };
 }
 
@@ -100,6 +106,8 @@ export interface CogsReversalData {
   date: Date;
   /** Optional description override — defaults to "COGS reversal — Return #<id>". */
   description?: string;
+  /** Forwarded onto the journal entry. See `CogsData.metadata` — same shape. */
+  metadata?: Record<string, unknown>;
 }
 
 export function cogsReversalToPosting(
@@ -127,6 +135,7 @@ export function cogsReversalToPosting(
     idempotencyKey: `cogs-reversal-${data.returnId}`,
     sourceRef: { sourceModel: 'Return', sourceId: data.returnId },
     autoPost: options.autoPost ?? true,
+    ...(data.metadata ? { metadata: data.metadata } : {}),
   };
 }
 

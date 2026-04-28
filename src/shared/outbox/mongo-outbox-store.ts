@@ -183,15 +183,9 @@ export class MongoOutboxStore implements OutboxStore {
     );
   }
 
-  async purge(olderThanMs: number): Promise<number> {
-    if (!isConnected()) return 0;
-    const cutoff = new Date(Date.now() - olderThanMs);
-    const result = await OutboxEvent.deleteMany({
-      status: 'delivered',
-      deliveredAt: { $lt: cutoff },
-    });
-    return result.deletedCount ?? 0;
-  }
+  // No manual `purge()` — the `{ deliveredAt: 1 }` TTL index above
+  // (expireAfterSeconds: 7 days) already auto-purges delivered events.
+  // A cron sweep would just race the TTL monitor on the same docs.
 }
 
 function toDomainEvent(doc: Record<string, unknown>): DomainEvent {

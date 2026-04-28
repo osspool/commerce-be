@@ -114,14 +114,19 @@ const plugin: FastifyPluginAsync = async (fastify) => {
   // Mongo's TTL monitor will auto-delete `done | failed | cancelled` runs
   // older than `streamline.ttlDays`. Safe to call repeatedly; `createIndex`
   // is idempotent for identical specs.
-  try {
-    await ensureTtlIndex(config.streamline.ttlDays);
-  } catch (err) {
+  //
+  // Fire-and-log — DO NOT await. Atlas index creation can take 10-30s on
+  // a fresh collection; awaiting here exceeds Fastify's default plugin
+  // timeout and crashes boot with `AVV_ERR_PLUGIN_EXEC_TIMEOUT`. The
+  // index is opportunistic (Mongo's TTL monitor only purges what's
+  // there); a few seconds of "no auto-purge" while it builds is
+  // strictly preferable to refusing to serve traffic at all.
+  ensureTtlIndex(config.streamline.ttlDays).catch((err) => {
     fastify.log.warn(
       { err, ttlDays: config.streamline.ttlDays },
-      'Streamline: failed to ensure TTL index',
+      'Streamline: failed to ensure TTL index (background)',
     );
-  }
+  });
 
   // Arc's `streamlinePlugin` already registers its own `onClose` that calls
   // `wf.shutdown()` for every workflow in its registry — do NOT duplicate it

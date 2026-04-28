@@ -72,6 +72,13 @@ export async function receivePurchase(
       const grandTotal = normalizeNumber(purchase.grandTotal, 0);
       if (grandTotal > 0) {
         const taxTotal = normalizeNumber(purchase.taxTotal, 0);
+        // PO model persists totals in BDT major units (`grandTotal: 5520` = ৳5,520).
+        // Accounting handlers / posting contracts work in paisa (`debit: number //
+        // paisa` per posting.service.ts). Convert at the publish boundary so
+        // the journal entry's `Dr/Cr` amounts match the actual money paid.
+        // Without this we'd post entries 100× too small (৳55.20 instead of ৳5,520).
+        const grandTotalPaisa = Math.round(grandTotal * 100);
+        const taxTotalPaisa = Math.round(taxTotal * 100);
         const currency = purchase.currency || 'BDT';
         const exchangeRate = purchase.exchangeRate || undefined;
         // Propagate the purchase's dominant VAT rate so the posting contract
@@ -81,37 +88,79 @@ export async function receivePurchase(
         const items = (purchase.items as Array<{ taxRate?: number }> | undefined) ?? [];
         const rates = new Set(items.map((i) => normalizeNumber(i.taxRate, 0)));
         const vatRate = rates.size === 1 ? [...rates][0] : undefined;
-        const event = createEvent(
-          'accounting:purchase.paid',
-          {
-            purchaseId: String(purchase._id),
-            amount: grandTotal,
-            tax: taxTotal,
-            ...(vatRate !== undefined ? { vatRate } : {}),
-            isPaid: purchase.paymentTerms === 'cash',
-            inventoryType: 'merchandise' as const,
-            branchId: String(purchase.branch || ''),
-            ...(currency !== 'BDT' && exchangeRate
-              ? {
-                  currency,
-                  exchangeRate,
-                  foreignTotal: Math.round(grandTotal / exchangeRate),
-                }
-              : {}),
-          },
-          {
-            resource: 'purchase',
-            resourceId: String(purchase._id),
-            userId: actorId,
-            organizationId: String(purchase.branch || ''),
-            source: 'commerce',
-            idempotencyKey: `purchase:${String(purchase._id)}:received`,
-          },
-        );
-        await outboxStore.save(event, {
-          session: session ?? undefined,
-          dedupeKey: event.meta.idempotencyKey,
-        });
+
+        // Two mutually-exclusive accounting paths, picked from the PO doc:
+        //
+        //   - Cash purchase (paymentTerms='cash' OR no supplier) → publish
+        //     `accounting:purchase.paid`. The handler posts the everything-
+        //     in-one PURCHASES JE: Dr Inv + Dr VAT / Cr Bank.
+        //
+        //   - Credit purchase (paymentTerms='credit' AND supplier set) →
+        //     publish `purchase:received`. The handler posts the accrual-
+        //     correct vendor-bill JE: Dr Inv + Dr VAT / Cr A/P, with the
+        //     credit line tagged with `partnerId: supplierId` and a
+        //     `maturityDate` so payment reconciliation can match against
+        //     it later.
+        //
+        // Publishing both would double-post the GL entry. The two events
+        // exist because the bill workflow (Phase 1 A/P) supersedes the
+        // simpler all-in-one posting only when a supplier exists to attach
+        // the partnerId to.
+        const isCreditWithSupplier = purchase.paymentTerms !== 'cash' && !!purchase.supplier;
+
+        if (isCreditWithSupplier) {
+          const billEvent = createEvent(
+            'purchase:received',
+            {
+              purchaseId: String(purchase._id),
+              organizationId: String(purchase.branch || ''),
+            },
+            {
+              resource: 'purchase',
+              resourceId: String(purchase._id),
+              userId: actorId,
+              organizationId: String(purchase.branch || ''),
+              source: 'commerce',
+              idempotencyKey: `purchase:${String(purchase._id)}:bill`,
+            },
+          );
+          await outboxStore.save(billEvent, {
+            session: session ?? undefined,
+            dedupeKey: billEvent.meta.idempotencyKey,
+          });
+        } else {
+          const event = createEvent(
+            'accounting:purchase.paid',
+            {
+              purchaseId: String(purchase._id),
+              amount: grandTotalPaisa,
+              tax: taxTotalPaisa,
+              ...(vatRate !== undefined ? { vatRate } : {}),
+              isPaid: purchase.paymentTerms === 'cash',
+              inventoryType: 'merchandise' as const,
+              branchId: String(purchase.branch || ''),
+              ...(currency !== 'BDT' && exchangeRate
+                ? {
+                    currency,
+                    exchangeRate,
+                    foreignTotal: Math.round(grandTotalPaisa / exchangeRate),
+                  }
+                : {}),
+            },
+            {
+              resource: 'purchase',
+              resourceId: String(purchase._id),
+              userId: actorId,
+              organizationId: String(purchase.branch || ''),
+              source: 'commerce',
+              idempotencyKey: `purchase:${String(purchase._id)}:received`,
+            },
+          );
+          await outboxStore.save(event, {
+            session: session ?? undefined,
+            dedupeKey: event.meta.idempotencyKey,
+          });
+        }
       }
 
       // Two-step cast: Mongoose hydrated docs aren't structurally

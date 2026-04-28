@@ -53,7 +53,6 @@ interface PosOrderBody {
   branchSlug?: string;
   customer?: { id?: string; name?: string; phone?: string; email?: string };
   payments?: Array<{ method: string; amount: number; reference?: string; details?: unknown }>;
-  payment?: { method: string; amount: number; reference?: string; details?: unknown };
   discount?: number;
   deliveryMethod?: 'pickup' | 'delivery';
   deliveryAddress?: Record<string, unknown>;
@@ -130,7 +129,7 @@ class PosController {
       organizationId: branchId,
     };
 
-    const payments = body.payments ?? (body.payment ? [body.payment] : []);
+    const payments = body.payments ?? [];
 
     try {
       const engine = await ensureOrderEngine();

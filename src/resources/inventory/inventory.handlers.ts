@@ -4,20 +4,33 @@
  * Two-way event bridge between products and Flow quants:
  *
  * Product → Flow:
- * - product:created → seed StockQuant (qty=0) for each variant at default branch
- * - product:variants.changed → invalidate POS lookup cache
- * - product:deleted / product:restored → invalidate POS lookup cache
+ * - product:created           → seed StockQuant (qty=0) for each variant at default branch
+ * - product:variants.changed  → invalidate POS lookup cache
+ * - product:deleted/restored  → invalidate POS lookup cache
+ * - product:before.purge      → no-op (quant data survives)
  *
  * Flow → Product (Shopify pattern — keep product.quantity as a cached field):
- * - inventory.move.done → update product.quantity from quant.quantityOnHand
- * - inventory.adjustment.posted → same
+ * - flow.move.done            → sync product.quantity from quant.quantityOnHand
+ * - flow.reservation.released → same
  *
- * This keeps product.quantity in sync without a second round-trip on reads.
- * The storefront reads product.quantity directly (zero latency).
- * Flow quant remains the source of truth for all inventory operations.
+ * Storefront reads `product.quantity` directly (zero round-trip). Flow
+ * quant remains the source of truth for all inventory operations.
+ *
+ * **Pattern:** every handler is wrapped with Arc's `wrapWithBoundary`
+ * which catches handler exceptions, logs them with structured
+ * `{ err, event, eventId }` context, and swallows so one bad event
+ * doesn't poison the bus. For projection / cache-invalidation
+ * handlers like these, retry would just delay the next-event resync —
+ * the boundary is the right reliability profile.
+ *
+ * Payloads are NOT re-validated here: the catalog and flow packages
+ * register their event schemas in `eventRegistry`, so
+ * `eventPlugin({ validateMode: 'reject' })` already rejects malformed
+ * payloads at publish time. Subscribers can trust the shape.
  */
 
 import { FlowEvents } from '@classytic/flow';
+import { wrapWithBoundary } from '@classytic/arc/events';
 import mongoose from 'mongoose';
 import { subscribe } from '#lib/events/arcEvents.js';
 import logger from '#lib/utils/logger.js';
@@ -36,166 +49,186 @@ interface ProductEventPayload {
   productId: string;
 }
 
-interface DomainEvent<T> {
-  payload?: T;
+interface FlowQuantChangePayload {
+  organizationId: string;
+  skuRef: string;
+  sourceLocationId?: string;
+  destinationLocationId?: string;
 }
+
+const eventLogger = logger as unknown as Parameters<typeof wrapWithBoundary>[1] extends infer O
+  ? O extends { logger?: infer L }
+    ? L
+    : never
+  : never;
 
 let handlersRegistered = false;
 
 export function registerInventoryEventHandlers(options: { force?: boolean } = {}): void {
   const { force = false } = options;
-
   if (handlersRegistered && !force) return;
   handlersRegistered = true;
 
   // ── product:created → seed quants at 0 for default branch ──
+  void subscribe(
+    'product:created',
+    wrapWithBoundary(
+      async (event) => {
+        const { productId, productType, variants } = event.payload as ProductCreatedPayload;
+        const flow = getFlowEngineOrNull();
+        if (!flow) return;
 
-  void subscribe('product:created', async (event: DomainEvent<unknown>) => {
-    const { productId, productType, variants } = (event.payload || {}) as ProductCreatedPayload;
-    try {
-      const flow = getFlowEngineOrNull();
-      if (!flow) return; // Flow not initialized yet
+        const defaultBranch = await branchRepository.getDefaultBranch();
+        if (!defaultBranch) return;
 
-      const defaultBranch = await branchRepository.getDefaultBranch();
-      if (!defaultBranch) return;
+        const ctx = buildFlowContext(defaultBranch._id as string | { toString(): string });
 
-      const ctx = buildFlowContext(defaultBranch._id as string | { toString(): string });
-
-      if (productType === 'simple') {
-        const skuRef = skuRefFromProduct(productId!, null);
-        await flow.repositories.quant.upsert({
-          organizationId: ctx.organizationId,
-          skuRef,
-          locationId: DEFAULT_LOCATION,
-          quantityDelta: 0,
-          inDate: new Date(),
-        });
-      } else if (productType === 'variant' && variants?.length) {
-        for (const v of variants) {
-          if (!v?.sku) continue;
+        if (productType === 'simple') {
           await flow.repositories.quant.upsert({
             organizationId: ctx.organizationId,
-            skuRef: v.sku,
+            skuRef: skuRefFromProduct(productId, null),
             locationId: DEFAULT_LOCATION,
             quantityDelta: 0,
             inDate: new Date(),
           });
+        } else if (productType === 'variant' && variants?.length) {
+          for (const v of variants) {
+            if (!v.sku) continue;
+            await flow.repositories.quant.upsert({
+              organizationId: ctx.organizationId,
+              skuRef: v.sku,
+              locationId: DEFAULT_LOCATION,
+              quantityDelta: 0,
+              inDate: new Date(),
+            });
+          }
         }
-      }
 
-      logger.info({ productId }, 'Seeded Flow quants for new product');
-    } catch (error) {
-      logger.error({ err: error, productId }, 'Failed to seed Flow quants');
-    }
-  });
+        logger.info({ productId }, 'Seeded Flow quants for new product');
+      },
+      { name: 'product:created', logger: eventLogger },
+    ),
+  );
 
   // ── product:variants.changed → invalidate cache ──
-
-  void subscribe('product:variants.changed', async (event: DomainEvent<unknown>) => {
-    const { productId } = (event.payload || {}) as ProductEventPayload;
-    try {
-      if (productId) posLookupService.invalidateCacheForProduct(productId);
-    } catch (error) {
-      logger.error({ err: error, productId }, 'Failed to invalidate cache on variant change');
-    }
-  });
+  void subscribe(
+    'product:variants.changed',
+    wrapWithBoundary(
+      async (event) => {
+        const { productId } = event.payload as ProductEventPayload;
+        if (productId) posLookupService.invalidateCacheForProduct(productId);
+      },
+      { name: 'product:variants.changed', logger: eventLogger },
+    ),
+  );
 
   // ── product:deleted → invalidate cache ──
-
-  void subscribe('product:deleted', async (event: DomainEvent<unknown>) => {
-    const { productId } = (event.payload || {}) as ProductEventPayload;
-    try {
-      if (productId) posLookupService.invalidateCacheForProduct(productId);
-      logger.info({ productId }, 'Invalidated cache for deleted product');
-    } catch (error) {
-      logger.error({ err: error, productId }, 'Failed to invalidate cache on product delete');
-    }
-  });
+  void subscribe(
+    'product:deleted',
+    wrapWithBoundary(
+      async (event) => {
+        const { productId } = event.payload as ProductEventPayload;
+        if (productId) {
+          posLookupService.invalidateCacheForProduct(productId);
+          logger.info({ productId }, 'Invalidated cache for deleted product');
+        }
+      },
+      { name: 'product:deleted', logger: eventLogger },
+    ),
+  );
 
   // ── product:restored → invalidate cache ──
+  void subscribe(
+    'product:restored',
+    wrapWithBoundary(
+      async (event) => {
+        const { productId } = event.payload as ProductEventPayload;
+        if (productId) {
+          posLookupService.invalidateCacheForProduct(productId);
+          logger.info({ productId }, 'Invalidated cache for restored product');
+        }
+      },
+      { name: 'product:restored', logger: eventLogger },
+    ),
+  );
 
-  void subscribe('product:restored', async (event: DomainEvent<unknown>) => {
-    const { productId } = (event.payload || {}) as ProductEventPayload;
-    try {
-      if (productId) posLookupService.invalidateCacheForProduct(productId);
-      logger.info({ productId }, 'Invalidated cache for restored product');
-    } catch (error) {
-      logger.error({ err: error, productId }, 'Failed to invalidate cache on product restore');
-    }
-  });
+  // ── product:before.purge → no-op (quant data survives) ──
+  void subscribe(
+    'product:before.purge',
+    wrapWithBoundary(async () => {}, {
+      name: 'product:before.purge',
+      logger: eventLogger,
+    }),
+  );
 
-  // ── product:before.purge → no-op ──
+  // ── Flow → Product: sync product.quantity from quant on stock changes ──
+  // Flow events MAY arrive with data at the envelope root (legacy publishers)
+  // or under `.payload` — handle both inline.
+  void subscribe(
+    FlowEvents.MOVE_DONE,
+    wrapWithBoundary(
+      async (event) => {
+        const data = ((event.payload as FlowQuantChangePayload | undefined) ??
+          (event as unknown as FlowQuantChangePayload));
+        if (!data.skuRef || !data.organizationId) return;
+        await syncProductQuantityFromQuant(data.skuRef, data.organizationId);
+      },
+      { name: FlowEvents.MOVE_DONE, logger: eventLogger },
+    ),
+  );
 
-  void subscribe('product:before.purge', async () => {
-    // No action needed — quant data survives product purge
-  });
-
-  // ── Flow → Product: sync product.quantity from quant on every stock change ──
-  // Shopify pattern: product.quantity is a cached field kept in sync via events.
-  // The storefront reads it directly (zero latency). Flow quant is the source of truth.
-
-  void subscribe(FlowEvents.MOVE_DONE, async (event: DomainEvent<unknown>) => {
-    const data = (event.payload || event) as {
-      organizationId?: string;
-      skuRef?: string;
-      sourceLocationId?: string;
-      destinationLocationId?: string;
-    };
-    if (!data.skuRef || !data.organizationId) return;
-
-    try {
-      await syncProductQuantityFromQuant(data.skuRef, data.organizationId);
-    } catch (error) {
-      logger.error({ err: error, skuRef: data.skuRef }, 'Failed to sync product quantity after move');
-    }
-  });
-
-  void subscribe(FlowEvents.RESERVATION_RELEASED, async (event: DomainEvent<unknown>) => {
-    const data = (event.payload || event) as { organizationId?: string; skuRef?: string };
-    if (!data.skuRef || !data.organizationId) return;
-
-    try {
-      await syncProductQuantityFromQuant(data.skuRef, data.organizationId);
-    } catch (error) {
-      logger.error({ err: error, skuRef: data.skuRef }, 'Failed to sync product quantity after reservation release');
-    }
-  });
+  void subscribe(
+    FlowEvents.RESERVATION_RELEASED,
+    wrapWithBoundary(
+      async (event) => {
+        const data = ((event.payload as FlowQuantChangePayload | undefined) ??
+          (event as unknown as FlowQuantChangePayload));
+        if (!data.skuRef || !data.organizationId) return;
+        await syncProductQuantityFromQuant(data.skuRef, data.organizationId);
+      },
+      { name: FlowEvents.RESERVATION_RELEASED, logger: eventLogger },
+    ),
+  );
 }
 
 /**
  * Sync product.quantity from Flow quant.quantityOnHand.
  *
  * Resolves skuRef back to a product:
- * - If skuRef matches a variant SKU → update that variant's quantity in stockProjection
- * - If skuRef matches a product _id → update product.quantity directly
+ *   - If skuRef matches a variant SKU → update that variant's quantity
+ *     in stockProjection
+ *   - If skuRef matches a product `_id` → update product.quantity directly
  *
- * This is a fire-and-forget cache update — failures don't affect inventory operations.
+ * Fire-and-forget cache update — failures don't affect inventory ops.
  */
-async function syncProductQuantityFromQuant(skuRef: string, _organizationId: string): Promise<void> {
+async function syncProductQuantityFromQuant(
+  skuRef: string,
+  organizationId: string,
+): Promise<void> {
   const flow = getFlowEngineOrNull();
   if (!flow) return;
 
   const { ensureCatalogEngine } = await import('#resources/catalog/catalog.engine.js');
   const catalog = await ensureCatalogEngine();
   const ctx = { actorId: 'stock-sync', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
-  const flowCtx = buildFlowContext(_organizationId);
+  const flowCtx = buildFlowContext(organizationId);
 
-  const avail = await flow.services.quant.getAvailability({ skuRef, locationId: DEFAULT_LOCATION }, flowCtx);
+  const avail = await flow.services.quant.getAvailability(
+    { skuRef, locationId: DEFAULT_LOCATION },
+    flowCtx,
+  );
   const onHand = avail.quantityOnHand;
 
-  // Try variant SKU first — miss returns null (don't throw)
+  // Variant SKU first — miss returns null (don't throw).
   const product = await catalog.repositories.product.getByQuery(
     { 'variants.sku': skuRef },
     { ...ctx, throwOnNotFound: false },
   );
   if (product) {
     // Rebuild stock projection from all variant quantities. Fan out the
-    // availability reads in parallel (Promise.all) — previously this was
-    // a serial `for...of` that did N round-trips per MOVE_DONE event for
-    // a product with N variants. A 10-variant product receipt fired 10
-    // events × 11 reads each = 110 sequential queries; under burst load
-    // (bulk import) this saturated the event loop. Iterations are
-    // independent so parallelism is safe.
+    // availability reads in parallel — previously serial, which made a
+    // 10-variant product receipt fire 110 sequential queries per
+    // MOVE_DONE event. Iterations are independent so parallelism is safe.
     const variants = (product.variants ?? []) as Array<{ sku: string }>;
     const variantStocks = await Promise.all(
       variants.map(async (v) => {
@@ -217,14 +250,21 @@ async function syncProductQuantityFromQuant(skuRef: string, _organizationId: str
       { totalAvailable: totalQty, variants: variantStocks },
       ctx,
     );
-    logger.debug({ skuRef, productId: product._id, onHand, totalQty }, 'Synced variant stock projection');
+    logger.debug(
+      { skuRef, productId: product._id, onHand, totalQty },
+      'Synced variant stock projection',
+    );
     return;
   }
 
-  // Simple product
+  // Simple product — match by `_id`.
   if (mongoose.isValidObjectId(skuRef)) {
     try {
-      await catalog.repositories.product.updateStockProjection(skuRef, { totalAvailable: onHand }, ctx);
+      await catalog.repositories.product.updateStockProjection(
+        skuRef,
+        { totalAvailable: onHand },
+        ctx,
+      );
       logger.debug({ skuRef, onHand }, 'Synced simple product stock projection');
     } catch {
       // Product may not exist

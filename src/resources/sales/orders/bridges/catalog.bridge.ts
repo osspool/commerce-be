@@ -71,9 +71,18 @@ export function createCatalogBridge(): OrderCatalogBridge {
         const basePrice = amountOf(pricing?.basePrice);
         const images = p.images as Array<Record<string, unknown>> | undefined;
 
-        const costManagement = monetization?.costManagement as Record<string, unknown> | undefined;
-        const productCostPrice =
-          amountOf(costManagement?.costPrice) ?? (typeof p.costPrice === 'number' ? (p.costPrice as number) : undefined);
+        // Cost path is `defaultMonetization.pricing.costPrice.amount` (Money,
+        // already in paisa — same place product.costPrice.service.ts writes
+        // to). Legacy top-level `costPrice` is a bare number in BDT major
+        // (pre-monetization schema) — convert to paisa so downstream
+        // (snapshot.costPrice → CogsData.costAmount → JE debit) is unit-
+        // consistent. Without this we'd post COGS at 1/100th the real cost.
+        const productCostPrice = (() => {
+          const fromMoney = amountOf(pricing?.costPrice);
+          if (typeof fromMoney === 'number') return fromMoney;
+          if (typeof p.costPrice === 'number') return Math.round(p.costPrice * 100);
+          return undefined;
+        })();
 
         // Resolve the variant when the caller provided one.
         const requestedVariantSku = typeof selections.variantSku === 'string' ? (selections.variantSku as string) : undefined;
@@ -92,7 +101,19 @@ export function createCatalogBridge(): OrderCatalogBridge {
         const skuRef = variant ? String(variant.sku) : String(product._id);
 
         const variantPrice = variant ? amountOf(variant.price) : undefined;
-        const variantCost = variant ? amountOf(variant.costPrice) : undefined;
+        // Same unit fix as productCostPrice — variant.costPrice on legacy
+        // docs is a bare BDT-major number; on monetization-block docs it's
+        // a Money with `amount` already in paisa.
+        const variantCost = variant
+          ? (() => {
+              const v = variant.costPrice;
+              if (v && typeof v === 'object' && 'amount' in v) {
+                return amountOf(v);
+              }
+              if (typeof v === 'number') return Math.round(v * 100);
+              return undefined;
+            })()
+          : undefined;
         const variantImage = variant?.image ?? (variant?.images?.[0]?.url as string | undefined);
         const variantLabel = variant
           ? ((variant.name as string | undefined) ??
@@ -143,6 +164,16 @@ export function createCatalogBridge(): OrderCatalogBridge {
           }
         }
 
+        // Freeze the category identifier (slug) onto the snapshot so
+        // category-typed loyalty earning rules + sales-by-category reports
+        // can match without a runtime DB lookup. We use `categorySlug`
+        // because that's what the catalog stores (`categoryId` is not a
+        // resolved field on Product) — earning rules' `conditions.categories`
+        // therefore expect category slugs (e.g. ["panjabi-1", "kids-boys"]).
+        // Pulled from the resolved product, not the request, so it can't
+        // be spoofed.
+        const categorySlug = p.categorySlug as string | undefined;
+
         return {
           offerId,
           productId: String(product._id),
@@ -155,6 +186,7 @@ export function createCatalogBridge(): OrderCatalogBridge {
           currency: 'BDT',
           requiresShipping: (p.productType as string) !== 'digital',
           weight: (variant?.weight ?? (p.weight as number | undefined)) as number | undefined,
+          metadata: categorySlug ? { categoryId: categorySlug } : undefined,
         };
       } catch {
         return null;

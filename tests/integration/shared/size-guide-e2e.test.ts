@@ -1,16 +1,18 @@
 /**
  * Size Guide resource integration test — bare-Fastify + Arc adapter.
  *
- * Covers the CRUD-by-adapter contract plus the slug-lookup preset:
+ * Covers the CRUD-by-adapter contract:
  *   GET    /size-guides            → public list
  *   GET    /size-guides/:id        → public get
- *   GET    /size-guides/slug/:slug → public lookup (slugLookup preset)
  *   POST   /size-guides            → admin create (auto-slug from name)
  *   PATCH  /size-guides/:id        → admin update
  *   DELETE /size-guides/:id        → admin delete
  *
  * Auth gate: writes require platformAdminOnly() (user.role contains 'admin'
  * or 'superadmin'). Reads are public — no user attached at all.
+ *
+ * Storefront resolves slugs client-side from the cached list, so no
+ * `/slug/:slug` route is registered.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -109,31 +111,6 @@ describe('Size Guide CRUD', () => {
     const docs = Array.isArray(body.data) ? body.data : (body.data?.docs ?? body.docs);
     expect(Array.isArray(docs)).toBe(true);
     expect(docs.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('GET /size-guides/slug/:slug resolves a guide by slug (preset route)', async () => {
-    await mongoose.connection.collection('sizeguides').insertOne({
-      name: 'Hoodie Guide',
-      slug: 'hoodie-guide',
-      measurementUnit: 'inches',
-      measurementLabels: ['Chest'],
-      sizes: [{ name: 'L', measurements: { Chest: '42-44' } }],
-      isActive: true,
-      displayOrder: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const res = await publicApp.inject({
-      method: 'GET',
-      url: '/api/v1/size-guides/slug/hoodie-guide',
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.success).toBe(true);
-    expect(body.data.slug).toBe('hoodie-guide');
-    expect(body.data.name).toBe('Hoodie Guide');
   });
 
   it('admin can update a guide; updateOnChange regenerates slug from new name', async () => {

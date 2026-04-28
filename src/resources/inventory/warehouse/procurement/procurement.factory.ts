@@ -17,10 +17,31 @@
 import { defineResource, BaseController } from '@classytic/arc';
 import type { IRequestContext, IControllerResponse } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
+import {
+  applyDecision,
+  createChain,
+  type ApprovalChain,
+  type ChainOrder,
+  type DecisionInput,
+} from '@classytic/primitives/approval';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
 import { flow, flowCtxFromArcReq, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
+
+interface SubmitForApprovalBody {
+  chain: {
+    order: ChainOrder;
+    steps: Array<{
+      id: string;
+      name?: string;
+      approvers: Array<{ id: string; name?: string; role?: string }>;
+      requiredApprovals?: number;
+    }>;
+  };
+}
+
+type DecideBody = Omit<DecisionInput, 'decidedAt'>;
 
 interface ProcurementCreateBody {
   vendorRef?: string;
@@ -57,9 +78,32 @@ class ProcurementController extends BaseController {
       destinationNodeId = String(defaultNode._id);
     }
 
+    // Auto-resolve destinationLocationId to the node's `stock` location.
+    // Without this, Flow's procurement service falls back to using the
+    // nodeId as locationId (procurement.service.ts:225), which orphans
+    // the resulting quants — they don't appear under any actual location.
+    let destinationLocationId = body.destinationLocationId;
+    if (!destinationLocationId) {
+      const stockLocation = await engine.repositories.location.getByQuery(
+        { nodeId: destinationNodeId, code: 'stock' },
+        { organizationId: ctx.organizationId, throwOnNotFound: false, lean: true },
+      );
+      if (!stockLocation) {
+        throw Object.assign(
+          new Error(
+            'Default storage location not found for this branch. Re-bootstrap the warehouse or pass destinationLocationId.',
+          ),
+          { statusCode: 400, code: 'NO_DEFAULT_STORAGE_LOCATION' },
+        );
+      }
+      destinationLocationId = String(stockLocation._id);
+    }
+
     try {
       const result = await engine.services.procurement.create(
-        { ...body, destinationNodeId } as Parameters<typeof engine.services.procurement.create>[0],
+        { ...body, destinationNodeId, destinationLocationId } as Parameters<
+          typeof engine.services.procurement.create
+        >[0],
         ctx,
       );
       return { success: true, data: result as unknown as Record<string, unknown>, status: 201 };
@@ -95,6 +139,8 @@ export function createProcurementResource() {
         destinationNodeId: { systemManaged: true },
         destinationLocationId: { systemManaged: true },
         fx: { systemManaged: true },
+        // Mutated only via submit_for_approval / decide actions; never via PATCH.
+        approvalChain: { systemManaged: true },
         receivedAt: { systemManaged: true },
         createdBy: { systemManaged: true },
         modifiedBy: { systemManaged: true },
@@ -118,6 +164,11 @@ export function createProcurementResource() {
                 skuRef: { type: 'string' },
                 quantity: { type: 'number', minimum: 0 },
                 unitCost: { type: 'number', minimum: 0 },
+                // Optional VAT pass-through. Engine ignores; the be-prod
+                // accounting bridge reads these to split input-VAT on the
+                // resulting vendor-bill JE.
+                taxRate: { type: 'number', minimum: 0 },
+                tax: { type: 'number', minimum: 0 },
                 expectedAt: { type: 'string', format: 'date-time' },
               },
               required: ['skuRef', 'quantity', 'unitCost'],
@@ -306,7 +357,18 @@ export function createProcurementResource() {
       approve: {
         handler: async (id, _data, req) => {
           const ctx = flowCtxFromArcReq(req as unknown as IRequestContext);
-          return engine.services.procurement.approve(id, ctx);
+          try {
+            return await engine.services.procurement.approve(id, ctx);
+          } catch (err) {
+            const e = err as { code?: string; httpStatus?: number; message?: string };
+            if (e?.code === 'APPROVAL_CHAIN_INCOMPLETE') {
+              throw Object.assign(new Error(e.message ?? 'Approval chain incomplete'), {
+                statusCode: 422,
+                code: 'APPROVAL_CHAIN_INCOMPLETE',
+              });
+            }
+            throw err;
+          }
         },
         permissions: permissions.inventory.procurementApprove,
       },
@@ -314,6 +376,117 @@ export function createProcurementResource() {
         handler: async (id, _data, req) => {
           const ctx = flowCtxFromArcReq(req as unknown as IRequestContext);
           return engine.services.procurement.cancel(id, ctx);
+        },
+        permissions: permissions.inventory.procurementApprove,
+      },
+      // Attach a multi-step approval chain to a draft PO. Steps come from the
+      // request body — admins typically build them from a saved template
+      // client-side. Subsequent `approve` calls are gated on
+      // `isApproved(approvalChain)` inside the kernel service.
+      submit_for_approval: {
+        handler: async (id, data, req) => {
+          const ctx = flowCtxFromArcReq(req as unknown as IRequestContext);
+          const body = (data ?? {}) as unknown as SubmitForApprovalBody;
+          if (!body.chain?.steps?.length) {
+            throw Object.assign(new Error('chain.steps is required and must be non-empty'), {
+              statusCode: 400,
+              code: 'INVALID_CHAIN',
+            });
+          }
+
+          const order = await engine.repositories.procurement.getByQuery(
+            { _id: id },
+            { organizationId: ctx.organizationId, throwOnNotFound: false, lean: true },
+          );
+          if (!order) {
+            throw Object.assign(new Error(`Procurement order ${id} not found`), {
+              statusCode: 404,
+              code: 'PROCUREMENT_NOT_FOUND',
+            });
+          }
+          if (order.status !== 'draft') {
+            throw Object.assign(
+              new Error(`Cannot attach approval chain to order in status: ${order.status}`),
+              { statusCode: 422, code: 'INVALID_STATUS' },
+            );
+          }
+          if (order.approvalChain) {
+            throw Object.assign(new Error('Approval chain already attached'), {
+              statusCode: 409,
+              code: 'CHAIN_ALREADY_ATTACHED',
+            });
+          }
+
+          let chain: ApprovalChain;
+          try {
+            chain = createChain(body.chain);
+          } catch (err) {
+            const e = err as { code?: string; message?: string };
+            throw Object.assign(new Error(e?.message ?? 'Invalid approval chain'), {
+              statusCode: 400,
+              code: e?.code ?? 'INVALID_CHAIN',
+            });
+          }
+
+          return engine.repositories.procurement.update(
+            id,
+            { approvalChain: chain } as Record<string, unknown>,
+            { organizationId: ctx.organizationId, lean: true },
+          );
+        },
+        permissions: permissions.inventory.procurementApprove,
+      },
+      // Apply a single approver decision to the attached chain. Pure
+      // transformation: load → applyDecision (primitive) → persist.
+      decide: {
+        handler: async (id, data, req) => {
+          const ctx = flowCtxFromArcReq(req as unknown as IRequestContext);
+          const body = (data ?? {}) as unknown as DecideBody;
+          if (!body.stepId || !body.approverId || !body.decision) {
+            throw Object.assign(
+              new Error('stepId, approverId, and decision are required'),
+              { statusCode: 400, code: 'INVALID_DECISION' },
+            );
+          }
+
+          const order = await engine.repositories.procurement.getByQuery(
+            { _id: id },
+            { organizationId: ctx.organizationId, throwOnNotFound: false, lean: true },
+          );
+          if (!order) {
+            throw Object.assign(new Error(`Procurement order ${id} not found`), {
+              statusCode: 404,
+              code: 'PROCUREMENT_NOT_FOUND',
+            });
+          }
+          if (!order.approvalChain) {
+            throw Object.assign(new Error('No approval chain attached'), {
+              statusCode: 422,
+              code: 'NO_CHAIN_ATTACHED',
+            });
+          }
+
+          let updatedChain: ApprovalChain;
+          try {
+            updatedChain = applyDecision(order.approvalChain as ApprovalChain, {
+              stepId: body.stepId,
+              approverId: body.approverId,
+              decision: body.decision,
+              ...(body.note !== undefined ? { note: body.note } : {}),
+            });
+          } catch (err) {
+            const e = err as { code?: string; message?: string };
+            throw Object.assign(new Error(e?.message ?? 'Invalid decision'), {
+              statusCode: 422,
+              code: e?.code ?? 'INVALID_DECISION',
+            });
+          }
+
+          return engine.repositories.procurement.update(
+            id,
+            { approvalChain: updatedChain } as Record<string, unknown>,
+            { organizationId: ctx.organizationId, lean: true },
+          );
         },
         permissions: permissions.inventory.procurementApprove,
       },

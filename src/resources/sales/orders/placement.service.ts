@@ -40,7 +40,6 @@ import {
   reserveOrderStock,
   resolveLineSkus,
 } from './order-placement.js';
-import { toFulfillmentAddress } from './shipping-address.js';
 
 export interface PlacementInput {
   body: Record<string, unknown>;
@@ -156,11 +155,35 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
 
   let order: Record<string, unknown>;
   try {
+    // Promote the promo-evaluation discount onto the canonical
+    // `totals.discount` so the order kernel re-derives `grandTotal` with the
+    // discount applied. The kernel reads `data.discount` as a Money object
+    // (see `composeTotals` in @classytic/order). Without this, the order
+    // would persist with `totals.discount: 0` and a grand total equal to
+    // subtotal — even though we already committed the promo redemption.
+    const promoDiscount =
+      promoReservation.totalDiscount > 0
+        ? { amount: promoReservation.totalDiscount, currency: 'BDT' }
+        : undefined;
+
+    // Forward the FE-quoted delivery charge so the order's `totals.shipping`
+    // and `grandTotal` reflect what the customer was shown. The FE quotes
+    // `delivery.price` in BDT major units (matching how the cart lines are
+    // displayed), while the kernel persists Money in paisa — convert here
+    // at the boundary instead of mixing units inside the kernel.
+    const deliveryPrice = (body.delivery as { price?: number } | undefined)?.price;
+    const promoShipping =
+      typeof deliveryPrice === 'number' && deliveryPrice > 0
+        ? { amount: Math.round(deliveryPrice * 100), currency: 'BDT' }
+        : undefined;
+
     order = (await engine.repositories.order.create(
       {
         channel: (forceChannel ?? (body.channel as OrderChannel | undefined) ?? 'web') satisfies OrderChannel,
         orderType: body.orderType as string,
         lines: linesWithSnapshots,
+        ...(promoDiscount ? { discount: promoDiscount } : {}),
+        ...(promoShipping ? { shipping: promoShipping } : {}),
         customer: body.customer as Record<string, unknown>,
         // NOTE: `shippingAddress` is NOT persisted on the Order doc — the
         // @classytic/order model has no address field (see order.model.ts).
@@ -232,48 +255,19 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
       })
     : { kind: 'skipped' as const, error: 'revenue_not_ready' };
 
-  // Persist the delivery address on a Fulfillment — the canonical home
-  // per @classytic/order (the Order doc itself has no address fields).
-  // This is the composition the kernel expects: the host calls
-  // `fulfillment.createForOrder` with the same address payload the FE
-  // sent, right after `order.create` — no DB lookup, no populate.
-  //
-  // The FE/SDK ship a BD-retail address shape (recipientName, addressLine1,
-  // areaId, ...) while the kernel's Fulfillment schema requires canonical
-  // { line1, city, country }. `toFulfillmentAddress` translates between
-  // them and returns null when required fields are missing (so we don't
-  // let Mongoose throw on an un-savable doc).
-  //
-  // Best-effort: if this throws, the order is already saved and the
-  // admin can create the fulfillment manually from /dashboard/orders.
-  const shippingAddress = toFulfillmentAddress(
-    body.shippingAddress as Record<string, unknown> | undefined,
-  );
-  const physicalLines = linesWithSnapshots.filter((l) => {
-    const snap = (l as { snapshot?: { requiresShipping?: boolean } }).snapshot;
-    return snap?.requiresShipping !== false;
-  });
-  if (shippingAddress && physicalLines.length > 0) {
-    try {
-      await engine.repositories.fulfillment.createForOrder(
-        {
-          orderNumber: order.orderNumber as string,
-          fulfillmentType: 'physical',
-          lines: physicalLines.map((l) => ({
-            orderLineId: (l as { lineId: string }).lineId,
-            quantity: (l as { quantity: number }).quantity,
-          })),
-          shippingAddress: shippingAddress as unknown as Record<string, unknown>,
-        },
-        ctx,
-      );
-    } catch (err) {
-      logger.warn(
-        { err: (err as Error).message, orderNumber: order.orderNumber },
-        'placement: fulfillment create failed — address not persisted, admin can create manually',
-      );
-    }
-  }
+  // Note: Fulfillment doc auto-creation used to happen here, but it was
+  // failing silently (the order kernel auto-generates `lineId: line_${i}`
+  // internally, while we passed `linesWithSnapshots` which carry no
+  // `lineId` — so `createForOrder` rejected the request as "sku/skuRef/
+  // name required"). With the new lifecycle handlers in
+  // `lifecycle/handlers/stock-commit.ts`, inventory automation runs off
+  // the order FSM and no longer requires a Fulfillment doc to fire. The
+  // Fulfillment record stays useful for carrier tracking metadata
+  // (Pathao/RedX slip numbers, shipped-at timestamps), so it's now
+  // created on demand by the carrier-integration code path with the
+  // correct lineId values resolved from the persisted order — see
+  // `engine.repositories.fulfillment.createForOrder` callers under
+  // `resources/logistics/`.
 
   return { status: 201, body: { success: true, data: order, promoCommit, payment: paymentResult } };
 }

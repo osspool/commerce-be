@@ -17,7 +17,7 @@
  * package for easy scanning).
  */
 
-import { createEventRegistry } from '@classytic/arc/events';
+import { createEventRegistry, type EventDefinitionOutput } from '@classytic/arc/events';
 import { type CatalogEventDefinition, catalogEventDefinitions } from '@classytic/catalog';
 import { type FlowEventDefinition, flowEventDefinitions } from '@classytic/flow';
 import { type InvoiceEventDefinition, invoiceEventDefinitions } from '@classytic/invoice';
@@ -26,6 +26,7 @@ import { type LoyaltyEventDefinition, loyaltyEventDefinitions } from '@classytic
 import { type OrderEventDefinition, orderEventDefinitions } from '@classytic/order';
 import { type PromoEventDefinition, promoEventDefinitions } from '@classytic/promo';
 import { type RevenueEventDefinition, revenueEventDefinitions } from '@classytic/revenue';
+import { accountingEventDefinitions } from '#resources/accounting/events/event-definitions.js';
 
 export const eventRegistry = createEventRegistry();
 
@@ -54,5 +55,13 @@ for (const def of promoEventDefinitions as ReadonlyArray<PromoEventDefinition>) 
   eventRegistry.register(def);
 }
 for (const def of revenueEventDefinitions as ReadonlyArray<RevenueEventDefinition>) {
+  eventRegistry.register(def);
+}
+
+// Host-internal events emitted by be-prod (order/fulfillment/COD/etc).
+// Registering them gives the same publish-time validation guarantee
+// (`validateMode: 'reject'` in dev/test) the package events get, and
+// lets `wrapWithSchema(definition, handler)` validate at the subscriber.
+for (const def of accountingEventDefinitions as ReadonlyArray<EventDefinitionOutput>) {
   eventRegistry.register(def);
 }

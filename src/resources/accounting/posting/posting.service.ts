@@ -54,6 +54,14 @@ export interface PostingInput {
    * context (auto-close hook, scheduled jobs) we fall back to SYSTEM_ACTOR_ID.
    */
   actorId?: string;
+  /**
+   * Free-form metadata stamped on the journal entry (`entryData.metadata`).
+   * Used today by the COGS pipeline to flag entries that posted with no cost
+   * basis (`costMissing: true` + `affectedLines`) so the admin "cost data
+   * gaps" view can surface them. Schema-less by design — different posting
+   * sources tag whatever provenance they need.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -147,6 +155,7 @@ export async function createPosting(
   };
   if (branchId) entryData.organizationId = branchId;
   if (input.sourceRef) entryData.sourceRef = input.sourceRef;
+  if (input.metadata && Object.keys(input.metadata).length > 0) entryData.metadata = input.metadata;
 
   const entry = (await journalEntryRepository.create(entryData)) as {
     _id: { toString(): string };
