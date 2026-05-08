@@ -22,9 +22,11 @@
  */
 
 import type { PostingInput, PostingItem } from '../posting.service.js';
+import { BD } from '../bd-account-codes.js';
+import { displayPartner } from './_label-helpers.js';
 
-const ACCOUNTS_PAYABLE = '2111';
-const ACCOUNTS_RECEIVABLE = '1141';
+const ACCOUNTS_PAYABLE = BD.ap;
+const ACCOUNTS_RECEIVABLE = BD.ar;
 const RETAINED_EARNINGS = '3310';
 
 export type PartnerSide = 'supplier' | 'customer';
@@ -32,6 +34,10 @@ export type PartnerSide = 'supplier' | 'customer';
 export interface OpeningBalanceInput {
   side: PartnerSide;
   partnerId: string;
+  /** Partner display name. When set, the JE label reads
+   *  `Opening balance — Supplier Acme Industries` instead of leaking the
+   *  raw partner ObjectId. */
+  partnerName?: string;
   amount: number; // paisa
   asOf?: Date;
   reason?: string;
@@ -65,7 +71,10 @@ function defaultAsOf(): Date {
   return new Date(d.getFullYear(), 0, 0); // Dec 31 of previous year
 }
 
-export function openingBalanceToPosting(input: OpeningBalanceInput): PostingInput {
+export function openingBalanceToPosting(
+  input: OpeningBalanceInput,
+  options: { autoPost?: boolean } = {},
+): PostingInput {
   validateOpeningBalance(input);
   const date = input.asOf ?? defaultAsOf();
 
@@ -108,7 +117,11 @@ export function openingBalanceToPosting(input: OpeningBalanceInput): PostingInpu
 
   return {
     journalType: 'GENERAL',
-    label: `Opening balance — ${input.side} ${input.partnerId}`,
+    label: `Opening balance — ${displayPartner(
+      input.partnerName,
+      input.partnerId,
+      input.side === 'supplier' ? 'Supplier' : 'Customer',
+    )}`,
     date,
     items,
     // Idempotent by (side, partnerId) — amount deliberately excluded so a
@@ -120,7 +133,9 @@ export function openingBalanceToPosting(input: OpeningBalanceInput): PostingInpu
       sourceModel: input.side === 'supplier' ? 'Supplier' : 'Customer',
       sourceId: input.partnerId,
     },
-    autoPost: true,
+    // Opening balance is a one-time migration entry — finance must verify
+    // before it hits Retained Earnings. Always Draft by default.
+    autoPost: options.autoPost ?? false,
   };
 }
 

@@ -5,10 +5,10 @@ import { z } from 'zod';
 
 const idParam = z.object({ id: z.string() });
 
-const successData = <T extends z.ZodType>(schema: T) => z.object({ success: z.literal(true), data: schema });
+const successData = <T extends z.ZodType>(schema: T) => schema;
 
 const listData = <T extends z.ZodType>(schema: T) =>
-  z.object({ success: z.literal(true), data: z.array(schema), total: z.number() });
+  z.object({ data: z.array(schema), total: z.number() });
 
 const lotEntity = z.object({
   _id: z.string(),

@@ -75,7 +75,7 @@ export const SYSTEM_ACTOR_ID = '000000000000000000000001';
 
 const accountCache = new Map<string, mongoose.Types.ObjectId>();
 
-async function resolveAccountId(accountCode: string): Promise<mongoose.Types.ObjectId> {
+export async function resolveAccountId(accountCode: string): Promise<mongoose.Types.ObjectId> {
   const cached = accountCache.get(accountCode);
   if (cached) return cached;
 
@@ -173,7 +173,7 @@ export async function createPosting(
   // Skip when the ledger already returned a posted winner (idempotent replay).
   if (input.autoPost && state !== 'posted') {
     try {
-      await journalEntryRepository.post(entry._id, undefined, {
+      await journalEntryRepository.post(entry._id, branchId, {
         actorId: input.actorId ?? SYSTEM_ACTOR_ID,
       });
       state = 'posted';

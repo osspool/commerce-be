@@ -85,7 +85,9 @@ describe('App bootstrap', () => {
   });
 
   it('serves health', async () => {
-    const res = await server.inject({ method: 'GET', url: '/health' });
+    // Arc's healthPlugin owns the path: /_health/live (liveness) +
+    // /_health/ready (readiness). The legacy /health is no longer wired.
+    const res = await server.inject({ method: 'GET', url: '/_health/live' });
     expect(res.statusCode).toBe(200);
   });
 });
@@ -212,7 +214,8 @@ describe('Library integrations', () => {
     expect(updated.value).toBe(99);
 
     const result = await repo.delete(doc._id.toString());
-    expect(result.success).toBe(true);
+    expect(result).not.toBeNull();
+    expect(result.message).toBeTruthy();
 
     await Model.deleteMany({});
   });

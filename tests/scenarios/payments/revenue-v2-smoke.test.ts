@@ -19,15 +19,17 @@ import mongoose from 'mongoose';
 import {
   createRevenue,
   PaymentProvider,
-  PaymentIntent,
-  PaymentResult,
-  RefundResult,
-  WebhookEvent,
-  type CreateIntentParams,
   type RevenueEngine,
   TRANSACTION_STATUS,
   HOLD_STATUS,
 } from '@classytic/revenue';
+import type {
+  CreateIntentParams,
+  PaymentIntent,
+  PaymentResult,
+  RefundResult,
+  WebhookEvent,
+} from '@classytic/primitives/payment-gateway';
 
 const TIMEOUT = 20_000;
 
@@ -40,17 +42,19 @@ class FakeProvider extends PaymentProvider {
 
   async createIntent(params: CreateIntentParams): Promise<PaymentIntent> {
     const id = `fake_pi_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    this.store.set(id, { amount: params.amount, currency: params.currency ?? 'BDT' });
-    return new PaymentIntent({ id, sessionId: id, paymentIntentId: id, provider: 'fake', status: 'pending', amount: params.amount, currency: params.currency, metadata: {} });
+    const amt = params.amount.amount;
+    const cur = params.amount.currency ?? 'BDT';
+    this.store.set(id, { amount: amt, currency: cur });
+    return { id, sessionId: id, paymentIntentId: id, provider: 'fake', status: 'pending', amount: { amount: amt, currency: cur }, metadata: {} };
   }
   async verifyPayment(intentId: string): Promise<PaymentResult> {
     const r = this.store.get(intentId);
-    if (!r) return new PaymentResult({ id: intentId, provider: 'fake', status: 'failed', metadata: {} });
-    return new PaymentResult({ id: intentId, provider: 'fake', status: 'succeeded', amount: r.amount, currency: r.currency, paidAt: new Date(), metadata: {} });
+    if (!r) return { id: intentId, provider: 'fake', status: 'failed', metadata: {} };
+    return { id: intentId, provider: 'fake', status: 'succeeded', amount: { amount: r.amount, currency: r.currency }, paidAt: new Date(), metadata: {} };
   }
   async getStatus(id: string) { return this.verifyPayment(id); }
-  async refund(paymentId: string, amount?: number | null) { return new RefundResult({ id: `ref_${paymentId}`, provider: 'fake', status: 'succeeded', amount: amount ?? 0, refundedAt: new Date(), metadata: {} }); }
-  async handleWebhook(payload: unknown) { const p = payload as any; return new WebhookEvent({ id: `wh_${Date.now()}`, provider: 'fake', type: p?.type ?? 'payment.succeeded', data: p ?? {}, createdAt: new Date() }); }
+  async refund(paymentId: string, amount?: number | null): Promise<RefundResult> { return { id: `ref_${paymentId}`, provider: 'fake', status: 'succeeded', amount: { amount: amount ?? 0, currency: 'BDT' }, refundedAt: new Date(), metadata: {} }; }
+  async handleWebhook(payload: unknown): Promise<WebhookEvent> { const p = payload as any; return { id: `wh_${Date.now()}`, provider: 'fake', type: p?.type ?? 'payment.succeeded', data: p ?? {}, createdAt: new Date() }; }
   override getCapabilities() { return { supportsWebhooks: true, supportsRefunds: true, supportsPartialRefunds: true, requiresManualVerification: false }; }
 }
 
@@ -217,7 +221,7 @@ describe('Escrow lifecycle: hold → release → split', () => {
     const children = await engine.repositories.transaction.getAll({
       filters: { relatedTransactionId: txn._id },
     });
-    expect(((children as any).docs as any[]).length).toBeGreaterThanOrEqual(3);
+    expect(((children as any).data as any[]).length).toBeGreaterThanOrEqual(3);
   }, TIMEOUT);
 });
 
@@ -283,7 +287,7 @@ describe('QueryParser compat (getAll)', () => {
       page: 1,
       limit: 10,
     });
-    expect(((verified as any).docs as any[]).length).toBe(3);
+    expect(((verified as any).data as any[]).length).toBe(3);
     expect((verified as any).total).toBe(3);
   }, TIMEOUT);
 });

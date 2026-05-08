@@ -198,11 +198,11 @@ describe('Report scoping: per-branch vs consolidated', () => {
     const bodyA = parse(resA);
     const bodyAll = parse(resAll);
 
-    if (bodyA.data?.accounts && bodyAll.data?.accounts) {
-      const sumA = bodyA.data.accounts.reduce(
+    if (bodyA?.accounts && bodyAll?.accounts) {
+      const sumA = bodyA.accounts.reduce(
         (s: number, a: { debit: number }) => s + (a.debit || 0), 0,
       );
-      const sumAll = bodyAll.data.accounts.reduce(
+      const sumAll = bodyAll.accounts.reduce(
         (s: number, a: { debit: number }) => s + (a.debit || 0), 0,
       );
       expect(sumAll).toBeGreaterThanOrEqual(sumA);
@@ -227,18 +227,17 @@ describe('A/P and A/R open items are branch-scoped', () => {
     const res = await api('GET', '/api/v1/accounting/vendor-bills/open', branchA);
     expect(res.statusCode).toBeLessThan(300);
     const body = parse(res);
-    expect(body.success).toBe(true);
 
     // Result should be an array (possibly empty, but branch-scoped)
-    expect(Array.isArray(body.data)).toBe(true);
+    expect(Array.isArray(body)).toBe(true);
   });
 
   it('customer-invoice /open endpoint scopes by x-organization-id', async () => {
     const res = await api('GET', '/api/v1/accounting/customer-invoices/open', branchA);
     expect(res.statusCode).toBeLessThan(300);
     const body = parse(res);
-    expect(body.success).toBe(true);
-    expect(Array.isArray(body.data)).toBe(true);
+
+    expect(Array.isArray(body)).toBe(true);
   });
 
   it('different branches get different open items', async () => {
@@ -312,8 +311,6 @@ describe('Day-close isolation', () => {
     const bodyB = parse(resB);
 
     // They may both be "open" initially, but the key point is they're independent
-    expect(bodyA.success).toBe(true);
-    expect(bodyB.success).toBe(true);
   });
 });
 
@@ -362,15 +359,34 @@ describe('Withholding certificates branch isolation', () => {
 
     if (createRes.statusCode >= 300) return; // skip if resource not wired
 
+    // Switch active org to branch B so the auth scope reflects it. Arc's
+    // Better Auth integration prefers session.activeOrganizationId over the
+    // x-organization-id header, so the admin user must explicitly activate
+    // branch B before the listing call.
+    await env.server.inject({
+      method: 'POST',
+      url: '/api/auth/organization/set-active',
+      headers: env.auth.as('admin').headers,
+      payload: { organizationId: branchB },
+    });
+
     // List under branch B — should NOT see branch A's cert
     const listB = await api('GET', '/api/v1/accounting/withholding-certificates', branchB);
     const bodyB = parse(listB);
-    const docs = bodyB.docs ?? bodyB.data ?? [];
+    const docs = bodyB.data ?? [];
     const certs = Array.isArray(docs) ? docs : [];
 
     for (const cert of certs) {
       expect((cert as { certificateNumber?: string }).certificateNumber).not.toBe('VDS-TEST-001');
     }
+
+    // Restore active org to branch A so subsequent tests aren't disrupted.
+    await env.server.inject({
+      method: 'POST',
+      url: '/api/auth/organization/set-active',
+      headers: env.auth.as('admin').headers,
+      payload: { organizationId: branchA },
+    });
   });
 });
 
@@ -386,8 +402,8 @@ describe('Tax reports branch-scoped', () => {
 
     const bodyA = parse(resA);
     const bodyB = parse(resB);
-    expect(bodyA.data).toHaveProperty('period');
-    expect(bodyB.data).toHaveProperty('period');
+    expect(bodyA).toHaveProperty('period');
+    expect(bodyB).toHaveProperty('period');
   });
 
   it('VDS receivable differs per branch', async () => {

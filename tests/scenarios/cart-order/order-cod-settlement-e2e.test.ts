@@ -109,7 +109,7 @@ async function recordSettlement(
     actualReceived: number;
     courierCommission: number;
     writeoff?: number;
-    cashAccount?: '1111' | '1112';
+    cashAccount?: '1111' | '1113';
     notes?: string;
   },
 ): Promise<{ status: number; body: Record<string, unknown> | null }> {
@@ -312,7 +312,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       idempotencyKey: `cod-placement-${Date.now()}`,
     });
     expect(status).toBeLessThan(400);
-    const order = body?.data as { _id: string; orderNumber: string };
+    const order = body as { _id: string; orderNumber: string };
 
     await flush();
 
@@ -337,7 +337,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
   it('COD settlement (full pay, no commission) clears A/R to Bank', async () => {
     const key = `cod-settle-full-${Date.now()}`;
     const place = await placeOrder({ gateway: 'cod', quantity: 1, unitPrice: 50000, idempotencyKey: key });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     const settle = await recordSettlement(order.orderNumber, {
@@ -355,7 +355,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
     const settlementEntry = entries[1];
     assertBalanced(settlementEntry);
 
-    const bank = await findItemOnAccount(settlementEntry, '1112');
+    const bank = await findItemOnAccount(settlementEntry, '1113');
     expect(bank?.debit).toBe(50000);
 
     const ar = await findItemOnAccount(settlementEntry, '1141');
@@ -376,7 +376,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       unitPrice: 100000,
       idempotencyKey: `cod-settle-fee-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     const settle = await recordSettlement(order.orderNumber, {
@@ -391,7 +391,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
     const settlementEntry = entries[entries.length - 1];
     assertBalanced(settlementEntry);
 
-    const bank = await findItemOnAccount(settlementEntry, '1112');
+    const bank = await findItemOnAccount(settlementEntry, '1113');
     const commission = await findItemOnAccount(settlementEntry, '6423');
     const ar = await findItemOnAccount(settlementEntry, '1141');
 
@@ -407,7 +407,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       unitPrice: 80000,
       idempotencyKey: `cod-settle-writeoff-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     const settle = await recordSettlement(order.orderNumber, {
@@ -422,7 +422,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
     const settlementEntry = entries[entries.length - 1];
     assertBalanced(settlementEntry);
 
-    expect((await findItemOnAccount(settlementEntry, '1112'))?.debit).toBe(60000);
+    expect((await findItemOnAccount(settlementEntry, '1113'))?.debit).toBe(60000);
     expect((await findItemOnAccount(settlementEntry, '6423'))?.debit).toBe(5000);
     expect((await findItemOnAccount(settlementEntry, '6702'))?.debit).toBe(15000);
     expect((await findItemOnAccount(settlementEntry, '1141'))?.credit).toBe(80000);
@@ -435,7 +435,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       unitPrice: 40000,
       idempotencyKey: `cod-settle-unbalanced-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
     const before = await getJournalEntriesForOrder(order._id);
 
@@ -463,7 +463,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       unitPrice: 50000,
       idempotencyKey: `cod-double-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     const first = await recordSettlement(order.orderNumber, {
@@ -493,7 +493,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       unitPrice: 70000,
       idempotencyKey: `cod-cancel-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     const cancel = await cancelOrder(order.orderNumber, 'customer-changed-mind');
@@ -528,7 +528,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       unitPrice: 60000,
       idempotencyKey: `cod-cancel-post-settle-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     await recordSettlement(order.orderNumber, { actualReceived: 60000, courierCommission: 0, writeoff: 0 });
@@ -553,7 +553,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       unitPrice: 30000,
       idempotencyKey: `cod-regression-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     const entries = await getJournalEntriesForOrder(order._id);
@@ -600,7 +600,7 @@ describe('COD lifecycle — placement → settlement / cancellation (full chain)
       unitPrice: 45000,
       idempotencyKey: `cod-aging-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     await recordSettlement(order.orderNumber, { actualReceived: 42000, courierCommission: 3000, writeoff: 0 });

@@ -112,8 +112,7 @@ describe('Replenishment evaluate — trigger detection', () => {
     }
     expect(lowRes.statusCode, lowRes.body).toBeLessThan(400);
 
-    const lowBody = parse(lowRes.body);
-    const lowData = lowBody?.data as { triggers: Array<{ skuRef?: string }>; ordersCreated: number };
+    const lowData = parse(lowRes.body) as { triggers: Array<{ skuRef?: string }>; ordersCreated: number };
     expect(Array.isArray(lowData.triggers)).toBe(true);
     expect(lowData.triggers.length).toBeGreaterThan(0);
     // Every returned trigger should be for our skuRef (we filtered by it).
@@ -131,7 +130,7 @@ describe('Replenishment evaluate — trigger detection', () => {
       payload: { skuRef: skuHigh, nodeId, dryRun: true },
     });
     expect(highRes.statusCode, highRes.body).toBeLessThan(400);
-    const highData = (parse(highRes.body)?.data) as { triggers: Array<unknown> };
+    const highData = parse(highRes.body) as { triggers: Array<unknown> };
     expect(Array.isArray(highData.triggers)).toBe(true);
     expect(highData.triggers.length).toBe(0);
   }, 90_000);

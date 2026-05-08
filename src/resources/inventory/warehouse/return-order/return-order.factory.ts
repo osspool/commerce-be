@@ -41,7 +41,7 @@ class ReturnOrderController extends BaseController {
   async create(req: IRequestContext): Promise<IControllerResponse<Record<string, unknown>>> {
     const ctx = flowCtxFromArcReq(req);
     const result = await flow().services.return.create(req.body as CreateReturnInput, ctx);
-    return { success: true, data: result as unknown as Record<string, unknown>, status: 201 };
+    return { data: result as unknown as Record<string, unknown>, status: 201 };
   }
 }
 
@@ -148,7 +148,7 @@ export function createReturnOrderResource() {
           const ctx = flowCtxGuard.from(req);
           const body = req.body as { lines: ReceiveLineInput[] };
           const result = await flow().services.return.receive(id, body.lines, ctx);
-          return reply.send({ success: true, data: result });
+          return reply.send({ data: result });
         },
       },
       {
@@ -163,7 +163,7 @@ export function createReturnOrderResource() {
           const ctx = flowCtxGuard.from(req);
           const body = req.body as { decisions: InspectLineInput[] };
           const result = await flow().services.return.inspect(id, body.decisions, ctx);
-          return reply.send({ success: true, data: result });
+          return reply.send({ data: result });
         },
       },
     ],

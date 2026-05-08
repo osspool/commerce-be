@@ -133,7 +133,7 @@ describe('Multi-branch transfer — full saga with partial receive', () => {
       },
     });
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const transfer = parse(createRes.body)?.data as {
+    const transfer = parse(createRes.body) as {
       _id: string;
       documentNumber: string;
       status: string;
@@ -160,7 +160,7 @@ describe('Multi-branch transfer — full saga with partial receive', () => {
     expect(await getStockAt(receiverOrgId)).toBe(0);
 
     // 3. Partial receive (receiver scope): 8 of 10.
-    const itemId = ((parse(createRes.body)?.data as { items: Array<{ _id: string }> }).items[0])._id;
+    const itemId = ((parse(createRes.body) as { items: Array<{ _id: string }> }).items[0])._id;
     const partialRes = await env.server.inject({
       method: 'POST',
       url: `${API}/inventory/transfers/${transfer._id}/action`,
@@ -171,7 +171,7 @@ describe('Multi-branch transfer — full saga with partial receive', () => {
       },
     });
     expect(partialRes.statusCode, partialRes.body).toBeLessThan(400);
-    const partial = parse(partialRes.body)?.data as { status: string };
+    const partial = parse(partialRes.body) as { status: string };
     expect(partial.status).toBe('partial_received');
 
     // Receiver stock: 0 + 8 = 8; sender unchanged.
@@ -189,7 +189,7 @@ describe('Multi-branch transfer — full saga with partial receive', () => {
       },
     });
     expect(finalRes.statusCode, finalRes.body).toBeLessThan(400);
-    const final = parse(finalRes.body)?.data as { status: string };
+    const final = parse(finalRes.body) as { status: string };
     expect(final.status).toBe('received');
 
     // Final reconciliation: sender down by 10 total, receiver up by 10 total.
@@ -230,7 +230,7 @@ describe('Multi-branch transfer — cannot oversend', () => {
       },
     });
     expect(createRes.statusCode).toBeLessThan(400);
-    const transfer = parse(createRes.body)?.data as { _id: string };
+    const transfer = parse(createRes.body) as { _id: string };
 
     await env.server.inject({
       method: 'POST',

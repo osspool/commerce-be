@@ -8,12 +8,13 @@
  */
 
 import mongoose from 'mongoose';
+import logger from '#lib/utils/logger.js';
 import config from './index.js';
 
 interface ConnectOptions {
   /** Override URI (e.g. for tests). Falls back to globalThis.__MONGO_URI__ → process.env.MONGO_URI → config.db.uri */
   uri?: string;
-  /** Logger function — defaults to console.log */
+  /** Logger function — defaults to structured logger (pino) */
   log?: (msg: string) => void;
 }
 
@@ -33,13 +34,22 @@ interface ConnectOptions {
 mongoose.set('strictQuery', true);
 mongoose.set('bufferTimeoutMS', 30000);
 
-mongoose.connection.on('connecting', () => console.log('[db] connecting...'));
+mongoose.connection.on('connecting', () => logger.info('[db] connecting...'));
 mongoose.connection.on('connected', () =>
-  console.log(`[db] connected (readyState: ${mongoose.connection.readyState})`),
+  logger.info(`[db] connected (readyState: ${mongoose.connection.readyState})`),
 );
-mongoose.connection.on('error', (err: Error) => console.error(`[db] error: ${err.message}`));
-mongoose.connection.on('disconnected', () => console.log('[db] disconnected'));
-mongoose.connection.on('reconnected', () => console.log('[db] reconnected'));
+mongoose.connection.on('error', (err: Error) => logger.error({ err }, `[db] error: ${err.message}`));
+mongoose.connection.on('disconnected', () => logger.warn('[db] disconnected'));
+mongoose.connection.on('reconnected', () => logger.info('[db] reconnected'));
+
+// Pool saturation signal. If `connectionCheckOutFailed` ever fires we know
+// `maxPoolSize` is the bottleneck — checkout is sitting in `waitQueue` past
+// `waitQueueTimeoutMS`. Without this listener pool exhaustion looks
+// indistinguishable from "DB is slow" in latency graphs.
+mongoose.connection.on('connectionPoolCleared', () => logger.warn('[db] pool cleared'));
+mongoose.connection.on('connectionCheckOutFailed', (event) =>
+  logger.warn(`[db] checkout failed: ${(event as { reason?: string })?.reason ?? 'unknown'}`),
+);
 
 let _connecting: Promise<typeof mongoose> | null = null;
 
@@ -67,7 +77,7 @@ export async function connectDatabase(options: ConnectOptions = {}): Promise<typ
   // Connection in progress — share the promise
   if (_connecting) return _connecting;
 
-  const log = options.log ?? ((msg: string) => console.log(`[db] ${msg}`));
+  const log = options.log ?? ((msg: string) => logger.info(`[db] ${msg}`));
 
   // Resolve URI: explicit option > test global > env > config
   const testUri =
@@ -101,9 +111,11 @@ export async function connectDatabase(options: ConnectOptions = {}): Promise<typ
       try {
         log('Connecting to database');
         await mongoose.connect(uri, {
-          serverSelectionTimeoutMS: 10000,
-          socketTimeoutMS: 45000,
-          maxPoolSize: 20,
+          serverSelectionTimeoutMS: config.db.serverSelectionTimeoutMS,
+          socketTimeoutMS: config.db.socketTimeoutMS,
+          maxPoolSize: config.db.maxPoolSize,
+          minPoolSize: config.db.minPoolSize,
+          waitQueueTimeoutMS: config.db.waitQueueTimeoutMS,
         });
         log(`after connect, readyState: ${mongoose.connection.readyState}`);
         return mongoose;

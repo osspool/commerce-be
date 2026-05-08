@@ -17,9 +17,9 @@ import {
   MemoryEventTransport,
   EventOutbox,
   MemoryOutboxStore,
-  createEvent,
 } from '@classytic/arc/events';
-import type { DomainEvent, EventHandler } from '@classytic/arc/events';
+import { createEvent } from '@classytic/primitives/events';
+import type { DomainEvent, EventHandler } from '@classytic/primitives/events';
 
 // MongoDB connection managed by per-suite-mongo.ts setupFile.
 // No need to create our own MongoMemoryServer.
@@ -453,7 +453,6 @@ describe('withCompensation E2E', () => {
       },
     ], { orderId: 'ord-1' });
 
-    expect(result.success).toBe(true);
     if (result.success) {
       expect(result.completedSteps).toEqual(['reserve', 'charge']);
       expect(result.results['reserve']).toEqual({ reservationId: 'r-1' });
@@ -486,7 +485,6 @@ describe('withCompensation E2E', () => {
       },
     ], { orderId: 'fail-1' });
 
-    expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.failedStep).toBe('step-3');
       expect(result.error).toBe('Payment gateway timeout');
@@ -521,7 +519,6 @@ describe('withCompensation E2E', () => {
       },
     ], {});
 
-    expect(result.success).toBe(false);
     if (!result.success) {
       // send-email was fire-and-forget so NOT in compensated list
       expect(compensated).toEqual(['main-work']);

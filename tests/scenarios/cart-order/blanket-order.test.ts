@@ -102,7 +102,7 @@ async function createBlanket(payload: Record<string, unknown>) {
   if (res.statusCode >= 400) {
     throw new Error(`Blanket create failed: ${res.statusCode} ${res.body}`);
   }
-  return parse(res.body)!.data as {
+  return parse(res.body)! as {
     blanketNumber: string;
     status: string;
     consumedQty: number;
@@ -132,7 +132,7 @@ describe('Blanket Order (T3.1) — sales-side standing order', () => {
       if (res.statusCode !== 200) {
         throw new Error(`Drawdown ${i} failed: ${res.statusCode} ${res.body}`);
       }
-      const body = parse(res.body)!.data as {
+      const body = parse(res.body)! as {
         blanket: { consumedQty: number; status: string };
         order: { orderNumber?: string } | null;
       };
@@ -152,7 +152,7 @@ describe('Blanket Order (T3.1) — sales-side standing order', () => {
       url: `${API}/blanket-orders/${blanket.blanketNumber}`,
       headers: h(),
     });
-    const finalDoc = parse(final.body)!.data as { status: string; consumedQty: number };
+    const finalDoc = parse(final.body)! as { status: string; consumedQty: number };
     expect(finalDoc.status).toBe('exhausted');
     expect(finalDoc.consumedQty).toBe(3);
   }, 120_000);
@@ -169,7 +169,7 @@ describe('Blanket Order (T3.1) — sales-side standing order', () => {
       reason: 'commitment fulfilled out-of-band',
     });
     expect(closed.statusCode).toBe(200);
-    expect(parse(closed.body)!.data).toMatchObject({ status: 'cancelled' });
+    expect(parse(closed.body)!).toMatchObject({ status: 'cancelled' });
 
     const blockedDraw = await action(blanket.blanketNumber, { action: 'release_drawdown' });
     expect(blockedDraw.statusCode).toBe(422);
@@ -198,7 +198,7 @@ describe('Blanket Order (T3.1) — sales-side standing order', () => {
       endAt: newEnd,
     });
     expect(extended.statusCode).toBe(200);
-    const updated = parse(extended.body)!.data as { cadence: { endAt: string } };
+    const updated = parse(extended.body)! as { cadence: { endAt: string } };
     expect(new Date(updated.cadence.endAt).toISOString()).toBe(newEnd);
   }, 120_000);
 });

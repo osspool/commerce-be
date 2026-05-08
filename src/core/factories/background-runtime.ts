@@ -2,6 +2,9 @@ import config from '#config/index.js';
 import logger from '#lib/utils/logger.js';
 import { registerAccountingEventHandlers } from '#resources/accounting/accounting.events.js';
 import { registerFlowProcurementAccountingBridge } from '#resources/accounting/events/handlers/flow-procurement-received.bridge.js';
+import { registerOrderFulfilledMushakBridge } from '#resources/accounting/events/handlers/order-fulfilled-mushak.bridge.js';
+import { registerProcurementCancelReturnBridge } from '#resources/accounting/events/handlers/procurement-cancel-return.bridge.js';
+import { registerTransferAccountingBridge } from '#resources/accounting/events/handlers/transfer-accounting.bridge.js';
 import { registerInventoryEventHandlers } from '#resources/inventory/inventory.handlers.js';
 import { registerNotificationEventHandlers } from '#resources/notifications/notification.handlers.js';
 import { registerRfqAwardBridge } from '#resources/sales/rfq/events/award-bridge.js';
@@ -31,6 +34,9 @@ async function initializeEventHandlers(): Promise<void> {
       registerRfqAwardBridge();
       registerSupplierPerformanceProcurementBridge();
       registerFlowProcurementAccountingBridge();
+      registerProcurementCancelReturnBridge();
+      registerTransferAccountingBridge();
+      registerOrderFulfilledMushakBridge();
 
       logger.info('Event handlers registered');
       eventHandlersInitialized = true;

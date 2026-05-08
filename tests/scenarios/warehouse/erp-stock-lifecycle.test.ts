@@ -289,7 +289,7 @@ describe('Scenario 5: Valuation Report Accuracy', () => {
 
     // HEAD valuation (layers mode for audit-grade)
     const headValuation = await flow.services.reporting.stockValuation.generate(
-      ctx(HEAD), { mode: 'layers' },
+      ctx(HEAD), { mode: 'layers', stockableOnly: false },
     );
 
     // 100*450 + 50*1200 = 45000 + 60000 = 105000
@@ -299,7 +299,7 @@ describe('Scenario 5: Valuation Report Accuracy', () => {
 
     // OUTLET valuation
     const outletValuation = await flow.services.reporting.stockValuation.generate(
-      ctx(OUTLET), { mode: 'layers' },
+      ctx(OUTLET), { mode: 'layers', stockableOnly: false },
     );
 
     // 30*800 = 24000
@@ -312,10 +312,10 @@ describe('Scenario 5: Valuation Report Accuracy', () => {
     await seedStock(flow, HEAD, PRODUCTS.TSHIRT_RED_M.sku, 100, 450);
 
     const snapshot = await flow.services.reporting.stockValuation.generate(
-      ctx(HEAD), { mode: 'snapshot' },
+      ctx(HEAD), { mode: 'snapshot', stockableOnly: false },
     );
     const layers = await flow.services.reporting.stockValuation.generate(
-      ctx(HEAD), { mode: 'layers' },
+      ctx(HEAD), { mode: 'layers', stockableOnly: false },
     );
 
     expect(snapshot.grandTotalQuantity).toBe(layers.grandTotalQuantity);
@@ -418,7 +418,7 @@ describe('Scenario 6: Sale with FIFO COGS', () => {
 
     // Valuation before sale
     const valBefore = await flow.services.reporting.stockValuation.generate(
-      ctx(OUTLET), { mode: 'layers' },
+      ctx(OUTLET), { mode: 'layers', stockableOnly: false },
     );
     expect(valBefore.grandTotalValue).toBe(50 * costPrice); // 22500
 
@@ -454,7 +454,7 @@ describe('Scenario 6: Sale with FIFO COGS', () => {
 
     // Valuation after sale: decreased by the sold amount
     const valAfter = await flow.services.reporting.stockValuation.generate(
-      ctx(OUTLET), { mode: 'layers' },
+      ctx(OUTLET), { mode: 'layers', stockableOnly: false },
     );
     expect(valAfter.grandTotalValue).toBe(40 * costPrice); // 18000
     expect(valAfter.grandTotalQuantity).toBe(40);
@@ -580,7 +580,7 @@ describe('Scenario 7: POS Order with Variant Products', () => {
 
     // Valuation: 40*900 + 30*950 = 36000 + 28500 = 64500
     const val = await flow.services.reporting.stockValuation.generate(
-      ctx(OUTLET), { mode: 'layers' },
+      ctx(OUTLET), { mode: 'layers', stockableOnly: false },
     );
     expect(val.grandTotalValue).toBe(40 * HOODIE_M_COST + 30 * HOODIE_L_COST); // 64500
     expect(val.grandTotalQuantity).toBe(70); // 40 + 30
@@ -662,7 +662,7 @@ describe('Scenario 8: Multi-Receipt FIFO Costing', () => {
 
     // Valuation: 5*1100 + 10*1250 = 5500 + 12500 = 18000
     const val = await flow.services.reporting.stockValuation.generate(
-      ctx(HEAD), { mode: 'layers' },
+      ctx(HEAD), { mode: 'layers', stockableOnly: false },
     );
     expect(val.grandTotalValue).toBe(5 * 1100 + 10 * 1250); // 18000
     expect(val.grandTotalQuantity).toBe(15);
@@ -733,12 +733,12 @@ describe('Scenario 9: Full Business Cycle Cross-Check', () => {
 
     // Step 5: Cross-check valuations
     const headVal = await flow.services.reporting.stockValuation.generate(
-      ctx(HEAD), { mode: 'layers' },
+      ctx(HEAD), { mode: 'layers', stockableOnly: false },
     );
     expect(headVal.grandTotalValue).toBe(60 * COST); // 48000
 
     const outletVal = await flow.services.reporting.stockValuation.generate(
-      ctx(OUTLET), { mode: 'layers' },
+      ctx(OUTLET), { mode: 'layers', stockableOnly: false },
     );
     expect(outletVal.grandTotalValue).toBe(25 * COST); // 20000
 

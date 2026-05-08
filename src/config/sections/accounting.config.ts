@@ -1,25 +1,16 @@
 /**
  * Accounting Configuration
  *
- * Controls the accounting/finance module.
- * Feature-gated: set ENABLE_ACCOUNTING=false to disable entirely.
+ * Single switch — `enabled`. The full accounting feature set ships when on:
+ * chart of accounts, journals, journal entries, budgets, reconciliation,
+ * auto-posting from POS / orders / inventory, reports.
  *
- * ACCOUNTING_MODE:
- *   - simple:     Manual journal entries only. No auto-posting from POS/orders.
- *   - standard:   Auto-posts from POS daily sales, purchases, and inventory adjustments.
- *   - enterprise: Full reconciliation, budgets, multi-currency, approval workflows.
+ * Hiding individual features (e.g. budgets from a small-shop tenant who
+ * doesn't care) belongs in the FE/permissions layer, NOT here. We removed
+ * the previous `mode: 'simple' | 'standard' | 'enterprise'` gate after it
+ * sprawled across 7 files of conditional code without serving a real
+ * single-tenant deployment.
  */
-
-type AccountingMode = 'simple' | 'standard' | 'enterprise';
-
-const VALID_MODES: AccountingMode[] = ['simple', 'standard', 'enterprise'];
-
-function parseMode(value: string | undefined): AccountingMode {
-  if (value && VALID_MODES.includes(value as AccountingMode)) {
-    return value as AccountingMode;
-  }
-  return 'standard';
-}
 
 export interface ExtraTaxClassEntry {
   code: string;
@@ -35,13 +26,10 @@ export interface ExtraTaxClassEntry {
 export interface AccountingConfigSection {
   accounting: {
     enabled: boolean;
-    mode: AccountingMode;
     /** Fiscal year start month (1-12). BD default: 7 (July). */
     fiscalYearStartMonth: number;
     /** Auto-seed chart of accounts on first branch access. */
     autoSeedAccounts: boolean;
-    /** Auto-post journal entries from POS/orders (standard+ mode). */
-    autoPost: boolean;
     /**
      * Additive tax classes merged on top of the country pack's seed at
      * engine bootstrap. Populate when a deployment is granted a custom SRO
@@ -54,10 +42,8 @@ export interface AccountingConfigSection {
 
 const accounting: AccountingConfigSection['accounting'] = {
   enabled: process.env.ENABLE_ACCOUNTING !== 'false',
-  mode: parseMode(process.env.ACCOUNTING_MODE),
   fiscalYearStartMonth: parseInt(process.env.FISCAL_YEAR_START_MONTH || '7', 10),
   autoSeedAccounts: process.env.ACCOUNTING_AUTO_SEED !== 'false',
-  autoPost: process.env.ACCOUNTING_AUTO_POST !== 'false',
   extraTaxClasses: [],
 };
 

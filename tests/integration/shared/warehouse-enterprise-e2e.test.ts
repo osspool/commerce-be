@@ -121,8 +121,7 @@ describe('Quality Inspection (Enterprise)', () => {
     expect([201, 403, 404]).toContain(res.statusCode);
     if (res.statusCode === 201) {
       const body = JSON.parse(res.body);
-      expect(body.success).toBe(true);
-      expect(body.data.name).toBe('Weight Check');
+      expect(body.name).toBe('Weight Check');
     }
   });
 

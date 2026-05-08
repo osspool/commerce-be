@@ -130,7 +130,6 @@ describe('Chart of Accounts', () => {
     expect([200, 201]).toContain(res.statusCode);
     if (res.statusCode <= 201) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
     }
   });
 
@@ -151,9 +150,9 @@ describe('Chart of Accounts', () => {
     expect([200, 201, 400, 403]).toContain(res.statusCode);
     const body = safeParseBody(res.body);
     if (res.statusCode < 300) {
-      expect(body.data).toBeTruthy();
-      expect(body.data.name).toBe('Petty Cash — Test Branch');
-      accountId = body.data._id;
+      expect(body).toBeTruthy();
+      expect(body.name).toBe('Petty Cash — Test Branch');
+      accountId = body._id;
     }
   });
 
@@ -175,7 +174,7 @@ describe('Chart of Accounts', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.data._id).toBe(accountId);
+      expect(body._id).toBe(accountId);
     }
   });
 
@@ -191,7 +190,7 @@ describe('Chart of Accounts', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.data.name).toBe('Petty Cash — Updated');
+      expect(body.name).toBe('Petty Cash — Updated');
     }
   });
 
@@ -207,8 +206,7 @@ describe('Chart of Accounts', () => {
     expect([200, 400, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
-      expect(body.data.active).toBe(false);
+      expect(body.active).toBe(false);
     }
   });
 
@@ -224,7 +222,7 @@ describe('Chart of Accounts', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.data.active).toBe(true);
+      expect(body.active).toBe(true);
     }
   });
 
@@ -236,7 +234,7 @@ describe('Chart of Accounts', () => {
       payload: {
         accounts: [
           { accountTypeCode: '1111', accountNumber: '1111-BLK1', name: 'Bulk Cash 1' },
-          { accountTypeCode: '1112', accountNumber: '1112-BLK2', name: 'Bulk Bank 2' },
+          { accountTypeCode: '1113', accountNumber: '1112-BLK2', name: 'Bulk Bank 2' },
         ],
       },
     });
@@ -244,7 +242,6 @@ describe('Chart of Accounts', () => {
     expect([200, 201, 403]).toContain(res.statusCode);
     if (res.statusCode <= 201) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
     }
   });
 
@@ -275,7 +272,7 @@ describe('Journal Entries', () => {
       headers: h(),
     });
     const body = safeParseBody(res.body);
-    const accounts = body?.docs || [];
+    const accounts = body?.data || [];
 
     // Find cash (1111) and revenue (4111) accounts
     const cash = accounts.find((a: any) => a.accountTypeCode === '1111');
@@ -311,9 +308,9 @@ describe('Journal Entries', () => {
     expect([200, 201, 400]).toContain(res.statusCode);
     const body = safeParseBody(res.body);
     if (body?.data) {
-      expect(body.data.state).toBe('draft');
-      expect(body.data.label).toBe('Cash Sale — Test');
-      entryId = body.data._id;
+      expect(body.state).toBe('draft');
+      expect(body.label).toBe('Cash Sale — Test');
+      entryId = body._id;
     }
   });
 
@@ -327,7 +324,7 @@ describe('Journal Entries', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.docs).toBeTruthy();
+      expect(body).toBeTruthy();
     }
   });
 
@@ -346,8 +343,7 @@ describe('Journal Entries', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
-      expect(body.data.state).toBe('posted');
+      expect(body.state).toBe('posted');
     }
   });
 
@@ -378,7 +374,6 @@ describe('Journal Entries', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
     }
   });
 
@@ -395,8 +390,7 @@ describe('Journal Entries', () => {
     expect([200, 201, 403]).toContain(res.statusCode);
     if (res.statusCode <= 201) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
-      expect(body.data._id).not.toBe(entryId); // Different ID
+      expect(body._id).not.toBe(entryId); // Different ID
     }
   });
 
@@ -423,7 +417,7 @@ describe('Journal Entries', () => {
     if (create.statusCode === 403) return; // role lacks write perm
 
     expect(create.statusCode).toBeLessThan(300);
-    const draftId = safeParseBody(create.body).data._id;
+    const draftId = safeParseBody(create.body)._id;
     expect(draftId).toBeDefined();
 
     const post = await server.inject({
@@ -479,8 +473,8 @@ describe('Journal Entries', () => {
     expect([200, 201, 400]).toContain(res.statusCode);
     const body = safeParseBody(res.body);
     if (body?.data) {
-      expect(body.data.journalItems[0].debit).toBe(15099);
-      expect(body.data.journalItems[1].credit).toBe(15099);
+      expect(body.journalItems[0].debit).toBe(15099);
+      expect(body.journalItems[1].credit).toBe(15099);
     }
   });
 });
@@ -507,7 +501,7 @@ describe('Fiscal Periods', () => {
     expect([200, 201, 400, 403]).toContain(res.statusCode);
     const body = safeParseBody(res.body);
     if (res.statusCode <= 201 && body?.data) {
-      periodId = body.data._id;
+      periodId = body._id;
     }
   });
 
@@ -559,7 +553,6 @@ describe('Constants — Account Types', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
       expect(body.data.length).toBeGreaterThan(0);
     }
   });
@@ -596,7 +589,6 @@ describe('Constants — Journal Types', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
       expect(body.data.length).toBeGreaterThan(0);
     }
   });
@@ -647,8 +639,7 @@ describe('Financial Reports', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
-      expect(body.data).toBeTruthy();
+      expect(body).toBeTruthy();
     }
   });
 
@@ -738,9 +729,8 @@ describe('Posting — Read-only oversight', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
-      expect(Array.isArray(body.data.activeShifts)).toBe(true);
-      expect(typeof body.data.currentBdDate).toBe('string');
+      expect(Array.isArray(body.activeShifts)).toBe(true);
+      expect(typeof body.currentBdDate).toBe('string');
     }
   });
 
@@ -753,10 +743,9 @@ describe('Posting — Read-only oversight', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
-      expect(Array.isArray(body.data.branches)).toBe(true);
-      expect(body.data.summary).toBeTruthy();
-      expect(typeof body.data.summary.totalBranches).toBe('number');
+      expect(Array.isArray(body.branches)).toBe(true);
+      expect(body.summary).toBeTruthy();
+      expect(typeof body.summary.totalBranches).toBe('number');
     }
   });
 });

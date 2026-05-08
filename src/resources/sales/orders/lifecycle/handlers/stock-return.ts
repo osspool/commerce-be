@@ -32,6 +32,19 @@ export const stockReturnHandler: TransitionHandler = {
     const wasShipped = ctx.fromStatus === 'fulfilled' || ctx.fromStatus === 'completed';
     if (!wasShipped) return;
 
+    // RMA-originated full refunds: the `changeConfirmedStockReturnHandler`
+    // has already restocked the returned units (per-line, exact quantity).
+    // Skip here so we don't double-restock. The RMA-confirm reason follows
+    // the convention `Full refund via {return|exchange|claim} CHG-...`
+    // (see change-confirmed-refund.ts).
+    if (typeof ctx.reason === 'string' && /^Full refund via (return|exchange|claim) /.test(ctx.reason)) {
+      deps.logger.debug?.(
+        { orderNumber: ctx.orderNumber, reason: ctx.reason },
+        'stock-return: RMA-driven refund — restock already done by change-confirmed-stock-return',
+      );
+      return;
+    }
+
     const order = await loadOrderByNumber(deps.engine, ctx.orderNumber);
     if (!order) return;
 

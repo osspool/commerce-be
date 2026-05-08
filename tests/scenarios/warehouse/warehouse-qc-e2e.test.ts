@@ -127,13 +127,13 @@ describe('Warehouse QC E2E', () => {
   it('auto-bootstraps default warehouse and locations for both branches', async () => {
     const hoNodesRes = await hoInject('GET', '/inventory/nodes');
     expect(hoNodesRes.statusCode).toBe(200);
-    const hoNodes = parse(hoNodesRes.body)?.data;
+    const hoNodes = parse(hoNodesRes.body);
     expect(Array.isArray(hoNodes)).toBe(true);
     expect(hoNodes.length).toBeGreaterThan(0);
 
     const subNodesRes = await subInject('GET', '/inventory/nodes');
     expect(subNodesRes.statusCode).toBe(200);
-    const subNodes = parse(subNodesRes.body)?.data;
+    const subNodes = parse(subNodesRes.body);
     expect(Array.isArray(subNodes)).toBe(true);
     expect(subNodes.length).toBeGreaterThan(0);
 
@@ -185,14 +185,14 @@ describe('Warehouse QC E2E', () => {
       notes: 'Warehouse QC purchase',
     });
     expect(createRes.statusCode).toBe(201);
-    purchaseId = parse(createRes.body)?.data?._id;
+    purchaseId = parse(createRes.body)?._id;
     expect(typeof purchaseId).toBe('string');
 
     const receiveRes = await hoInject('POST', `/inventory/purchase-orders/${purchaseId}/action`, {
       action: 'receive',
     });
     expect(receiveRes.statusCode).toBe(200);
-    expect(parse(receiveRes.body)?.data?.status).toBe('received');
+    expect(parse(receiveRes.body)?.status).toBe('received');
 
     const avail = await flow.services.quant.getAvailability(
       { skuRef: productId, locationId: 'stock' },
@@ -209,27 +209,27 @@ describe('Warehouse QC E2E', () => {
       remarks: 'Warehouse QC transfer',
     });
     expect(createTransferRes.statusCode).toBe(201);
-    transferId = parse(createTransferRes.body)?.data?._id;
+    transferId = parse(createTransferRes.body)?._id;
     expect(typeof transferId).toBe('string');
 
     const approveRes = await hoInject('POST', `/inventory/transfers/${transferId}/action`, {
       action: 'approve',
     });
     expect(approveRes.statusCode).toBe(200);
-    expect(parse(approveRes.body)?.data?.status).toBe('approved');
+    expect(parse(approveRes.body)?.status).toBe('approved');
 
     const dispatchRes = await hoInject('POST', `/inventory/transfers/${transferId}/action`, {
       action: 'dispatch',
     });
     expect(dispatchRes.statusCode).toBe(200);
-    expect(parse(dispatchRes.body)?.data?.status).toBe('dispatched');
+    expect(parse(dispatchRes.body)?.status).toBe('dispatched');
 
     const receiveRes = await subInject('POST', `/inventory/transfers/${transferId}/action`, {
       action: 'receive',
       items: [{ productId, quantityReceived: 10 }],
     });
     expect(receiveRes.statusCode).toBe(200);
-    expect(['received', 'partial_received']).toContain(parse(receiveRes.body)?.data?.status);
+    expect(['received', 'partial_received']).toContain(parse(receiveRes.body)?.status);
 
     const hoAvail = await flow.services.quant.getAvailability(
       { skuRef: productId, locationId: 'stock' },

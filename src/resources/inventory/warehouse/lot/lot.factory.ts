@@ -15,9 +15,11 @@
 
 import { defineResource } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { Types } from 'mongoose';
 import permissions from '#config/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
-import { flow, standardModeGuard } from '../shared/helpers.js';
+import { flow, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
 
 export function createLotResource() {
   const engine = flow();
@@ -43,5 +45,49 @@ export function createLotResource() {
       update: permissions.inventory.lotManage,
       delete: permissions.inventory.lotManage,
     },
+    routes: [
+      {
+        method: 'GET',
+        path: '/qty-summary',
+        summary: 'Aggregate quantities per lot for the active branch',
+        description:
+          'Returns on-hand / reserved / available quantities grouped by lotId. One row per lot that has at least one StockQuant record. Lots with no quants are absent.',
+        permissions: permissions.inventory.lotView,
+        raw: true,
+        preHandler: [flowCtxGuard.preHandler],
+        handler: async (req: FastifyRequest, reply: FastifyReply) => {
+          const ctx = flowCtxGuard.from(req);
+          const Quant = flow().models.StockQuant;
+          const rows = await Quant.aggregate<{
+            _id: Types.ObjectId;
+            quantityOnHand: number;
+            quantityReserved: number;
+            quantityAvailable: number;
+          }>([
+            {
+              $match: {
+                organizationId: new Types.ObjectId(ctx.organizationId),
+                lotId: { $ne: null },
+              },
+            },
+            {
+              $group: {
+                _id: '$lotId',
+                quantityOnHand: { $sum: '$quantityOnHand' },
+                quantityReserved: { $sum: '$quantityReserved' },
+                quantityAvailable: { $sum: '$quantityAvailable' },
+              },
+            },
+          ]);
+          const data = rows.map((r) => ({
+            lotId: String(r._id),
+            quantityOnHand: r.quantityOnHand,
+            quantityReserved: r.quantityReserved,
+            quantityAvailable: r.quantityAvailable,
+          }));
+          return reply.send(data);
+        },
+      },
+    ],
   });
 }

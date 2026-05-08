@@ -12,7 +12,8 @@
  *     AND `paymentState.chargeStatus = 'full'`
  */
 
-import { BaseController, type RepositoryLike } from '@classytic/arc';
+import { BaseController } from '@classytic/arc';
+import type { RepositoryLike } from '@classytic/repo-core/adapter';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import Customer from '#resources/sales/customers/customer.model.js';
 import { ensureOrderEngine } from '#resources/sales/orders/order.engine.js';
@@ -137,8 +138,6 @@ class AnalyticsController extends BaseController {
     });
 
     return reply.code(200).send({
-      success: true,
-      data: {
         summary: {
           totalCustomers,
           totalOrders,
@@ -171,8 +170,7 @@ class AnalyticsController extends BaseController {
           byCategory: revenueByCategory,
           byPaymentMethod: revenueByMethod,
         },
-      },
-    });
+      });
   }
 }
 

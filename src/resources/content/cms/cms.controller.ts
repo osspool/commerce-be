@@ -2,6 +2,7 @@ import { BaseController } from '@classytic/arc';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import CMSRepository from './cms.repository.js';
 import { cmsSchemaOptions } from './cms.schemas.js';
+import { NotFoundError } from '@classytic/arc/utils';
 
 class CMSController extends BaseController {
   constructor() {
@@ -20,13 +21,10 @@ class CMSController extends BaseController {
     const page = await CMSRepository.getByQuery({ slug }, { throwOnNotFound: false });
 
     if (!page) {
-      return reply?.code(404).send({
-        success: false,
-        message: `Page with slug "${slug}" not found`,
-      });
+      throw new NotFoundError(`Page with slug "${slug}" not found`);
     }
 
-    return reply?.code(200).send({ success: true, data: page });
+    return reply?.code(200).send(page);
   }
 
   /**
@@ -39,12 +37,12 @@ class CMSController extends BaseController {
     const { slug } = req.params;
     const defaults = req.body || {};
 
-    const page = await CMSRepository.getOrCreate(
+    const { doc: page } = await CMSRepository.getOrCreate(
       { slug },
       { ...defaults, name: (defaults as Record<string, unknown>).name || slug, slug },
     );
 
-    return reply.code(200).send({ success: true, data: page });
+    return reply.code(200).send(page);
   }
 
   /**
@@ -69,13 +67,13 @@ class CMSController extends BaseController {
     }
 
     // Simple upsert: update if exists, create if doesn't
-    const page = await CMSRepository.Model.findOneAndUpdate(
+    const page = await CMSRepository.findOneAndUpdate(
       { slug },
       { $set: updates },
-      { upsert: true, returnDocument: 'after', runValidators: true },
+      { upsert: true, runValidators: true },
     );
 
-    return reply.code(200).send({ success: true, data: page });
+    return reply.code(200).send(page);
   }
 
   /**
@@ -83,19 +81,15 @@ class CMSController extends BaseController {
    */
   async deleteBySlug(req: FastifyRequest<{ Params: { slug: string } }>, reply: FastifyReply): Promise<void> {
     const { slug } = req.params;
-    const page = await CMSRepository.Model.findOneAndDelete({ slug });
+    const existing = await CMSRepository.getByQuery({ slug }, { throwOnNotFound: false });
 
-    if (!page) {
-      return reply.code(404).send({
-        success: false,
-        message: `Page with slug "${slug}" not found`,
-      });
+    if (!existing) {
+      throw new NotFoundError(`Page with slug "${slug}" not found`);
     }
 
-    return reply.code(200).send({
-      success: true,
-      message: `Page "${slug}" deleted successfully`,
-    });
+    await CMSRepository.delete(String(existing._id));
+
+    return reply.code(200).send(null);
   }
 }
 

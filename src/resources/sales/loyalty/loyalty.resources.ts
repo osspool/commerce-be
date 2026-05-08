@@ -22,6 +22,7 @@ import { defineResource } from '@classytic/arc';
 import { ArcError } from '@classytic/arc/utils';
 import type { FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
+import Customer from '../customers/customer.model.js';
 import customerRepository from '../customers/customer.repository.js';
 import * as bridge from './loyalty.bridge.js';
 import { ensureLoyaltyEngine } from './loyalty.plugin.js';
@@ -150,6 +151,29 @@ export const memberResource = defineResource({
         const branchCode = await resolveBranchCode(req);
         return bridge.enrollCustomer(customerId, { ...loyaltyCtx(req), branchCode });
       }, 201),
+    },
+    {
+      method: 'GET',
+      path: '/by-card/:cardId',
+      summary: 'Look up loyalty member + customer by printed card ID (POS card-share scan)',
+      permissions: permissions.loyalty.view,
+      raw: true,
+      schema: memberSchemas.byCard,
+      handler: loyaltyRoute(async (req: FastifyRequest) => {
+        const { cardId } = req.params as { cardId: string };
+        const member = await engine().repositories.member.getByQuery(
+          { cardId },
+          { throwOnNotFound: false },
+        );
+        if (!member) {
+          throw new ArcError('Member not found for card', { code: 'MEMBER_NOT_FOUND', statusCode: 404 });
+        }
+        const customer = await customerRepository.getById(member.externalId, {
+          lean: true,
+          throwOnNotFound: false,
+        });
+        return { member, customer };
+      }),
     },
     {
       method: 'GET',

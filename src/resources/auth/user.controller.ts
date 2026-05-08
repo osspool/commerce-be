@@ -1,5 +1,5 @@
 import type { AnyRecord, IControllerResponse, IRequestContext, RouteSchemaOptions } from '@classytic/arc';
-import { BaseController } from '@classytic/arc';
+import { BaseController, UnauthorizedError } from '@classytic/arc';
 import type { Repository } from '@classytic/mongokit';
 import * as authWorkflow from './auth.workflow.js';
 import { userSchemaOptions } from './schemas.js';
@@ -38,22 +38,22 @@ export class UserController extends BaseController<IUser & AnyRecord> {
    * Get current user profile (Arc pipeline — receives IRequestContext)
    */
   async getProfile(req: IRequestContext): Promise<IControllerResponse> {
-    const userId = req.user?.id || (req.user as Record<string, unknown>)?._id;
-    if (!userId) return { success: false, error: 'Not authenticated', status: 401 };
+    const userId = req.scope?.userId;
+    if (!userId) throw new UnauthorizedError('Not authenticated');
 
-    const profile = await authWorkflow.getUserProfile(userId as string);
-    return { success: true, data: profile };
+    const profile = await authWorkflow.getUserProfile(userId);
+    return { data: profile };
   }
 
   /**
    * Update current user profile (Arc pipeline — receives IRequestContext)
    */
   async updateProfile(req: IRequestContext<UserProfileUpdate>): Promise<IControllerResponse> {
-    const userId = req.user?.id || (req.user as Record<string, unknown>)?._id;
-    if (!userId) return { success: false, error: 'Not authenticated', status: 401 };
+    const userId = req.scope?.userId;
+    if (!userId) throw new UnauthorizedError('Not authenticated');
 
-    const profile = await authWorkflow.updateUserProfile(userId as string, req.body);
-    return { success: true, data: profile };
+    const profile = await authWorkflow.updateUserProfile(userId, req.body);
+    return { data: profile };
   }
 }
 

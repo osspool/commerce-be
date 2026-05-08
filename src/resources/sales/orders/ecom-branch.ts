@@ -32,10 +32,18 @@ let cached: string | null | undefined; // undefined = not yet resolved
 export async function getEcomBranchId(): Promise<string | null> {
   if (cached !== undefined) return cached;
 
-  const branch = await BranchModel.findOne(
+  // BranchModel is registered on the `organization` collection with a
+  // `strict: false` STUB schema (see branch.model.ts default export) so
+  // both Better Auth's BA-managed fields and our ad-hoc commerce fields
+  // can coexist. Mongoose's `strictQuery` strips filter keys that aren't
+  // declared on the schema — `fulfillsEcommerce` and `isActive` both get
+  // dropped here, and `findOne({}, '_id')` then returns whichever org
+  // happens to be first in the collection, masking the "no flag set"
+  // contract. Drop to the raw collection so the filter survives.
+  const branch = await BranchModel.collection.findOne(
     { fulfillsEcommerce: true, isActive: true },
-    '_id',
-  ).lean();
+    { projection: { _id: 1 } },
+  );
   cached = branch ? String(branch._id) : null;
   return cached;
 }

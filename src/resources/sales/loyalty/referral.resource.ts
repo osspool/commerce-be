@@ -14,7 +14,8 @@
  * Filter `?referrerId=<memberId>` to scope to a member's referrals.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { ArcError } from '@classytic/arc/utils';
 import { QueryParser } from '@classytic/mongokit';
 import type { FastifyRequest } from 'fastify';
@@ -37,6 +38,11 @@ export default defineResource({
   tag: 'Loyalty',
   prefix: '/loyalty/referrals',
   audit: true,
+
+  // Loyalty is company-wide — a referral made at one branch credits the
+  // referrer regardless of which branch their friend redeems at. See
+  // loyalty.plugin.ts for the design rationale.
+  tenantField: false,
 
   adapter: createMongooseAdapter(engine.models.Referral as never, engine.repositories.referral as never),
   queryParser,

@@ -7,5 +7,5 @@ export async function addFulfillmentTrackingHandler(req: FastifyRequest, reply: 
   const { id } = req.params as { id: string };
   const body = req.body as { carrier: string; trackingNumber: string; trackingUrl?: string };
   const fulfillment = await engine.repositories.fulfillment.addTracking(id, body, getFulfillmentContext(req));
-  return reply.send({ success: true, data: fulfillment });
+  return reply.send(fulfillment);
 }

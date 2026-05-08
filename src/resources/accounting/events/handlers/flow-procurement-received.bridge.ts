@@ -28,10 +28,11 @@
  *     the bridge fires twice (retry), we duplicate. Acceptable for now;
  *     proper dedup would attach a JE on the procurement doc itself.
  */
-import type { DomainEvent } from '@classytic/arc/events';
+import type { DomainEvent } from '@classytic/primitives/events';
 import { subscribe } from '#lib/events/arcEvents.js';
 import logger from '#lib/utils/logger.js';
 import { getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';
+import Supplier from '#resources/inventory/supplier/models/supplier.model.js';
 import { vendorBillToPosting } from '../../posting/contracts/vendor-bill.contract.js';
 import { createPosting, ensureCompanyAccounts } from '../../posting/posting.service.js';
 
@@ -130,15 +131,36 @@ export function registerFlowProcurementAccountingBridge(): void {
 
       await ensureCompanyAccounts();
 
-      const posting = vendorBillToPosting({
-        purchaseId: String(order._id),
-        supplierId: payload.vendorRef,
-        totalAmount: totalAmountPaisa,
-        tax: taxPaisa,
-        ...(dominantTaxRate !== undefined ? { vatRate: dominantTaxRate } : {}),
-        receivedAt: new Date(order.receivedAt ?? Date.now()),
-        billNumber: order.orderNumber ?? payload.orderNumber,
-      });
+      // VDS lookup — non-fatal; if the supplier lookup fails, post without VDS split.
+      let withholdVds = false;
+      let vdsRate: number | undefined;
+      try {
+        const supplier = await Supplier.findById(payload.vendorRef).select('withholdVds vdsRate').lean();
+        if (supplier?.withholdVds) {
+          withholdVds = true;
+          vdsRate = supplier.vdsRate ?? 0.5;
+        }
+      } catch (vdsErr) {
+        logger.warn({ err: (vdsErr as Error).message }, '[accounting] VDS supplier lookup failed — posting without VDS split');
+      }
+
+      // Procurement-received bridge mirrors purchase-received.handler.ts:
+      // the Flow event means "goods are physically in, A/P liability is real
+      // and accrued." Skip draft state — there is nothing left to review.
+      const posting = vendorBillToPosting(
+        {
+          purchaseId: String(order._id),
+          supplierId: payload.vendorRef,
+          totalAmount: totalAmountPaisa,
+          tax: taxPaisa,
+          ...(dominantTaxRate !== undefined ? { vatRate: dominantTaxRate } : {}),
+          receivedAt: new Date(order.receivedAt ?? Date.now()),
+          billNumber: order.orderNumber ?? payload.orderNumber,
+          withholdVds,
+          ...(vdsRate !== undefined ? { vdsRate } : {}),
+        },
+        { autoPost: true },
+      );
 
       const result = await createPosting(branchId, posting);
       logger.info(

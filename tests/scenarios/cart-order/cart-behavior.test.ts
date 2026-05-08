@@ -152,8 +152,7 @@ describe('Cart item operations', () => {
     expect(res.statusCode).toBeLessThan(500);
     if (res.statusCode < 400) {
       const body = parse(res.body);
-      expect(body?.success).toBe(true);
-      expect(body?.data).toBeTruthy();
+      expect(body).toBeTruthy();
     }
   });
 
@@ -168,7 +167,6 @@ describe('Cart item operations', () => {
     const res = await app.inject({ method: 'GET', url: `${API}/cart`, headers: headers() });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
   });
 
   it('UPDATE on non-existent cart returns 404', async () => {
@@ -226,7 +224,7 @@ describe('Cart actor isolation', () => {
     setUser(USER_B);
     const userBCart = await app.inject({ method: 'GET', url: `${API}/cart`, headers: headers() });
     expect(userBCart.statusCode).toBe(200);
-    expect(parse(userBCart.body)?.data).toBeNull();
+    expect(parse(userBCart.body)).toBeNull();
   });
 
   it('anonymous (session) user is rejected by requireAuth on cart.access', async () => {
@@ -259,13 +257,12 @@ describe('Cart is company-wide (follows the user across branches)', () => {
     });
     expect(other.statusCode).toBe(200);
     const body = parse(other.body);
-    expect(body?.success).toBe(true);
     // If the bridge resolved the product, the cart is populated; otherwise
     // it's null either way — the key contract is no different response
     // between the two org headers.
     const noOrgHeader = await app.inject({ method: 'GET', url: `${API}/cart` });
     expect(noOrgHeader.statusCode).toBe(200);
-    expect(parse(noOrgHeader.body)?.data).toEqual(body?.data);
+    expect(parse(noOrgHeader.body)).toEqual(body);
   });
 });
 
@@ -310,8 +307,7 @@ describe('Admin routes', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    expect(body?.docs).toBeInstanceOf(Array);
+    expect(body?.data).toBeInstanceOf(Array);
   });
 
   it('GET /cart/admin/abandoned returns array with metadata', async () => {
@@ -322,7 +318,6 @@ describe('Admin routes', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
     expect(body?.data).toBeInstanceOf(Array);
     const meta = body?.metadata as Record<string, unknown>;
     expect(meta?.daysOld).toBe(7);

@@ -151,9 +151,8 @@ describe('Guest checkout — /orders/guest/place', () => {
     });
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
     expect(typeof body?.guestCustomerId).toBe('string');
-    const order = body?.data as Record<string, unknown>;
+    const order = body as Record<string, unknown>;
     expect(order.channel).toBe('web');
     expect(order.organizationId).toBe(orgId);
   });
@@ -247,7 +246,7 @@ describe('Guest checkout — /orders/guest/place', () => {
       },
     });
     expect(res.statusCode).toBe(400);
-    expect(parse(res.body)?.field).toBe('customer.phone');
+    expect((parse(res.body) as { meta?: { field?: string } } | null)?.meta?.field).toBe('customer.phone');
   });
 
   it('drops staff-only fields silently (sellerId / metadata ignored)', async () => {
@@ -263,7 +262,7 @@ describe('Guest checkout — /orders/guest/place', () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    const order = (parse(res.body)?.data as Record<string, unknown>) ?? {};
+    const order = (parse(res.body) as Record<string, unknown>) ?? {};
     expect(order.sellerId).toBeFalsy();
     const meta = order.metadata as Record<string, unknown> | undefined;
     expect(meta?.staffNote).toBeUndefined();
@@ -280,8 +279,7 @@ describe('Guest checkout — /orders/guest/place', () => {
     });
     expect(res.statusCode).toBe(400);
     const body = parse(res.body);
-    expect(body?.success).toBe(false);
-    expect(body?.field).toBe('customer.phone');
+    expect((body as { meta?: { field?: string } })?.meta?.field).toBe('customer.phone');
   });
 
   it('rejects missing email with structured 400', async () => {
@@ -294,7 +292,7 @@ describe('Guest checkout — /orders/guest/place', () => {
       },
     });
     expect(res.statusCode).toBe(400);
-    expect(parse(res.body)?.field).toBe('customer.email');
+    expect((parse(res.body) as { meta?: { field?: string } } | null)?.meta?.field).toBe('customer.email');
   });
 
   it('rejects empty lines with 400', async () => {
@@ -307,6 +305,6 @@ describe('Guest checkout — /orders/guest/place', () => {
       },
     });
     expect(res.statusCode).toBe(400);
-    expect(parse(res.body)?.field).toBe('lines');
+    expect((parse(res.body) as { meta?: { field?: string } } | null)?.meta?.field).toBe('lines');
   });
 });

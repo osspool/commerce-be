@@ -27,7 +27,7 @@ const accountingPlugin: FastifyPluginAsync = async (_fastify) => {
   registerAccountingEventHandlers();
 
   logger.info(
-    { mode: config.accounting.mode, fiscalYearStart: config.accounting.fiscalYearStartMonth },
+    { fiscalYearStart: config.accounting.fiscalYearStartMonth },
     'Accounting bootstrap complete',
   );
 };

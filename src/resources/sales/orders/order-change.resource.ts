@@ -6,7 +6,8 @@
  * verbs: `requestChange`, `confirm`, `decline`.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { type OrderContext, repoOptionsFromCtx } from '@classytic/order';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
@@ -14,6 +15,11 @@ import { getContextFromReq } from '#shared/context.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { queryParser } from '#shared/query-parser.js';
 import { ensureOrderEngine } from './order.engine.js';
+import {
+  inspectChange,
+  type InspectionDisposition,
+} from './services/rma-inspect.service.js';
+import { createError, ValidationError } from '@classytic/arc/utils';
 
 // Top-level await — see order.resource.ts rationale.
 const orderChangeEngine = await ensureOrderEngine();
@@ -63,7 +69,7 @@ const orderChangeResource = defineResource({
           },
           getContextFromReq(req),
         );
-        reply.status(201).send({ success: true, data: change });
+        reply.status(201).send(change);
       },
     },
     {
@@ -75,8 +81,31 @@ const orderChangeResource = defineResource({
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const engine = await ensureOrderEngine();
         const { id } = req.params as { id: string };
-        const body = req.body as { action: string; reason?: string };
+        const body = req.body as {
+          action: string;
+          reason?: string;
+          // Inspection-mode payload — required when action='inspect'.
+          // Per-action disposition list, ordered to match `actions[]` on the change.
+          dispositions?: InspectionDisposition[];
+          notes?: string;
+        };
         const ctx = getContextFromReq(req);
+
+        if (body.action === 'inspect') {
+          if (!Array.isArray(body.dispositions) || body.dispositions.length === 0) {
+            throw new ValidationError('dispositions[] required for inspect action (per-line: restock | damaged | defective | scrap | write_off)');
+          }
+          try {
+            const result = await inspectChange(
+              { changeNumber: id, dispositions: body.dispositions, notes: body.notes },
+              { actorRef: (ctx as { actorRef?: string }).actorRef ?? 'system', organizationId: ctx.organizationId },
+            );
+            return reply.send(result);
+          } catch (err) {
+            const e = err as { message?: string; statusCode?: number };
+            throw createError(e.statusCode ?? 500, e.message ?? 'inspect failed');
+          }
+        }
 
         let result;
         if (body.action === 'confirm') {
@@ -84,9 +113,9 @@ const orderChangeResource = defineResource({
         } else if (body.action === 'decline') {
           result = await engine.repositories.orderChange.decline(id, body.reason ?? 'Declined', ctx);
         } else {
-          return reply.status(400).send({ success: false, error: `Unknown action: ${body.action}` });
+          throw new ValidationError(`Unknown action: ${body.action}`);
         }
-        reply.send({ success: true, data: result });
+        reply.send(result);
       },
     },
     {
@@ -104,7 +133,7 @@ const orderChangeResource = defineResource({
           sort: { createdAt: -1 },
           ...repoOptionsFromCtx(ctx),
         });
-        reply.send({ success: true, data: result });
+        reply.send(result);
       },
     },
   ],

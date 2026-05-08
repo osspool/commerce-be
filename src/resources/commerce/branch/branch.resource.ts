@@ -5,7 +5,8 @@
  * Each branch can have its own stock levels, POS transactions, and settings.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { z } from 'zod';
 import permissions from '#config/permissions.js';
 import { toArcSchemas } from '#shared/event-helpers.js';

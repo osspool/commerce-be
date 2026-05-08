@@ -8,7 +8,8 @@
  * exposed so admin UIs can list "rewards for program X" or "rewards
  * triggered by rule Y".
  */
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { QueryParser } from '@classytic/mongokit';
 import permissions from '#config/permissions.js';
 import { ensurePromoEngine } from './promo.plugin.js';

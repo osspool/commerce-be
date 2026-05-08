@@ -83,7 +83,7 @@ describe('Scrap — full lifecycle with stock decrement', () => {
       return;
     }
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const draft = parse(createRes.body)?.data as {
+    const draft = parse(createRes.body) as {
       _id: string;
       status: string;
       scrapNumber: string;
@@ -94,15 +94,37 @@ describe('Scrap — full lifecycle with stock decrement', () => {
     // Stock unchanged — draft is paper-only.
     expect(await getStock(sku)).toBe(10);
 
-    // 2. Approve.
-    const approveRes = await env.server.inject({
+    // 2. Approve via the unified preset — submit a single-step chain, then
+    //    decide. Replaces the legacy `action: 'approve'` shortcut. The admin
+    //    is both submitter and approver; permission for both is `scrapApprove`.
+    const approverId = env.ctx.users.admin.userId as string;
+    const submitRes = await env.server.inject({
       method: 'POST',
       url: `${API}/inventory/scrap/${draft._id}/action`,
       headers: authH(),
-      payload: { action: 'approve' },
+      payload: {
+        action: 'submit_for_approval',
+        chain: {
+          order: 'sequential',
+          steps: [{ id: 'admin', approvers: [{ id: approverId }] }],
+        },
+      },
     });
-    expect(approveRes.statusCode, approveRes.body).toBeLessThan(400);
-    expect((parse(approveRes.body)?.data as { status: string }).status).toBe('approved');
+    expect(submitRes.statusCode, submitRes.body).toBeLessThan(400);
+
+    const decideRes = await env.server.inject({
+      method: 'POST',
+      url: `${API}/inventory/scrap/${draft._id}/action`,
+      headers: authH(),
+      payload: {
+        action: 'decide',
+        stepId: 'admin',
+        approverId,
+        decision: 'approved',
+      },
+    });
+    expect(decideRes.statusCode, decideRes.body).toBeLessThan(400);
+    expect((parse(decideRes.body) as { status: string }).status).toBe('approved');
     expect(await getStock(sku)).toBe(10);
 
     // 3. Execute — this is the call that has historically not been

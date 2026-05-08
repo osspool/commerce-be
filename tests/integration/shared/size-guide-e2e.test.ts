@@ -83,10 +83,9 @@ describe('Size Guide CRUD', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = res.json();
-    expect(body.success).toBe(true);
     // slug plugin transliterates "&" → "and"
-    expect(body.data.slug).toMatch(/^t-shirts(-and)?-tops$/);
-    expect(body.data.sizes).toHaveLength(2);
+    expect(body.slug).toMatch(/^t-shirts(-and)?-tops$/);
+    expect(body.sizes).toHaveLength(2);
   });
 
   it('public list returns active size guides without auth', async () => {
@@ -106,9 +105,8 @@ describe('Size Guide CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.success).toBe(true);
-    // Arc paginated list: { data: [...], total } or { data: { docs: [...] } }
-    const docs = Array.isArray(body.data) ? body.data : (body.data?.docs ?? body.docs);
+    // Arc paginated list: { data: [...], total }
+    const docs = Array.isArray(body.data) ? body.data : [];
     expect(Array.isArray(docs)).toBe(true);
     expect(docs.length).toBeGreaterThanOrEqual(1);
   });
@@ -124,7 +122,7 @@ describe('Size Guide CRUD', () => {
         sizes: [{ name: 'One', measurements: {} }],
       },
     });
-    const id = created.json().data._id;
+    const id = created.json()._id;
 
     const res = await adminApp.inject({
       method: 'PATCH',
@@ -135,8 +133,8 @@ describe('Size Guide CRUD', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = res.json();
-    expect(body.data.name).toBe('Renamed Guide');
-    expect(body.data.slug).toBe('renamed-guide');
+    expect(body.name).toBe('Renamed Guide');
+    expect(body.slug).toBe('renamed-guide');
   });
 
   it('admin can delete a guide', async () => {
@@ -150,7 +148,7 @@ describe('Size Guide CRUD', () => {
         sizes: [{ name: 'One', measurements: {} }],
       },
     });
-    const id = created.json().data._id;
+    const id = created.json()._id;
 
     const res = await adminApp.inject({ method: 'DELETE', url: `/api/v1/size-guides/${id}` });
     expect(res.statusCode).toBeLessThan(300);

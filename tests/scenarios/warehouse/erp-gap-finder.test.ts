@@ -162,7 +162,7 @@ describe('Gap 2: Customer return — COGS reversal', () => {
 
     // FIXED: Valuation matches stock (layers mode)
     const val = await flow.services.reporting.stockValuation.generate(
-      ctx(BRANCH_A), { mode: 'layers' },
+      ctx(BRANCH_A), { mode: 'layers', stockableOnly: false },
     );
     expect(val.grandTotalValue).toBe(8 * 1200); // 9600
   });
@@ -270,10 +270,10 @@ describe('Gap 5: Stock count surplus — cost layer gap', () => {
 
     // FIXED: Layers mode and snapshot mode agree
     const layersVal = await flow.services.reporting.stockValuation.generate(
-      ctx(BRANCH_A), { mode: 'layers' },
+      ctx(BRANCH_A), { mode: 'layers', stockableOnly: false },
     );
     const snapshotVal = await flow.services.reporting.stockValuation.generate(
-      ctx(BRANCH_A), { mode: 'snapshot' },
+      ctx(BRANCH_A), { mode: 'snapshot', stockableOnly: false },
     );
 
     // Both should report the same total (within rounding tolerance)
@@ -329,7 +329,7 @@ describe('Gap 6: Paisa rounding precision', () => {
 
     // Valuation: 15 * 167 = 2505
     const val = await flow.services.reporting.stockValuation.generate(
-      ctx(BRANCH_A), { mode: 'layers' },
+      ctx(BRANCH_A), { mode: 'layers', stockableOnly: false },
     );
     expect(val.grandTotalValue).toBe(2505);
 

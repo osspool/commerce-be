@@ -71,7 +71,7 @@ beforeAll(async () => {
     },
   });
   expect(progRes.statusCode, progRes.body).toBeLessThan(400);
-  const progData = (parse(progRes.body)?.data ?? {}) as Record<string, unknown>;
+  const progData = (parse(progRes.body) ?? {}) as Record<string, unknown>;
   programIdA = (progData._id ?? progData.id) as string;
   expect(programIdA).toBeTruthy();
 
@@ -99,8 +99,8 @@ describe('Promo — company-wide cross-branch visibility', () => {
     });
     expect(res.statusCode, res.body).toBe(200);
     const body = parse(res.body) as Record<string, unknown>;
-    // Arc's list envelope: { success, docs, page, limit, total, ... }
-    const docs = ((body?.docs ?? (body?.data as { docs?: unknown[] })?.docs ?? body?.data ?? []) as Array<Record<string, unknown>>);
+    // Arc's list envelope: { success, data, page, limit, total, ... }
+    const docs = ((body?.data ?? []) as Array<Record<string, unknown>>);
     const ids = docs.map((d) => (d._id ?? d.id) as string);
     expect(ids).toContain(programIdA);
   });
@@ -113,7 +113,7 @@ describe('Promo — company-wide cross-branch visibility', () => {
       headers: headersFor(branchB),
     });
     expect(res.statusCode, res.body).toBe(200);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect((data._id ?? data.id)).toBe(programIdA);
   });
 
@@ -125,7 +125,7 @@ describe('Promo — company-wide cross-branch visibility', () => {
       headers: headersFor(branchB),
     });
     expect(res.statusCode, res.body).toBe(200);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(data.valid).toBe(true);
   });
 

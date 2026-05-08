@@ -76,7 +76,7 @@ describe('WMS Trace Smoke — enterprise traceability via HTTP', () => {
       headers: h(),
     });
     expect(nodesRes.statusCode).toBe(200);
-    nodeId = String(JSON.parse(nodesRes.body).data[0]._id);
+    nodeId = String(JSON.parse(nodesRes.body)[0]._id);
 
     // Create a second storage location to model the shipping dock explicitly
     const shipLocRes = await server.inject({
@@ -92,7 +92,7 @@ describe('WMS Trace Smoke — enterprise traceability via HTTP', () => {
       },
     });
     expect([200, 201]).toContain(shipLocRes.statusCode);
-    shippingLocId = String(JSON.parse(shipLocRes.body).data._id);
+    shippingLocId = String(JSON.parse(shipLocRes.body)._id);
 
     const locsRes = await server.inject({
       method: 'GET',
@@ -100,7 +100,7 @@ describe('WMS Trace Smoke — enterprise traceability via HTTP', () => {
       headers: h(),
     });
     expect(locsRes.statusCode).toBe(200);
-    const locs = JSON.parse(locsRes.body).data as Array<{ _id: string; type: string }>;
+    const locs = JSON.parse(locsRes.body) as Array<{ _id: string; type: string }>;
     const storage =
       locs.find((l) => l.type === 'storage' || l.type === 'stock') ?? locs[0];
     storageLocId = String(storage._id);
@@ -171,14 +171,14 @@ describe('WMS Trace Smoke — enterprise traceability via HTTP', () => {
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.lot.lotCode).toBe(LOT_CODE);
-    expect(body.data.lot.skuRef).toBe(LOT_SKU);
-    expect(body.data.totalQuantity).toBe(30);
-    expect(body.data.currentLocations).toHaveLength(1);
-    expect(String(body.data.currentLocations[0].locationId)).toBe(storageLocId);
-    expect(body.data.currentLocations[0].quantity).toBe(30);
-    expect(body.data.movementHistory.length).toBeGreaterThanOrEqual(1);
+
+    expect(body.lot.lotCode).toBe(LOT_CODE);
+    expect(body.lot.skuRef).toBe(LOT_SKU);
+    expect(body.totalQuantity).toBe(30);
+    expect(body.currentLocations).toHaveLength(1);
+    expect(String(body.currentLocations[0].locationId)).toBe(storageLocId);
+    expect(body.currentLocations[0].quantity).toBe(30);
+    expect(body.movementHistory.length).toBeGreaterThanOrEqual(1);
   });
 
   it('should return 404 for a lot code that does not exist', async () => {
@@ -189,8 +189,8 @@ describe('WMS Trace Smoke — enterprise traceability via HTTP', () => {
     });
     expect(res.statusCode).toBe(404);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(false);
-    expect(body.error).toMatch(/DOES-NOT-EXIST/);
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(body.message).toMatch(/DOES-NOT-EXIST/);
   });
 
   it('should trace a serial-tracked unit', async () => {
@@ -251,10 +251,10 @@ describe('WMS Trace Smoke — enterprise traceability via HTTP', () => {
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.lot.serialCode).toBe(SERIAL_CODE);
-    expect(body.data.lot.trackingType).toBe('serial');
-    expect(body.data.totalQuantity).toBe(1);
+
+    expect(body.lot.serialCode).toBe(SERIAL_CODE);
+    expect(body.lot.trackingType).toBe('serial');
+    expect(body.totalQuantity).toBe(1);
   });
 
   it('should run a recall analysis for an existing lot', async () => {
@@ -267,12 +267,12 @@ describe('WMS Trace Smoke — enterprise traceability via HTTP', () => {
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.lot.lotCode).toBe(LOT_CODE);
-    expect(body.data.totalInWarehouse).toBe(30);
-    expect(body.data.totalShipped).toBe(0); // nothing shipped yet
-    expect(body.data.affectedLocations).toHaveLength(1);
-    expect(body.data.shippedMoves).toHaveLength(0);
+
+    expect(body.lot.lotCode).toBe(LOT_CODE);
+    expect(body.totalInWarehouse).toBe(30);
+    expect(body.totalShipped).toBe(0); // nothing shipped yet
+    expect(body.affectedLocations).toHaveLength(1);
+    expect(body.shippedMoves).toHaveLength(0);
   });
 
   it('should reject unauthenticated trace requests', async () => {

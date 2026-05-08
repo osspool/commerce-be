@@ -1,5 +1,5 @@
-import config from '#config/index.js';
 import { type CodSettlementData, codSettlementToPosting } from '../../posting/contracts/cod-settlement.contract.js';
+import { getOrderRefAndCustomer } from '../../_shared/order-ref.service.js';
 import { definePostingHandler } from '../define-posting-handler.js';
 import { CodSettledEvent, codSettledSchema } from '../event-definitions.js';
 
@@ -27,21 +27,28 @@ export const codSettledHandler = definePostingHandler({
       return null;
     }
 
+    const { referenceNumber: orderReferenceNumber, customerId } = await getOrderRefAndCustomer(payload.orderId);
+
     const data: CodSettlementData = {
       settlementId: payload.settlementId,
       orderId: payload.orderId,
+      orderReferenceNumber,
       grossAmount: payload.grossAmount,
       actualReceived: payload.actualReceived,
       courierCommission: payload.courierCommission,
       writeoff: payload.writeoff,
       cashAccount: payload.cashAccount,
+      // Customer reference for the A/R clear line — must match the placement
+      // entry's partnerId so the subsidiary ledger nets to zero. Null for
+      // guest checkouts (placement also stamps no partnerId).
+      customerId: customerId ?? undefined,
       date: payload.date ? new Date(payload.date) : new Date(),
       notes: payload.notes,
     };
 
     return {
       branchId: payload.branchId,
-      posting: codSettlementToPosting(data, { autoPost: config.accounting.autoPost }),
+      posting: codSettlementToPosting(data),
       logFields: {
         orderId: payload.orderId,
         settlementId: payload.settlementId,

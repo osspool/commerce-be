@@ -9,6 +9,17 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+
+// Stub the OrderRef service so cod-settled / cod-cancelled handlers don't
+// boot a real Order engine + hit Mongo from a unit test. Handlers care
+// about the `customerId` for the A/R partnerId fallback — we return an
+// empty result so the handler exercises the orderId-fallback branch
+// (matches the "guest checkout" path in [cod-placement.contract.ts]).
+vi.mock('../../src/resources/accounting/_shared/order-ref.service.js', () => ({
+  getOrderRefAndCustomer: vi.fn(async () => ({})),
+  getOrderReferenceNumber: vi.fn(async () => undefined),
+}));
+
 import { codCancelledHandler } from '../../src/resources/accounting/events/handlers/cod-cancelled.handler.js';
 import { codSettledHandler } from '../../src/resources/accounting/events/handlers/cod-settled.handler.js';
 import { inventoryAdjustedHandler } from '../../src/resources/accounting/events/handlers/inventory-adjusted.handler.js';
@@ -84,12 +95,20 @@ describe('returnRestockedHandler.build', () => {
     });
   });
 
-  it('returns null for zero cost (services / promo items)', async () => {
+  it('still posts at zero cost so the audit trail records the restock', async () => {
+    // The handler intentionally posts even when cost is zero — service-fee
+    // and promo lines have no COGS, but the restock event itself must be
+    // visible in the journal (Dr Inventory 0 / Cr COGS 0). The bridge stamps
+    // `costMissing: true` + `affectedLines` so the admin "missing cost" view
+    // surfaces the row instead of silently dropping it.
     const work = await returnRestockedHandler.build(
       { returnId: 'rtn-1', orderId: 'ord-1', costAmount: 0, branchId: 'b' },
       log,
     );
-    expect(work).toBeNull();
+    expect(work).not.toBeNull();
+    expect(work?.posting?.items?.[0]?.debit).toBe(0);
+    expect(work?.posting?.items?.[1]?.credit).toBe(0);
+    expect(work?.logFields?.costAmount).toBe(0);
   });
 
   it('returns null when branchId is missing', async () => {

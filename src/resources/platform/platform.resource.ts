@@ -100,7 +100,7 @@ const platformResource = defineResource({
       raw: true,
       handler: async (_req: any, reply: any) => {
         if (!cachedMatrix) cachedMatrix = buildPermissionMatrix();
-        return reply.send({ success: true, data: cachedMatrix });
+        return reply.send(cachedMatrix);
       },
     },
   ],

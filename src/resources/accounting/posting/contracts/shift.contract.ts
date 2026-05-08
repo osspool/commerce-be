@@ -83,9 +83,7 @@ export const shiftLedgerBridge: LedgerBridge = {
       transactionCount: shift.salesCount,
     };
 
-    const posting = dailyPosSummaryToPosting(summary, {
-      autoPost: config.accounting.autoPost,
-    });
+    const posting = dailyPosSummaryToPosting(summary);
 
     const result = await createPosting(branchId, {
       ...posting,

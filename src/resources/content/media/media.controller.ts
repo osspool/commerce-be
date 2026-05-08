@@ -12,6 +12,7 @@ import type { MediaRepository } from '@classytic/media-kit';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { BASE_FOLDERS } from './media.config.js';
 import { CONTENT_TYPES, mediaSchemaOptions } from './media.schemas.js';
+import { createError, NotFoundError, ValidationError } from '@classytic/arc/utils';
 
 type ContentType = (typeof CONTENT_TYPES)[number];
 
@@ -77,7 +78,7 @@ class MediaController extends BaseController {
   // Block generic create — uploads must go through /upload (buffer required).
   // biome-ignore lint/suspicious/noExplicitAny: arc handler return type
   async create(_context?: unknown): Promise<any> {
-    return { success: false, error: 'Use /api/media/upload for creation', status: 405 };
+    throw createError(405, 'Use /api/media/upload for creation');
   }
 
   // Override the inherited DELETE /:id handler so it routes through
@@ -85,19 +86,19 @@ class MediaController extends BaseController {
   // The signature must match BaseController.delete (single IRequestContext).
   async delete(req: IRequestContext): Promise<IControllerResponse<{ message: string; id: string }>> {
     const id = req.params?.id;
-    if (!id) return { success: false, error: 'ID parameter is required', status: 400 };
+    if (!id) throw new ValidationError('ID parameter is required');
 
     const user = req.user as { id?: string; _id?: string } | undefined;
     const ctx = { userId: user?.id ?? user?._id };
     const ok = await this.repo.hardDelete(id, ctx as never);
-    if (!ok) return { success: false, error: 'Media not found', status: 404 };
-    return { success: true, data: { message: 'Media deleted', id } };
+    if (!ok) throw new NotFoundError('Media');
+    return { data: { message: 'Media deleted', id } };
   }
 
   // ─── Upload handlers ────────────────────────────────────────
   async upload(req: AuthedRequest, reply: FastifyReply): Promise<void> {
     const file = await (req as unknown as { file: () => Promise<MultipartFile | null> }).file();
-    if (!file) return reply.code(400).send({ success: false, message: 'No file uploaded' });
+    if (!file) throw new ValidationError('No file uploaded');
 
     const buffer = await file.toBuffer();
     const { folder = 'general', alt, title, contentType, skipProcessing } = (req.body ?? {}) as Record<string, string>;
@@ -116,7 +117,7 @@ class MediaController extends BaseController {
       } as never,
       ctx as never,
     );
-    return reply.code(201).send({ success: true, data: uploaded });
+    return reply.code(201).send(uploaded);
   }
 
   async uploadMultiple(req: AuthedRequest, reply: FastifyReply): Promise<void> {
@@ -136,8 +137,8 @@ class MediaController extends BaseController {
       }
     }
 
-    if (!files.length) return reply.code(400).send({ success: false, message: 'No files uploaded' });
-    if (files.length > 20) return reply.code(400).send({ success: false, message: 'Max 20 files per request' });
+    if (!files.length) throw new ValidationError('No files uploaded');
+    if (files.length > 20) throw new ValidationError('Max 20 files per request');
 
     const { folder = 'general', contentType, skipProcessing } = formData;
     const ctx = { userId: req.user?.id ?? req.user?._id };
@@ -151,7 +152,7 @@ class MediaController extends BaseController {
     }));
 
     const uploaded = await this.repo.uploadMany(inputs as never, ctx as never);
-    return reply.code(201).send({ success: true, data: uploaded });
+    return reply.code(201).send(uploaded);
   }
 
   // ─── Presigned uploads ──────────────────────────────────────
@@ -166,7 +167,7 @@ class MediaController extends BaseController {
       folder?: string;
     };
     const result = await this.repo.getSignedUploadUrl(filename, mimeType, { folder } as never);
-    return reply.send({ success: true, data: result });
+    return reply.send(result);
   }
 
   async confirmPresignedUpload(req: AuthedRequest, reply: FastifyReply): Promise<void> {
@@ -176,7 +177,7 @@ class MediaController extends BaseController {
       { key, filename, mimeType, size, folder, alt, title } as never,
       ctx as never,
     );
-    return reply.code(201).send({ success: true, data: result });
+    return reply.code(201).send(result);
   }
 
   // ─── Bulk handlers ──────────────────────────────────────────
@@ -188,8 +189,8 @@ class MediaController extends BaseController {
     const success = results.success ?? [];
     const statusCode = failed.length ? 207 : 200;
     return reply.code(statusCode).send({
-      success: failed.length === 0,
-      data: { success, failed },
+      success,
+      failed,
       message: `Deleted ${success.length} of ${ids.length} files`,
     });
   }
@@ -199,21 +200,20 @@ class MediaController extends BaseController {
     const ctx = { userId: req.user?.id ?? req.user?._id };
     const result = await this.repo.move(ids, targetFolder, ctx as never);
     return reply.send({
-      success: true,
-      data: result,
+      ...result,
       message: `Moved ${result.modifiedCount ?? 0} files`,
     });
   }
 
   // ─── Folder handlers ────────────────────────────────────────
   async getFolders(_req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    return reply.send({ success: true, data: BASE_FOLDERS });
+    return reply.send(BASE_FOLDERS);
   }
 
   async getFolderTree(req: AuthedRequest, reply: FastifyReply): Promise<void> {
     const ctx = { userId: req.user?.id ?? req.user?._id };
     const tree = await this.repo.getFolderTree(ctx as never);
-    return reply.send({ success: true, data: tree });
+    return reply.send(tree);
   }
 
   async getFolderStats(
@@ -222,12 +222,12 @@ class MediaController extends BaseController {
   ): Promise<void> {
     const ctx = { userId: req.user?.id ?? req.user?._id };
     const stats = await this.repo.getFolderStats(req.params.folder, ctx as never);
-    return reply.send({ success: true, data: stats });
+    return reply.send(stats);
   }
 
   async getBreadcrumb(req: FastifyRequest<{ Params: { folder: string } }>, reply: FastifyReply): Promise<void> {
     const breadcrumb = this.repo.getBreadcrumb(req.params.folder);
-    return reply.send({ success: true, data: breadcrumb });
+    return reply.send(breadcrumb);
   }
 
   async getSubfolders(
@@ -236,7 +236,7 @@ class MediaController extends BaseController {
   ): Promise<void> {
     const ctx = { userId: req.user?.id ?? req.user?._id };
     const subfolders = await this.repo.getSubfolders(req.params.folder, ctx as never);
-    return reply.send({ success: true, data: subfolders });
+    return reply.send(subfolders);
   }
 
   async renameFolder(
@@ -245,7 +245,7 @@ class MediaController extends BaseController {
   ): Promise<void> {
     const ctx = { userId: req.user?.id ?? req.user?._id };
     const result = await this.repo.renameFolder(req.params.folder, req.body.newName, ctx as never);
-    return reply.send({ success: true, data: result });
+    return reply.send(result);
   }
 
   async deleteFolder(
@@ -258,7 +258,7 @@ class MediaController extends BaseController {
     const success = results.success ?? [];
 
     if (success.length === 0 && failed.length === 0) {
-      return reply.code(404).send({ success: false, message: 'No files in folder' });
+      throw new NotFoundError('No files in folder');
     }
     const statusCode = failed.length ? 207 : 200;
     return reply.code(statusCode).send({
@@ -275,7 +275,7 @@ class MediaController extends BaseController {
   ): Promise<void> {
     const ctx = { userId: req.user?.id ?? req.user?._id };
     const result = await this.repo.addTags(req.params.id, req.body.tags, ctx as never);
-    return reply.send({ success: true, data: result });
+    return reply.send(result);
   }
 
   async removeTags(
@@ -284,7 +284,7 @@ class MediaController extends BaseController {
   ): Promise<void> {
     const ctx = { userId: req.user?.id ?? req.user?._id };
     const result = await this.repo.removeTags(req.params.id, req.body.tags, ctx as never);
-    return reply.send({ success: true, data: result });
+    return reply.send(result);
   }
 }
 

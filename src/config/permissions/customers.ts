@@ -16,7 +16,7 @@ const customerPermissions: CustomerPermissions = {
   create: allowPublic(),
   update: requireAuth(),
   delete: platformAdminOnly(),
-  getMe: platformAdminOnly(),
+  getMe: requireAuth(),
 };
 
 export default customerPermissions;

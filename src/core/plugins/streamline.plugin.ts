@@ -80,6 +80,15 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     workflows.push(...createInvoiceWorkflows(container));
   }
 
+  // Subscription billing sweep — replaces the prior `subscription.billing.due`
+  // cron. Self-rescheduling workflow that survives restarts and runs exactly
+  // once per cycle across replicas (streamline scheduler claim is race-safe).
+  const { createSubscriptionWorkflows, SUBSCRIPTION_BILLING_SWEEP_KEY } = await import(
+    '#resources/payments/subscription/subscription.workflows.js'
+  );
+  const subscriptionWorkflows = createSubscriptionWorkflows(container);
+  workflows.push(...subscriptionWorkflows);
+
   // Future modules:
   // if (config.loyalty.enabled) {
   //   const { createLoyaltyWorkflows } = await import('#resources/sales/loyalty/loyalty.workflows.js');
@@ -102,13 +111,42 @@ const plugin: FastifyPluginAsync = async (fastify) => {
   // prefix to `/workflows`, which is what we want (the surrounding
   // `register-domain-bootstrap` scope already applies the `/api/v1`
   // prefix, so the final path is `/api/v1/workflows/<id>/start`).
+  // Arc 2.13 renamed `bridgeStepEvents` → `bridgeBusEvents` to better
+  // describe what the flag does (subscribe to the workflow's internal
+  // event bus, which carries step + lifecycle + engine telemetry events).
+  // Same default-off behavior; we opt in for dashboards / monitoring.
   await fastify.register(streamlinePlugin, {
     workflows,
     auth: true,
     bridgeEvents: true,
-    bridgeStepEvents: true,
+    bridgeBusEvents: true,
     enableStreaming: config.isDevelopment,
   });
+
+  // ── Auto-start singleton recurring workflows ─────────────────────────────
+  // Self-rescheduling workflows (subscription billing sweep, etc.) need an
+  // initial `start()` call so the scheduler picks them up. Idempotency keys
+  // dedupe across pods + restarts: streamline's `findActiveByIdempotencyKey`
+  // returns the existing active run instead of creating a parallel one.
+  // Fire-and-forget — if the start fails (transient Mongo blip), the next
+  // boot retries; we don't gate boot on a workflow start.
+  const billingSweepWorkflow = subscriptionWorkflows[0];
+  if (billingSweepWorkflow) {
+    billingSweepWorkflow
+      .start({}, { idempotencyKey: SUBSCRIPTION_BILLING_SWEEP_KEY })
+      .then((run: { _id: string; status: string }) => {
+        fastify.log.info(
+          { runId: run._id, status: run.status, workflow: 'subscription-billing-sweep' },
+          'Streamline: singleton recurring workflow ensured',
+        );
+      })
+      .catch((err: unknown) => {
+        fastify.log.warn(
+          { err, workflow: 'subscription-billing-sweep' },
+          'Streamline: failed to ensure singleton recurring workflow (will retry next boot)',
+        );
+      });
+  }
 
   // ── TTL index for terminal runs ──────────────────────────────────────────
   // Mongo's TTL monitor will auto-delete `done | failed | cancelled` runs

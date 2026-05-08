@@ -25,7 +25,6 @@ import {
   cleanupAllOrgs,
   handleStockAlert,
 } from '#resources/inventory/inventory.jobs.js';
-import { processBillingDue } from '#resources/payments/subscription/cron/process-billing-due.js';
 import { getCartEngine } from '#resources/sales/cart/cart.engine.js';
 import { registerLoyaltyEventHandlers } from '#resources/sales/loyalty/loyalty.events.js';
 import { getLoyaltyEngine } from '#resources/sales/loyalty/loyalty.plugin.js';
@@ -103,17 +102,11 @@ const jobs: ReadonlyArray<CronJob> = [
       logger.info(result, 'Daily tier evaluation');
     },
   },
-  {
-    name: 'subscription.billing.due',
-    intervalMs: ONE_HOUR,
-    jitterMs: 5 * ONE_MINUTE,
-    run: async () => {
-      const result = await processBillingDue();
-      if (result.billed > 0 || result.failed > 0) {
-        logger.info(result, 'Subscription billing tick');
-      }
-    },
-  },
+  // `subscription.billing.due` — migrated to a streamline workflow
+  // (`subscription-billing-sweep`) wired in `core/plugins/streamline.plugin.ts`.
+  // The workflow is self-rescheduling (process → sleep 1h → goto process) and
+  // gets crash-recovery + retry semantics for free. See
+  // `resources/payments/subscription/subscription.workflows.ts`.
   {
     name: 'cart.checkout.sweep',
     intervalMs: ONE_DAY,

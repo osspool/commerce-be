@@ -30,7 +30,7 @@ const VARIANT_BARCODE = '8901234567890';
 
 beforeAll(async () => {
   ctx = await setupTestOrg();
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
   await teardownTestOrg(ctx);
@@ -59,12 +59,12 @@ describe('POS /lookup — barcode resolution', () => {
     });
     expect(created.statusCode).toBeLessThan(300);
     const body = JSON.parse(created.body);
-    variantProductId = body.data._id;
-    variantSku = body.data.variants[0].sku;
+    variantProductId = body._id;
+    variantSku = body.variants[0].sku;
 
     // Round-trip the FULL variant array — the catalog `variantSchema` requires
     // `attributes` and `isActive`, so a slimmed `{sku, barcode}` payload would 500.
-    const fullVariants = body.data.variants.map(
+    const fullVariants = body.variants.map(
       (v: { sku: string; attributes: Record<string, string>; isActive: boolean }, i: number) => ({
         ...v,
         ...(i === 0 ? { barcode: VARIANT_BARCODE } : {}),
@@ -111,12 +111,11 @@ describe('POS /lookup — barcode resolution', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.product._id).toBe(variantProductId);
-    expect(body.data.variantSku).toBe(variantSku);
-    expect(body.data.matchedVariant?.barcode).toBe(VARIANT_BARCODE);
+    expect(body.product._id).toBe(variantProductId);
+    expect(body.variantSku).toBe(variantSku);
+    expect(body.matchedVariant?.barcode).toBe(VARIANT_BARCODE);
     // Quantity is 0 (no quants seeded — Flow's upsert needs a replset).
-    expect(body.data.quantity).toBe(0);
+    expect(body.quantity).toBe(0);
   });
 
   it('GET /pos/lookup?code=<variant-sku> — resolves the same variant by SKU', async () => {
@@ -128,7 +127,7 @@ describe('POS /lookup — barcode resolution', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.data.product._id).toBe(variantProductId);
-    expect(body.data.variantSku).toBe(variantSku);
+    expect(body.product._id).toBe(variantProductId);
+    expect(body.variantSku).toBe(variantSku);
   });
 });

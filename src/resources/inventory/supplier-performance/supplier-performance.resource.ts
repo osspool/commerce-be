@@ -111,13 +111,9 @@ const supplierPerformanceResource = defineResource({
           period ?? undefined,
         );
         if (!score) {
-          return reply.send({
-            success: true,
-            data: null,
-            meta: { supplierId, hasScore: false },
-          });
+          return reply.send({ data: null, meta: { supplierId, hasScore: false } });
         }
-        return reply.send({ success: true, data: score });
+        return reply.send(score);
       },
     },
 
@@ -138,7 +134,7 @@ const supplierPerformanceResource = defineResource({
           : defaultPeriod();
 
         const score = await sp.services.score.computeScore({ supplierId, period }, ctx);
-        return reply.send({ success: true, data: score });
+        return reply.send(score);
       },
     },
 
@@ -169,7 +165,7 @@ const supplierPerformanceResource = defineResource({
           },
           ctx,
         );
-        return reply.status(201).send({ success: true, data: event });
+        return reply.status(201).send(event);
       },
     },
   ],

@@ -163,29 +163,28 @@ describe('Mushak 6.3 Generation', () => {
     const body = parse(res.body);
 
     expect(res.statusCode).toBe(201);
-    expect(body.success).toBe(true);
-    expect(body.data.mushakSerial).toMatch(/^HO-001\/\d{4}\/\d{6}$/);
-    expect(body.data.seller.bin).toBe(sellerBin);
-    expect(body.data.buyer.name).toBe('Test Customer');
-    expect(body.data.lines).toHaveLength(2);
+    expect(body.mushakSerial).toMatch(/^HO-001\/\d{4}\/\d{6}$/);
+    expect(body.seller.bin).toBe(sellerBin);
+    expect(body.buyer.name).toBe('Test Customer');
+    expect(body.lines).toHaveLength(2);
 
     // Widget A: 2 × 5000 = 10000 base, 15% VAT = 1500
-    expect(body.data.lines[0].totalValue).toBe(10000);
-    expect(body.data.lines[0].vatRate).toBe(15);
-    expect(body.data.lines[0].vatAmount).toBe(1500);
+    expect(body.lines[0].totalValue).toBe(10000);
+    expect(body.lines[0].vatRate).toBe(15);
+    expect(body.lines[0].vatAmount).toBe(1500);
 
     // Widget B: 1 × 10000 = 10000 base, 5% VAT = 500
-    expect(body.data.lines[1].totalValue).toBe(10000);
-    expect(body.data.lines[1].vatRate).toBe(5);
-    expect(body.data.lines[1].vatAmount).toBe(500);
+    expect(body.lines[1].totalValue).toBe(10000);
+    expect(body.lines[1].vatRate).toBe(5);
+    expect(body.lines[1].vatAmount).toBe(500);
 
     // Totals
-    expect(body.data.totalValue).toBe(20000);
-    expect(body.data.totalVat).toBe(2000);
-    expect(body.data.grandTotal).toBe(22000);
-    expect(body.data.status).toBe('issued');
+    expect(body.totalValue).toBe(20000);
+    expect(body.totalVat).toBe(2000);
+    expect(body.grandTotal).toBe(22000);
+    expect(body.status).toBe('issued');
 
-    firstInvoiceId = body.data._id;
+    firstInvoiceId = body._id;
   });
 
   it('is idempotent — same source returns same invoice', async () => {
@@ -194,15 +193,15 @@ describe('Mushak 6.3 Generation', () => {
 
     expect(res.statusCode).toBe(200);
     expect(body.idempotent).toBe(true);
-    expect(body.data._id).toBe(firstInvoiceId);
+    expect(body._id).toBe(firstInvoiceId);
   });
 
   it('increments serial number for new sources', async () => {
     const res1 = await generateMusok();
     const res2 = await generateMusok();
 
-    const serial1 = parse(res1.body).data.serialNumber;
-    const serial2 = parse(res2.body).data.serialNumber;
+    const serial1 = parse(res1.body).serialNumber;
+    const serial2 = parse(res2.body).serialNumber;
 
     expect(serial2).toBe(serial1 + 1);
   });
@@ -217,10 +216,10 @@ describe('Mushak 6.3 Generation', () => {
 
     expect(res.statusCode).toBe(201);
     // Base: 50000, SD: 12500, VAT base: 62500, VAT: 9375
-    expect(body.data.lines[0].sdAmount).toBe(12500);
-    expect(body.data.totalSd).toBe(12500);
-    expect(body.data.totalVat).toBe(9375);
-    expect(body.data.grandTotal).toBe(71875);
+    expect(body.lines[0].sdAmount).toBe(12500);
+    expect(body.totalSd).toBe(12500);
+    expect(body.totalVat).toBe(9375);
+    expect(body.grandTotal).toBe(71875);
   });
 });
 
@@ -239,10 +238,9 @@ describe('CRUD via Arc Adapter', () => {
     const body = parse(res.body);
 
     expect(res.statusCode).toBe(200);
-    expect(body.success).toBe(true);
-    expect(Array.isArray(body.docs)).toBe(true);
-    expect(body.docs.length).toBeGreaterThanOrEqual(1);
-    expect(body.total).toBeGreaterThanOrEqual(body.docs.length);
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.data.length).toBeGreaterThanOrEqual(1);
+    expect(body.total).toBeGreaterThanOrEqual(body.data.length);
     expect(body.page).toBeDefined();
     expect(body.limit).toBeDefined();
   });
@@ -255,7 +253,7 @@ describe('CRUD via Arc Adapter', () => {
       headers: auth.as('admin').headers,
     });
     const listBody = parse(listRes.body);
-    const id = listBody.docs[0]._id;
+    const id = listBody.data[0]._id;
 
     const res = await server.inject({
       method: 'GET',
@@ -266,8 +264,8 @@ describe('CRUD via Arc Adapter', () => {
 
     expect(res.statusCode).toBe(200);
     // Single GET still uses { success, data } envelope.
-    expect(body.data._id).toBe(id);
-    expect(body.data.mushakSerial).toBeDefined();
+    expect(body._id).toBe(id);
+    expect(body.mushakSerial).toBeDefined();
   });
 
   it('filters by status', async () => {
@@ -279,7 +277,7 @@ describe('CRUD via Arc Adapter', () => {
     const body = parse(res.body);
 
     expect(res.statusCode).toBe(200);
-    for (const inv of body.docs) {
+    for (const inv of body.data) {
       expect(inv.status).toBe('issued');
     }
   });
@@ -298,7 +296,7 @@ describe('Source Lookup', () => {
     const body = parse(res.body);
 
     expect(res.statusCode).toBe(200);
-    expect(String(body.data.sourceId)).toBe(sourceId);
+    expect(String(body.sourceId)).toBe(sourceId);
   });
 
   it('returns 404 for unknown source', async () => {
@@ -316,19 +314,19 @@ describe('Source Lookup', () => {
 describe('Cancel Action (Stripe Pattern)', () => {
   it('cancels an issued invoice', async () => {
     const genRes = await generateMusok();
-    const id = parse(genRes.body).data._id;
+    const id = parse(genRes.body)._id;
 
     const res = await musokAction(id, 'cancel', { reason: 'Buyer refused delivery' });
     const body = parse(res.body);
 
     expect(res.statusCode).toBe(200);
-    expect(body.data.status).toBe('cancelled');
-    expect(body.data.cancelReason).toBe('Buyer refused delivery');
+    expect(body.status).toBe('cancelled');
+    expect(body.cancelReason).toBe('Buyer refused delivery');
   });
 
   it('rejects cancel on already cancelled invoice', async () => {
     const genRes = await generateMusok();
-    const id = parse(genRes.body).data._id;
+    const id = parse(genRes.body)._id;
 
     await musokAction(id, 'cancel', { reason: 'First cancel' });
     const res = await musokAction(id, 'cancel', { reason: 'Double cancel' });
@@ -347,8 +345,8 @@ describe('BIN Validation', () => {
     const body = parse(res.body);
 
     expect(res.statusCode).toBe(200);
-    expect(body.data.isValid).toBe(true);
-    expect(body.data.formatted).toMatch(/^\d{4}-\d{4}-\d{4}-\d$/);
+    expect(body.isValid).toBe(true);
+    expect(body.formatted).toMatch(/^\d{4}-\d{4}-\d{4}-\d$/);
   });
 
   it('rejects an invalid BIN', async () => {
@@ -360,7 +358,7 @@ describe('BIN Validation', () => {
     const body = parse(res.body);
 
     expect(res.statusCode).toBe(200);
-    expect(body.data.isValid).toBe(false);
+    expect(body.isValid).toBe(false);
   });
 });
 
@@ -377,12 +375,12 @@ describe('Mushak 9.1 Monthly Return', () => {
     const body = parse(res.body);
 
     expect(res.statusCode).toBe(200);
-    expect(body.data.return).toBeDefined();
-    expect(body.data.return.period).toBe(period);
-    expect(body.data.return.bin).toBe(sellerBin);
-    expect(body.data.return.lines).toHaveLength(19);
-    expect(body.data.return.netPayable).toBeGreaterThanOrEqual(0);
-    expect(body.data.aggregates).toBeInstanceOf(Array);
+    expect(body.return).toBeDefined();
+    expect(body.return.period).toBe(period);
+    expect(body.return.bin).toBe(sellerBin);
+    expect(body.return.lines).toHaveLength(19);
+    expect(body.return.netPayable).toBeGreaterThanOrEqual(0);
+    expect(body.aggregates).toBeInstanceOf(Array);
   });
 
   it('rejects invalid period format', async () => {
@@ -420,11 +418,11 @@ describe('Business-Type Scenario: STANDARD_VAT (default regime)', () => {
     const body = parse(res.body);
 
     // Assert — invoice has the audit trail with NATIONAL position
-    expect(body.data.fiscalPosition).toBe('NATIONAL');
-    expect(body.data.sroReference).toBeNull();
-    expect(body.data.exemptionReason).toBeNull();
+    expect(body.fiscalPosition).toBe('NATIONAL');
+    expect(body.sroReference).toBeNull();
+    expect(body.exemptionReason).toBeNull();
     // 15% of 50000 = 7500
-    expect(body.data.totalVat).toBe(7500);
+    expect(body.totalVat).toBe(7500);
   });
 });
 
@@ -444,12 +442,12 @@ describe('Business-Type Scenario: RMG_EXPORTER (foreign buyer remap)', () => {
     const body = parse(res.body);
 
     // Assert — fiscal position remapped, VAT zero (was STANDARD 15% pre-remap)
-    expect(body.data.fiscalPosition).toBe('INTERNATIONAL');
-    expect(body.data.sroReference).toBe('EXPORT-US');
-    expect(body.data.exemptionReason).toMatch(/Export to US/);
-    expect(body.data.totalVat).toBe(0); // Zero-rated export
+    expect(body.fiscalPosition).toBe('INTERNATIONAL');
+    expect(body.sroReference).toBe('EXPORT-US');
+    expect(body.exemptionReason).toMatch(/Export to US/);
+    expect(body.totalVat).toBe(0); // Zero-rated export
     // Total value still records the export amount for monthly return reporting
-    expect(body.data.totalValue).toBe(5_000_000);
+    expect(body.totalValue).toBe(5_000_000);
   });
 });
 
@@ -471,9 +469,9 @@ describe('Business-Type Scenario: Diplomatic mission (SRO-304/2018)', () => {
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
 
-    expect(body.data.fiscalPosition).toBe('DIPLOMATIC');
-    expect(body.data.sroReference).toBe('SRO-304/2018');
-    expect(body.data.totalVat).toBe(0);
+    expect(body.fiscalPosition).toBe('DIPLOMATIC');
+    expect(body.sroReference).toBe('SRO-304/2018');
+    expect(body.totalVat).toBe(0);
   });
 });
 
@@ -493,7 +491,7 @@ describe('Business-Type Scenario: NGO without certificate is rejected', () => {
     expect(res.statusCode).toBe(400);
     const body = parse(res.body);
     expect(body.code).toBe('SRO_REFERENCE_REQUIRED');
-    expect(body.fiscalPositionReason).toMatch(/POSTING MUST BE REJECTED/);
+    expect(body.meta?.fiscalPositionReason).toMatch(/POSTING MUST BE REJECTED/);
   });
 
   it('NGO WITH certificate passes → EXEMPT_NGO position, certificate stored', async () => {
@@ -510,8 +508,8 @@ describe('Business-Type Scenario: NGO without certificate is rejected', () => {
 
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.data.fiscalPosition).toBe('EXEMPT_NGO');
-    expect(body.data.sroReference).toBe('NGO-CERT-2026-042');
+    expect(body.fiscalPosition).toBe('EXEMPT_NGO');
+    expect(body.sroReference).toBe('NGO-CERT-2026-042');
   });
 });
 
@@ -535,10 +533,10 @@ describe('Business-Type Scenario: SME_TOT branch files Mushak 9.2 (not 9.1)', ()
     // Assert — handler branched to the 9.2 path
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.data.formType).toBe('9.2');
-    expect(body.data.regime).toBe('SME_TOT');
-    expect(body.data.return).toBeDefined();
-    expect(body.data.return.totRate).toBe(4);
+    expect(body.formType).toBe('9.2');
+    expect(body.regime).toBe('SME_TOT');
+    expect(body.return).toBeDefined();
+    expect(body.return.totRate).toBe(4);
 
     // Cleanup — restore STANDARD_VAT for downstream tests
     await mongoose.connection.db!.collection('organization').updateOne(
@@ -564,9 +562,9 @@ describe('Business-Type Scenario: COTTAGE_EXEMPT files nothing', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.data.formType).toBe('NONE');
-    expect(body.data.regime).toBe('COTTAGE_EXEMPT');
-    expect(body.data.message).toMatch(/no VAT.*filing required/i);
+    expect(body.formType).toBe('NONE');
+    expect(body.regime).toBe('COTTAGE_EXEMPT');
+    expect(body.message).toMatch(/no VAT.*filing required/i);
 
     // Restore for any downstream test runs
     await mongoose.connection.db!.collection('organization').updateOne(

@@ -2,6 +2,7 @@ import { repoOptionsFromCtx } from '@classytic/order';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getContextFromReq } from '#shared/context.js';
 import { blanketOrderRepository } from '../blanket-order.engine.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 function normalizeCadence(rawCadence: Record<string, unknown>) {
   const cadence: Record<string, unknown> = {
@@ -25,16 +26,10 @@ export async function createBlanketOrderHandler(req: FastifyRequest, reply: Fast
   const lines = (body.lines as Array<unknown> | undefined) ?? [];
 
   if (!Array.isArray(lines) || lines.length === 0) {
-    return reply.status(400).send({
-      success: false,
-      error: 'Blanket order must contain at least one line template',
-    });
+    throw new ValidationError('Blanket order must contain at least one line template');
   }
   if (!body.cadence) {
-    return reply.status(400).send({
-      success: false,
-      error: 'Blanket order requires a cadence',
-    });
+    throw new ValidationError('Blanket order requires a cadence');
   }
 
   const rawCadence = body.cadence as Record<string, unknown>;
@@ -50,11 +45,11 @@ export async function createBlanketOrderHandler(req: FastifyRequest, reply: Fast
       },
       repoOptionsFromCtx(ctx),
     );
-    return reply.status(201).send({ success: true, data: blanket });
+    return reply.status(201).send(blanket);
   } catch (err) {
     if (isBlanketValidationError(err)) {
       const e = err as { code?: string; message?: string };
-      return reply.status(400).send({ success: false, error: e.message, code: e.code });
+      throw new ValidationError(e.message ?? 'Blanket order validation failed');
     }
     throw err;
   }

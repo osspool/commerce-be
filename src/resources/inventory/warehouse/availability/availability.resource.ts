@@ -50,7 +50,7 @@ const availabilityResource = defineResource({
           },
           ctx,
         );
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
     {
@@ -68,7 +68,7 @@ const availabilityResource = defineResource({
         };
         const ctx = availCtx(req);
         const result = await flow().services.allocation.checkAvailability(items, nodeId, ctx);
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
   ],

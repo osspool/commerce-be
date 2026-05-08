@@ -1,9 +1,10 @@
 import { createStatusError } from '#resources/inventory/shared/status-errors.js';
-import PurchaseOrder, { PurchaseOrderPaymentStatus, PurchaseOrderPaymentTerms, PurchaseOrderStatus } from '../models/purchase-order.model.js';
+import { PurchaseOrderPaymentStatus, PurchaseOrderPaymentTerms, PurchaseOrderStatus } from '../purchase-order.constants.js';
 import purchaseOrderRepository from '../purchase-order.repository.js';
 import { buildStatusEntry, computePurchaseTotals, normalizeNumber } from '../purchase-order.utils.js';
 import type { CreatePurchaseData } from './shared.js';
 import { getSupplierById, normalizePurchaseItems, resolveDueDate, resolveHeadOfficeBranch } from './shared.js';
+import { InventoryCounter } from '#resources/inventory/flow/counter-bridge.js';
 
 export async function createPurchase(
   data: CreatePurchaseData,
@@ -55,7 +56,10 @@ export async function createPurchase(
     invoiceDate: resolvedInvoiceDate,
   });
 
-  const invoiceNumber = await PurchaseOrder.generateInvoiceNumber();
+  const now = new Date();
+  const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const seq = await InventoryCounter.nextSeq('PINV', ym);
+  const invoiceNumber = `PINV-${ym}-${String(seq).padStart(4, '0')}`;
 
   let purchase: unknown = await purchaseOrderRepository.create({
     invoiceNumber,

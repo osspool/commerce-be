@@ -3,7 +3,7 @@
  */
 import { z } from 'zod';
 
-const successData = <T extends z.ZodType>(schema: T) => z.object({ success: z.literal(true), data: schema });
+const successData = <T extends z.ZodType>(schema: T) => schema;
 
 const standardCostEntity = z.object({
   _id: z.string(),
@@ -27,7 +27,6 @@ export const standardCostSchemas = {
     }),
     response: {
       200: z.object({
-        success: z.literal(true),
         data: z.array(standardCostEntity),
         total: z.number(),
       }),

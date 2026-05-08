@@ -13,19 +13,23 @@
 
 import { VAT_ACCOUNTS } from '../../tax/tax.accounts.js';
 import type { PostingInput, PostingItem } from '../posting.service.js';
+import { BD } from '../bd-account-codes.js';
 
+// Payment-method → GL account map. Refunds reverse the originating
+// instrument: a card refund hits the gateway clearing balance (the
+// processor returns it from there); a cash refund comes out of the till.
+// See sales.contract.ts for the full account-routing rationale.
 const PAYMENT_METHOD_ACCOUNTS: Record<string, string> = {
-  cash: '1111',
-  card: '1112',
-  bkash: '1122',
-  nagad: '1122',
-  rocket: '1122',
-  bank_transfer: '1112',
-  split: '1111',
-  manual: '1111',
+  cash: BD.pettyCash,
+  card: BD.gatewayClearing,
+  bkash: BD.mobileMoneyMerchant,
+  nagad: BD.mobileMoneyMerchant,
+  rocket: BD.mobileMoneyMerchant,
+  bank_transfer: BD.cash,
+  manual: BD.pettyCash,
 };
 
-const SALES_REVENUE = '4111';
+const SALES_REVENUE = BD.revenue;
 const VAT_PAYABLE = VAT_ACCOUNTS.OUTPUT; // 2132 — VAT Output Payable (from ledger-bd)
 
 export interface RefundData {
@@ -39,7 +43,7 @@ export interface RefundData {
 }
 
 export function refundToPosting(data: RefundData, options: { autoPost?: boolean } = {}): PostingInput {
-  const cashAccount = PAYMENT_METHOD_ACCOUNTS[data.method] || '1111';
+  const cashAccount = PAYMENT_METHOD_ACCOUNTS[data.method] || BD.pettyCash;
   const netRefund = data.refundAmount - (data.tax || 0);
 
   const items: PostingItem[] = [

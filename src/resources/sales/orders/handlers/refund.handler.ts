@@ -1,112 +1,84 @@
+/**
+ * POST /orders/:id/refund — admin "refund this order" button.
+ *
+ * Three classes of work:
+ *   1. Validate the request shape + check refund-window state
+ *   2. Branch by gateway:
+ *      - prepaid → delegate to `executeRefund` (revenue.refund + paymentState sync + metadata stamp)
+ *      - COD → publish `accounting:cod.cancelled` (no money to move, ledger reverses accruals)
+ *   3. Optionally release stock reservations + transition status to refunded
+ *
+ * The actual money movement lives in services/refund.service.ts so the
+ * /orders/:id/refund (manual button), order:canceled (automated on
+ * cancel), and order:change.confirmed (automated on RMA) entry points
+ * all share the same code path. Adding a new entry point = compute
+ * { amount, reason, source } and call executeRefund.
+ */
+
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { publish } from '#lib/events/arcEvents.js';
-import { getRevenueEngine, isRevenueReady } from '#shared/revenue/engine.js';
 import { createFlowBridge } from '../bridges/flow.bridge.js';
 import { ensureOrderEngine } from '../order.engine.js';
 import { releaseOrderStock } from '../order-placement.js';
-import { resolveCaptureTransactionId } from '../resolve-capture-txn.js';
+import { executeRefund, type RefundErrorCode } from '../services/refund.service.js';
 import { getOrderContext, getScopedOrderByNumber, type ScopedOrder } from './shared.js';
+import { ConflictError, ValidationError, createDomainError, createError, NotFoundError } from '@classytic/arc/utils';
 
 type RefundBody = { amount?: number; reason?: string; restockItems?: boolean };
-type RefundPlan =
-  | { ok: false; status: number; body: Record<string, unknown> }
-  | {
-      ok: true;
-      amount: number;
-      grossAmount: number;
-      isCod: boolean;
-      isFullRefund: boolean;
-      meta: Record<string, unknown>;
-      reason: string;
-    };
+
+interface RefundPlan {
+  amount: number;
+  grossAmount: number;
+  isCod: boolean;
+  isFullRefund: boolean;
+  meta: Record<string, unknown>;
+  reason: string;
+}
 
 function buildRefundPlan(order: ScopedOrder, body: RefundBody): RefundPlan {
   const meta = (order.metadata as Record<string, unknown> | undefined) ?? {};
   const isCod = String(meta.paymentGateway ?? '').toLowerCase() === 'cod';
 
   if (meta.refundedAt) {
-    return {
-      ok: false,
-      status: 409,
-      body: { success: false, error: 'Order is already refunded', code: 'ALREADY_REFUNDED' },
-    };
+    throw createDomainError('ALREADY_REFUNDED', 'Order is already refunded', 409);
   }
-
   if (isCod && meta.codSettlement) {
-    return {
-      ok: false,
-      status: 400,
-      body: {
-        success: false,
-        error: 'COD order is already settled — use the RMA flow (POST /sales/returns) for a refund',
-        code: 'COD_SETTLED_USE_RMA',
-      },
-    };
+    throw createDomainError(
+      'COD_SETTLED_USE_RMA',
+      'COD order is already settled — use the RMA flow for a refund',
+      400,
+    );
   }
 
   const grossAmount = order.totals?.grandTotal?.amount ?? 0;
   if (grossAmount <= 0) {
-    return { ok: false, status: 400, body: { success: false, error: 'Order has no amount to refund' } };
+    throw new ValidationError('Order has no amount to refund');
   }
 
   const amount = Math.max(0, Math.trunc(Number(body.amount ?? grossAmount)));
   if (amount <= 0) {
-    return { ok: false, status: 400, body: { success: false, error: 'amount must be positive' } };
+    throw new ValidationError('amount must be positive');
   }
   if (amount > grossAmount) {
-    return {
-      ok: false,
-      status: 400,
-      body: {
-        success: false,
-        error: `amount (${amount}) exceeds order total (${grossAmount})`,
-        code: 'AMOUNT_EXCEEDS_TOTAL',
-      },
-    };
+    throw createDomainError(
+      'AMOUNT_EXCEEDS_TOTAL',
+      `amount (${amount}) exceeds order total (${grossAmount})`,
+      400,
+    );
   }
 
   const reason = body.reason?.trim() || `Admin refund for order ${order.orderNumber ?? String(order._id)}`;
-  return {
-    ok: true,
-    amount,
-    grossAmount,
-    isCod,
-    isFullRefund: amount === grossAmount,
-    meta,
-    reason,
-  };
+  return { amount, grossAmount, isCod, isFullRefund: amount === grossAmount, meta, reason };
 }
 
-async function refundPrepaid(order: ScopedOrder, amount: number, reason: string, req: FastifyRequest, id: string) {
-  const txnId = resolveCaptureTransactionId(order);
-  if (!txnId) {
-    return {
-      status: 400,
-      body: {
-        success: false,
-        error: 'No verified capture transaction found — cannot refund',
-        code: 'NO_CAPTURE_TXN',
-      },
-    };
-  }
-  if (!isRevenueReady()) {
-    return { status: 503, body: { success: false, error: 'Revenue engine unavailable' } };
-  }
-  try {
-    await getRevenueEngine().repositories.transaction.refund(txnId, amount, { reason });
-    return null;
-  } catch (err) {
-    req.log.error({ err: (err as Error).message, orderId: id, txnId }, 'Revenue refund failed');
-    return {
-      status: 500,
-      body: {
-        success: false,
-        error: 'Revenue refund failed',
-        details: (err as Error).message,
-      },
-    };
-  }
-}
+const SERVICE_ERROR_TO_HTTP: Partial<Record<RefundErrorCode, { status: number; code: string }>> = {
+  ALREADY_REFUNDED: { status: 409, code: 'ALREADY_REFUNDED' },
+  NO_CAPTURE_TXN: { status: 400, code: 'NO_CAPTURE_TXN' },
+  REVENUE_UNAVAILABLE: { status: 503, code: 'REVENUE_UNAVAILABLE' },
+  AT_REFUND_LIMIT: { status: 409, code: 'AT_REFUND_LIMIT' },
+  NO_AMOUNT_CHARGED: { status: 400, code: 'NO_AMOUNT_CHARGED' },
+  REVENUE_FAILED: { status: 500, code: 'REVENUE_FAILED' },
+};
 
 export async function refundOrderHandler(req: FastifyRequest, reply: FastifyReply) {
   const engine = await ensureOrderEngine();
@@ -116,23 +88,20 @@ export async function refundOrderHandler(req: FastifyRequest, reply: FastifyRepl
 
   const order = await getScopedOrderByNumber(id, ctx);
   if (!order) {
-    return reply.status(404).send({ success: false, error: 'Order not found' });
+    throw new NotFoundError('Order not found');
   }
 
   const plan = buildRefundPlan(order, body);
-  if (!plan.ok) return reply.status(plan.status).send(plan.body);
 
-  if (!plan.isCod) {
-    const error = await refundPrepaid(order, plan.amount, plan.reason, req, id);
-    if (error) return reply.status(error.status).send(error.body);
-  } else {
+  // Money movement.
+  if (plan.isCod) {
     const tax = order.totals?.tax?.amount ?? 0;
     const proportionalTax = Math.round((tax * plan.amount) / plan.grossAmount);
     const promoDiscount = Number(plan.meta.promoTotalDiscount ?? 0);
     const proportionalPromo = Math.round((promoDiscount * plan.amount) / plan.grossAmount);
-
     await publish('accounting:cod.cancelled', {
       orderId: String(order._id),
+      customerId: order.customerId ? String(order.customerId) : null,
       grossAmount: plan.amount,
       tax: proportionalTax,
       promoDiscount: proportionalPromo,
@@ -140,28 +109,26 @@ export async function refundOrderHandler(req: FastifyRequest, reply: FastifyRepl
       date: new Date().toISOString(),
       branchId: ctx.organizationId,
     });
+  } else {
+    const result = await executeRefund(
+      {
+        order: order as unknown as Record<string, unknown>,
+        amount: plan.amount,
+        reason: plan.reason,
+        source: 'admin_refund_button',
+        actorRef: ctx.actorRef,
+      },
+      { engine, logger: req.log },
+    );
+    if (!result.ok) {
+      const mapping = SERVICE_ERROR_TO_HTTP[result.code] ?? { status: 500, code: result.code };
+      throw createDomainError(mapping.code, result.message, mapping.status);
+    }
   }
 
-  const refundRecord = {
-    amount: plan.amount,
-    reason: plan.reason,
-    refundedAt: new Date(),
-    refundedBy: ctx.actorRef,
-    isPartial: !plan.isFullRefund,
-  };
-  const orderModel = engine.models.Order;
-  await orderModel.updateOne(
-    { _id: order._id },
-    {
-      $set: {
-        'metadata.refundedAt': refundRecord.refundedAt,
-        'metadata.refundedAmount': plan.amount,
-        'metadata.refundReason': plan.reason,
-        'metadata.refundIsPartial': !plan.isFullRefund,
-      },
-    },
-  );
-
+  // Status transition + optional restock — kept here because the admin
+  // endpoint exposes them as explicit toggles. Lifecycle handlers reach
+  // these via order:refunded → existing stock-return / ledger-restock-bridge.
   if (plan.isFullRefund) {
     try {
       await engine.repositories.order.transition(id, 'refunded', ctx, { reason: plan.reason });
@@ -187,5 +154,8 @@ export async function refundOrderHandler(req: FastifyRequest, reply: FastifyRepl
   }
 
   const refreshed = await engine.repositories.order.getById(String(order._id));
-  return reply.send({ success: true, data: refreshed, refund: refundRecord });
+  return reply.send({
+    ...((refreshed as Record<string, unknown> | null) ?? {}),
+    refund: { amount: plan.amount, reason: plan.reason, isPartial: !plan.isFullRefund },
+  });
 }

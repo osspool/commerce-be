@@ -5,7 +5,8 @@
  * Declarative `actions:` for FSM verbs (deactivate). No raw routes.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import permissions from '#config/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
@@ -19,6 +20,14 @@ const earningRuleResource = defineResource({
   tag: 'Loyalty',
   prefix: '/loyalty/earning-rules',
   audit: true,
+
+  // Loyalty is company-wide by design (see loyalty.plugin.ts) — one program,
+  // one set of earning rules across every branch, matching Sephora / Nike /
+  // Starbucks loyalty architecture. `tenantField: false` keeps Arc's adapter
+  // from injecting an `organizationId` filter on reads. Docs are still
+  // stamped with `organizationId` (which branch enrolled the rule) for
+  // audit, but the rule applies globally.
+  tenantField: false,
 
   adapter: createMongooseAdapter(engine.models.EarningRule as never, engine.repositories.earningRule as never),
   queryParser,

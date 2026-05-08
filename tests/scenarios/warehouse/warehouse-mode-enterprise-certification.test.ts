@@ -58,7 +58,7 @@ describe('Warehouse Mode Certification: Enterprise', () => {
   it('supports multiple warehouse nodes in one branch', async () => {
     const nodesRes = await inject('GET', '/inventory/nodes');
     expect(nodesRes.statusCode).toBe(200);
-    const initialNodes = parse(nodesRes.body)?.data ?? [];
+    const initialNodes = (parse(nodesRes.body) as unknown[]) ?? [];
     expect(initialNodes.length).toBeGreaterThanOrEqual(1);
 
     const secondNodeRes = await inject('POST', '/inventory/nodes', {
@@ -79,7 +79,7 @@ describe('Warehouse Mode Certification: Enterprise', () => {
 
     const finalNodesRes = await inject('GET', '/inventory/nodes');
     expect(finalNodesRes.statusCode).toBe(200);
-    const finalNodes = parse(finalNodesRes.body)?.data ?? [];
+    const finalNodes = (parse(finalNodesRes.body) as Array<{ _id: string }>) ?? [];
     expect(finalNodes.length).toBeGreaterThanOrEqual(3);
     nodeIds = finalNodes.map((node: { _id: string }) => String(node._id));
   });
@@ -102,21 +102,18 @@ describe('Warehouse Mode Certification: Enterprise', () => {
     const listLocRes = await inject('GET', `/inventory/locations?nodeId=${targetNodeId}`);
     expect(listLocRes.statusCode).toBe(200);
     const listLocBody = parse(listLocRes.body);
-    expect(Array.isArray(listLocBody?.data)).toBe(true);
-    expect(listLocBody.data.some((location: { code: string }) => location.code === 'B-02-01')).toBe(true);
+    expect(Array.isArray(listLocBody)).toBe(true);
+    expect(listLocBody.some((location: { code: string }) => location.code === 'B-02-01')).toBe(true);
   });
 
   it('exposes enterprise reports instead of mode-gating them', async () => {
     const availabilityRes = await inject('GET', '/inventory/reports/availability');
     expect(availabilityRes.statusCode).toBe(200);
-    expect(parse(availabilityRes.body)?.success).toBe(true);
 
     const healthRes = await inject('GET', '/inventory/reports/health');
     expect(healthRes.statusCode).toBe(200);
-    expect(parse(healthRes.body)?.success).toBe(true);
 
     const agingRes = await inject('GET', '/inventory/reports/aging');
     expect(agingRes.statusCode).toBe(200);
-    expect(parse(agingRes.body)?.success).toBe(true);
   });
 });

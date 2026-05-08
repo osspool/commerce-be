@@ -49,6 +49,10 @@ export function createLandedCostResource() {
     // Only `draft` landed costs are editable. Applied or reversed docs are
     // frozen audit records. Arc 2.10.8 passes `meta.existing` on update so we
     // can read the current status without a second DB hit.
+    //
+    // Arc 2.13 changed `beforeUpdate` to optionally return a transformed
+    // patch (`AnyRecord | undefined`). We don't rewrite the patch — just
+    // throw when not draft, otherwise return undefined to pass through.
     hooks: {
       beforeUpdate: (ctx) => {
         const existing = (ctx.meta as { existing?: { status?: string } } | undefined)?.existing;
@@ -58,6 +62,7 @@ export function createLandedCostResource() {
             { statusCode: 400, code: 'LANDED_COST_NOT_EDITABLE' },
           );
         }
+        return undefined;
       },
     },
 
@@ -96,7 +101,7 @@ export function createLandedCostResource() {
             { items: body.items },
             { organizationId: ctx.organizationId, actorId: ctx.actorId },
           );
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         },
       },
       {
@@ -115,7 +120,7 @@ export function createLandedCostResource() {
             { reason: body.reason },
             { organizationId: ctx.organizationId, actorId: ctx.actorId },
           );
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         },
       },
     ],

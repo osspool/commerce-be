@@ -1,4 +1,5 @@
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import permissions from '#config/permissions.js';
 import cmsController from './cms.controller.js';
 import CMS from './cms.model.js';

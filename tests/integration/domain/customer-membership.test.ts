@@ -4,19 +4,19 @@ import mongoose from 'mongoose';
 /**
  * Customer Stats Tests
  *
- * Tests for customer.stats.ts pure functions and DB-backed stat tracking:
- * - calculatePointsForOrder (pure)
- * - getTierDiscountPercent (pure)
- * - onOrderCreated, onOrderCompleted, onOrderCancelled, onOrderRefunded (DB)
+ * Tests for the DB-backed customer-stats hooks:
+ * - onOrderCreated, onOrderCompleted, onOrderCancelled, onOrderRefunded
  *
- * Note: Membership point operations (earn, redeem, reserve, release, adjust) are now
- * tested in tests/integration/loyalty-e2e.test.ts via the @classytic/loyalty engine.
+ * Note: The legacy pure helpers `calculatePointsForOrder` and
+ * `getTierDiscountPercent` were removed when loyalty switched from a
+ * config-driven calculator to an engine + earning-rules model. The new
+ * surface is `previewPointsForOrder` in `loyalty.bridge.ts`, exercised
+ * via the @classytic/loyalty engine in `tests/integration/loyalty-e2e.test.ts`.
  */
 
 let shouldDisconnect = false;
 let Customer: typeof import('#resources/sales/customers/customer.model.js').default;
 let customerStats: typeof import('#resources/sales/customers/customer.stats.js');
-let loyaltyBridge: typeof import('#resources/sales/loyalty/loyalty.bridge.js');
 
 async function createCustomerWithMembership(overrides: Record<string, unknown> = {}) {
   const phone = `017${Date.now().toString().slice(-8)}`;
@@ -47,7 +47,6 @@ describe('Customer Stats', () => {
 
     Customer = (await import('#resources/sales/customers/customer.model.js')).default;
     customerStats = await import('#resources/sales/customers/customer.stats.js');
-    loyaltyBridge = await import('#resources/sales/loyalty/loyalty.bridge.js');
   });
 
   afterAll(async () => {
@@ -58,92 +57,6 @@ describe('Customer Stats', () => {
 
   beforeEach(async () => {
     await Customer.deleteMany({});
-  });
-
-  // ─── calculatePointsForOrder (pure function) ──────────
-
-  describe('calculatePointsForOrder', () => {
-    const config = {
-      enabled: true,
-      amountPerPoint: 100,
-      pointsPerAmount: 1,
-      roundingMode: 'floor' as const,
-      tiers: [
-        { name: 'Bronze', minPoints: 0, pointsMultiplier: 1 },
-        { name: 'Silver', minPoints: 500, pointsMultiplier: 1.5 },
-        { name: 'Gold', minPoints: 2000, pointsMultiplier: 2, discountPercent: 5 },
-      ],
-    };
-
-    it('calculates base points for Bronze tier', () => {
-      const points = loyaltyBridge.calculatePointsForOrder(1000, config, 'Bronze');
-      expect(points).toBe(10);
-    });
-
-    it('applies tier multiplier for Silver', () => {
-      const points = loyaltyBridge.calculatePointsForOrder(1000, config, 'Silver');
-      expect(points).toBe(15);
-    });
-
-    it('applies tier multiplier for Gold', () => {
-      const points = loyaltyBridge.calculatePointsForOrder(1000, config, 'Gold');
-      expect(points).toBe(20);
-    });
-
-    it('floors fractional points by default', () => {
-      const points = loyaltyBridge.calculatePointsForOrder(150, config, 'Silver');
-      expect(points).toBe(2);
-    });
-
-    it('uses ceil rounding mode', () => {
-      const ceilConfig = { ...config, roundingMode: 'ceil' as const };
-      const points = loyaltyBridge.calculatePointsForOrder(150, ceilConfig, 'Silver');
-      expect(points).toBe(3);
-    });
-
-    it('uses round rounding mode', () => {
-      const roundConfig = { ...config, roundingMode: 'round' as const };
-      const points = loyaltyBridge.calculatePointsForOrder(150, roundConfig, 'Silver');
-      expect(points).toBe(2);
-    });
-
-    it('returns 0 when membership is not enabled', () => {
-      const disabledConfig = { ...config, enabled: false };
-      const points = loyaltyBridge.calculatePointsForOrder(1000, disabledConfig, 'Bronze');
-      expect(points).toBe(0);
-    });
-
-    it('returns 0 when order total is 0', () => {
-      const points = loyaltyBridge.calculatePointsForOrder(0, config, 'Bronze');
-      expect(points).toBe(0);
-    });
-  });
-
-  // ─── getTierDiscountPercent (pure function) ────────────
-
-  describe('getTierDiscountPercent', () => {
-    const config = {
-      enabled: true,
-      tiers: [
-        { name: 'Bronze', minPoints: 0 },
-        { name: 'Gold', minPoints: 2000, discountPercent: 5 },
-      ],
-    };
-
-    it('returns discount percent for matching tier', () => {
-      const discount = loyaltyBridge.getTierDiscountPercent('Gold', config);
-      expect(discount).toBe(5);
-    });
-
-    it('returns 0 for tier without discount', () => {
-      const discount = loyaltyBridge.getTierDiscountPercent('Bronze', config);
-      expect(discount).toBe(0);
-    });
-
-    it('returns 0 when membership is disabled', () => {
-      const discount = loyaltyBridge.getTierDiscountPercent('Gold', { enabled: false });
-      expect(discount).toBe(0);
-    });
   });
 
   // ─── Customer Stats (DB) ──────────────────────────────

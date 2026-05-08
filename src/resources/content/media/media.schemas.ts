@@ -10,7 +10,7 @@
  * from the Mongoose model by `buildCrudSchemasFromModel` in createMongooseAdapter().
  */
 
-import { createMongooseAdapter } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { confirmUploadSchema as kitConfirmUploadSchema } from '@classytic/media-kit/schemas';
 import { z } from 'zod';
 import { BASE_FOLDERS } from './media.config.js';

@@ -151,8 +151,7 @@ async function seedProgramAndVoucher(opts: { codePrefix: string; discountAmount?
     },
   });
   expect(programRes.statusCode, programRes.body).toBeLessThan(400);
-  const programId = ((parse(programRes.body) ?? {}).data as Record<string, unknown>)?._id as string
-    ?? (parse(programRes.body) as Record<string, unknown>)?._id as string;
+  const programId = (parse(programRes.body) as Record<string, unknown>)?._id as string;
 
   await env.server.inject({
     method: 'POST',
@@ -288,7 +287,7 @@ describe('Scenario A — promo order posts 4-line journal with 4115 Sales Discou
     expect(res.statusCode, res.body).toBeLessThan(400);
 
     const body = parse(res.body) ?? {};
-    const order = (body.data as Record<string, unknown>) ?? {};
+    const order = (body as Record<string, unknown>) ?? {};
     orderId = order._id as string;
     expect(orderId).toBeTruthy();
 
@@ -331,14 +330,20 @@ describe('Scenario A — promo order posts 4-line journal with 4115 Sales Discou
     const discount = findItem(items, '4115');
     const revenue = findItem(items, '4111');
 
-    // With be-prod's current order-engine wiring (no pricing bridge applying
-    // promo discount to grandTotal), the payment amount equals grandTotal.
-    // So receipts = gross, and revenue = gross + discount. Debits balance.
-    // The value of this assertion: the 4115 contra line is present AND
-    // carries the exact discount amount — that's the gap Phase A2 fixed.
-    expect(cash?.debit).toBe(gross);
+    // Double-entry contract for a promo sale:
+    //   Cash 1111 Dr  = net (what the customer actually paid, post-discount)
+    //   Discount 4115 Dr = the discount amount (contra-revenue)
+    //   Revenue 4111 Cr  = gross (pre-discount sticker price)
+    //   ⇒ debits balance credits: net + discount = gross
+    //
+    // The order engine reduces grandTotal by the promo amount before the
+    // payment is captured (ERPNext / Odoo / Shopify all do the same), so
+    // the receipt = net = gross - discount, NOT gross. The 4115 contra
+    // line carries the gap so the credit-side revenue stays at gross.
+    const net = gross - expectedDiscount;
+    expect(cash?.debit).toBe(net);
     expect(discount?.debit).toBe(expectedDiscount);
-    expect(revenue?.credit).toBe(gross + expectedDiscount);
+    expect(revenue?.credit).toBe(gross);
   });
 });
 
@@ -356,7 +361,7 @@ describe('Scenario B — no promo → no contra line (baseline)', () => {
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
     const body = parse(res.body) ?? {};
-    orderId = ((body.data as Record<string, unknown>) ?? {})._id as string;
+    orderId = ((body as Record<string, unknown>) ?? {})._id as string;
     expect(orderId).toBeTruthy();
   });
 
@@ -397,7 +402,7 @@ describe('Scenario C — order moves through the FSM; sales entry stays intact',
       payload: orderPayload(),
     });
     const body = parse(res.body) ?? {};
-    const order = (body.data as Record<string, unknown>) ?? {};
+    const order = (body as Record<string, unknown>) ?? {};
     orderId = order._id as string;
     orderNumber = order.orderNumber as string;
     expect(orderNumber).toBeTruthy();

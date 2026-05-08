@@ -20,6 +20,7 @@ import { CounterDeviceSequenceStore } from './counter-device-store.js';
 
 let engine: FlowEngine | null = null;
 let readyPromise: Promise<void> | null = null;
+let readyResolved = false;
 
 export interface FlowEngineOptions {
   connection?: Connection;
@@ -67,6 +68,17 @@ export function initializeFlowEngine(options: FlowEngineOptions = {}): FlowEngin
     // on the same bus as Arc CRUD events. No bridge adapter needed.
     // Swap to RedisEventTransport / Kafka / etc. when scaling out.
     eventTransport: eventTransport as unknown as EventTransport,
+
+    // Strict-mode opt-in for procurement.receive — when a PO is missing
+    // destinationLocationId, Flow falls back to destinationNodeId and
+    // stamps Quants/CostLayers with a node._id, which the valuation
+    // report's stockable filter then silently drops. We auto-resolve the
+    // location at PO create + receive (procurement.factory.ts) so this
+    // flag is the kernel-side belt-and-suspenders: any path that bypasses
+    // the host's resolver fails fast with a 400 rather than corrupting
+    // the cost-layer locationId.
+    procurement: { requireDestinationLocation: true },
+    forceRecreate: process.env.NODE_ENV === 'test',
   });
 
   // Kick off the one-time collection + index materialisation. Consumers
@@ -74,12 +86,25 @@ export function initializeFlowEngine(options: FlowEngineOptions = {}): FlowEngin
   // handlers) should `await ensureFlowEngineReady()` before first use.
   // Doing it lazily here keeps `initializeFlowEngine()` synchronous for
   // callers that don't need the guarantee.
-  readyPromise = ensureFlowReady(engine, { skipIndexes: config.isProduction }).catch((err) => {
-    readyPromise = null;
-    throw err;
-  });
+  readyPromise = ensureFlowReady(engine, { skipIndexes: config.isProduction })
+    .then(() => {
+      readyResolved = true;
+    })
+    .catch((err) => {
+      readyPromise = null;
+      throw err;
+    });
 
   return engine;
+}
+
+/**
+ * Synchronous readiness probe — `true` once `ensureFlowReady()` has
+ * resolved at least once. Health/readiness endpoints use this so the
+ * probe never triggers Flow setup itself.
+ */
+export function isFlowEngineReady(): boolean {
+  return readyResolved;
 }
 
 /**
@@ -98,10 +123,39 @@ export async function ensureFlowEngineReady(): Promise<void> {
     throw new Error('FlowEngine not initialized. Call initializeFlowEngine() before ensureFlowEngineReady().');
   }
   if (!readyPromise) {
-    readyPromise = ensureFlowReady(engine);
+    readyPromise = ensureFlowReady(engine).then(() => {
+      readyResolved = true;
+    });
   }
   await readyPromise;
+
+  // Warm up `flow_stock_events` against MongoMemoryReplSet — `ensureFlowReady`
+  // calls `Model.createCollection()` for every flow model, but the replica
+  // set lazily promotes a collection from local-only to fully-replicated on
+  // its first WRITE. The first transactional write to `flow_stock_events`
+  // (procurement.receive, postMove, transfer-receive) trips a
+  // catalog-change retry inside Mongo's `session.withTransaction`, and the
+  // txn aborts before the retry resolves. Doing one write+delete OUTSIDE a
+  // transaction here forces full catalog propagation so subsequent
+  // transactional writes find a stable replica state. Production Mongo
+  // doesn't see this — it's a MongoMemoryReplSet quirk — but the warmup is
+  // a no-op there (writes a single doc to a stable collection and removes
+  // it), so we apply it unconditionally.
+  if (!warmedUp) {
+    warmedUp = true;
+    const stockEventModel = (engine.models as unknown as Record<string, { collection?: { insertOne: (d: unknown) => Promise<{ insertedId: unknown }>; deleteOne: (q: unknown) => Promise<unknown> } }>).StockEvent;
+    if (stockEventModel?.collection) {
+      try {
+        const probe = await stockEventModel.collection.insertOne({ __warmup: true, ts: Date.now() });
+        await stockEventModel.collection.deleteOne({ _id: probe.insertedId });
+      } catch {
+        // Best-effort — production has stable catalogs already.
+      }
+    }
+  }
 }
+
+let warmedUp = false;
 
 export function getFlowEngine(): FlowEngine {
   if (!engine) {
@@ -119,5 +173,6 @@ export async function destroyFlowEngine(): Promise<void> {
     await engine.destroy();
     engine = null;
     readyPromise = null;
+    warmedUp = false;
   }
 }

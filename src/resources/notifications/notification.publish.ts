@@ -41,38 +41,6 @@ export const notifyEvent = {
     fire('order:status-changed', { ...data, newStatus: data.status });
   },
 
-  // ── Transfer Events ──
-
-  transferCreated(data: {
-    transferId: string;
-    docNumber: string;
-    organizationId: string;
-    senderBranch?: string;
-    receiverBranch?: string;
-    triggeredBy?: string;
-  }) {
-    fire('transfer:created', data);
-  },
-
-  transferApproved(data: { transferId: string; docNumber: string; organizationId: string; triggeredBy?: string }) {
-    fire('transfer:approved', data);
-  },
-
-  transferDispatched(data: {
-    transferId: string;
-    docNumber: string;
-    organizationId: string;
-    senderBranch?: string;
-    receiverBranch?: string;
-    triggeredBy?: string;
-  }) {
-    fire('transfer:dispatched', data);
-  },
-
-  transferReceived(data: { transferId: string; docNumber: string; organizationId: string; triggeredBy?: string }) {
-    fire('transfer:received', data);
-  },
-
   // ── Inventory Events ──
 
   stockAdjusted(data: { organizationId: string; count: number; actorName: string; triggeredBy?: string }) {

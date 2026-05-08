@@ -9,19 +9,25 @@
 
 import { isCustomerSide } from '@classytic/invoice';
 import type { PartnerBridge, PartnerContact } from '@classytic/invoice/domain/contracts';
-import Supplier from '#resources/inventory/supplier/models/supplier.model.js';
-import Customer from '#resources/sales/customers/customer.model.js';
+import supplierRepository from '#resources/inventory/supplier/supplier.repository.js';
+import customerRepository from '#resources/sales/customers/customer.repository.js';
 
 export function createPartnerBridge(): PartnerBridge {
   return {
     async resolveContact(partnerId, moveType): Promise<PartnerContact | null> {
       if (isCustomerSide(moveType)) {
-        const customer = await Customer.findById(partnerId).select('contact displayName firstName lastName').lean<{
-          contact?: { email?: string; phone?: string };
-          displayName?: string;
-          firstName?: string;
-          lastName?: string;
-        }>();
+        const customer = (await customerRepository.getById(partnerId, {
+          select: 'contact displayName firstName lastName',
+          lean: true,
+          throwOnNotFound: false,
+        })) as
+          | {
+              contact?: { email?: string; phone?: string };
+              displayName?: string;
+              firstName?: string;
+              lastName?: string;
+            }
+          | null;
         if (!customer) return null;
         const composedName = [customer.firstName, customer.lastName].filter(Boolean).join(' ') || undefined;
         const name = customer.displayName ?? composedName;
@@ -33,9 +39,11 @@ export function createPartnerBridge(): PartnerBridge {
         };
       }
 
-      const supplier = await Supplier.findById(partnerId)
-        .select('email phone name')
-        .lean<{ email?: string; phone?: string; name?: string }>();
+      const supplier = (await supplierRepository.getById(partnerId, {
+        select: 'email phone name',
+        lean: true,
+        throwOnNotFound: false,
+      })) as { email?: string; phone?: string; name?: string } | null;
       if (!supplier) return null;
       return {
         id: partnerId,

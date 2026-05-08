@@ -200,8 +200,8 @@ describe('Warehouse Certification', () => {
     const nodesRes = await injectAs(hoAuth, 'GET', '/inventory/nodes');
     expect(nodesRes.statusCode).toBe(200);
     const nodesBody = parse(nodesRes.body);
-    expect(Array.isArray(nodesBody?.data)).toBe(true);
-    expect(nodesBody.data.length).toBeGreaterThan(0);
+    expect(Array.isArray(nodesBody)).toBe(true);
+    expect(nodesBody.length).toBeGreaterThan(0);
 
     const hoCtx = { organizationId: hoOrgId, actorId: 'cert' };
     const defaultNode = await flow.repositories.node.getByQuery({ isDefault: true }, { organizationId: hoCtx.organizationId, throwOnNotFound: false, lean: true });
@@ -225,13 +225,12 @@ describe('Warehouse Certification', () => {
     });
     expect(adjustRes.statusCode).toBe(200);
     const adjustBody = parse(adjustRes.body);
-    expect(adjustBody?.success).toBe(true);
-    expect(adjustBody?.data?.newQuantity).toBe(40);
+    expect(adjustBody?.newQuantity).toBe(40);
 
     const availability = await getAvailability(hoAuth, simpleProductId);
     expect(availability.statusCode).toBe(200);
-    expect(availability.body?.data?.quantityOnHand).toBe(40);
-    expect(availability.body?.data?.quantityAvailable).toBe(40);
+    expect(availability.body?.quantityOnHand).toBe(40);
+    expect(availability.body?.quantityAvailable).toBe(40);
   });
 
   it('rejects creating a second warehouse for the branch in standard mode', async () => {
@@ -254,7 +253,7 @@ describe('Warehouse Certification', () => {
       notes: 'Certification purchase receipt',
     });
     expect(createPurchaseRes.statusCode).toBe(201);
-    const purchaseId = parse(createPurchaseRes.body)?.data?._id;
+    const purchaseId = parse(createPurchaseRes.body)?._id;
     expect(typeof purchaseId).toBe('string');
 
     const receivePurchaseRes = await injectAs(
@@ -264,12 +263,12 @@ describe('Warehouse Certification', () => {
       { action: 'receive' },
     );
     expect(receivePurchaseRes.statusCode).toBe(200);
-    expect(parse(receivePurchaseRes.body)?.data?.status).toBe('received');
+    expect(parse(receivePurchaseRes.body)?.status).toBe('received');
 
     const availability = await getAvailability(hoAuth, purchaseProductId);
     expect(availability.statusCode).toBe(200);
-    expect(availability.body?.data?.quantityOnHand).toBe(15);
-    expect(availability.body?.data?.quantityAvailable).toBe(15);
+    expect(availability.body?.quantityOnHand).toBe(15);
+    expect(availability.body?.quantityAvailable).toBe(15);
   });
 
   it('rejects supplier purchase documents for a sub-branch', async () => {
@@ -293,7 +292,7 @@ describe('Warehouse Certification', () => {
       reason: 'Certification transfer seed',
     });
     expect(stockSeedRes.statusCode).toBe(200);
-    expect(parse(stockSeedRes.body)?.data?.newQuantity).toBe(25);
+    expect(parse(stockSeedRes.body)?.newQuantity).toBe(25);
 
     const createTransferRes = await injectAs(hoAuth, 'POST', '/inventory/transfers', {
       senderBranchId: hoOrgId,
@@ -302,36 +301,36 @@ describe('Warehouse Certification', () => {
       remarks: 'Certification branch transfer',
     });
     expect(createTransferRes.statusCode).toBe(201);
-    const transferId = parse(createTransferRes.body)?.data?._id;
+    const transferId = parse(createTransferRes.body)?._id;
     expect(typeof transferId).toBe('string');
 
     const approveRes = await injectAs(hoAuth, 'POST', `/inventory/transfers/${transferId}/action`, {
       action: 'approve',
     });
     expect(approveRes.statusCode).toBe(200);
-    expect(parse(approveRes.body)?.data?.status).toBe('approved');
+    expect(parse(approveRes.body)?.status).toBe('approved');
 
     const dispatchRes = await injectAs(hoAuth, 'POST', `/inventory/transfers/${transferId}/action`, {
       action: 'dispatch',
     });
     expect(dispatchRes.statusCode).toBe(200);
-    expect(parse(dispatchRes.body)?.data?.status).toBe('dispatched');
+    expect(parse(dispatchRes.body)?.status).toBe('dispatched');
 
     const hoAfterDispatch = await getAvailability(hoAuth, CERT_TRANSFER_SKU);
     const subAfterDispatch = await getAvailability(subAuth, CERT_TRANSFER_SKU);
-    expect(hoAfterDispatch.body?.data?.quantityOnHand).toBe(15);
-    expect(subAfterDispatch.body?.data?.quantityOnHand).toBe(0);
+    expect(hoAfterDispatch.body?.quantityOnHand).toBe(15);
+    expect(subAfterDispatch.body?.quantityOnHand).toBe(0);
 
     const receiveRes = await injectAs(subAuth, 'POST', `/inventory/transfers/${transferId}/action`, {
       action: 'receive',
       items: [{ productId: variantProductId, variantSku: CERT_TRANSFER_SKU, quantityReceived: 10 }],
     });
     expect(receiveRes.statusCode).toBe(200);
-    expect(['received', 'partial_received']).toContain(parse(receiveRes.body)?.data?.status);
+    expect(['received', 'partial_received']).toContain(parse(receiveRes.body)?.status);
 
     const hoAfterReceive = await getAvailability(hoAuth, CERT_TRANSFER_SKU);
     const subAfterReceive = await getAvailability(subAuth, CERT_TRANSFER_SKU);
-    expect(hoAfterReceive.body?.data?.quantityOnHand).toBe(15);
-    expect(subAfterReceive.body?.data?.quantityOnHand).toBe(10);
+    expect(hoAfterReceive.body?.quantityOnHand).toBe(15);
+    expect(subAfterReceive.body?.quantityOnHand).toBe(10);
   });
 });

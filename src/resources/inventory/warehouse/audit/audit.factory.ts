@@ -18,11 +18,31 @@
 
 import { defineResource, BaseController } from '@classytic/arc';
 import type { IRequestContext, IControllerResponse } from '@classytic/arc';
-import { QueryParser } from '@classytic/mongokit';
+import { QueryParser, type Repository } from '@classytic/mongokit';
+import { isApproved } from '@classytic/primitives/approval';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
+import {
+  withApprovalChain,
+  type ApprovableDoc,
+} from '#core/approval/with-approval-chain.js';
+import { createPolicyChainResolver } from '#resources/approval/policy-resolver.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
+import { createDomainError } from '@classytic/arc/utils';
 import { flow, flowCtxFromArcReq, flowCtxGuard } from '../shared/helpers.js';
+
+/**
+ * Local typed view of an InventoryCount document. Extends `ApprovableDoc`
+ * so the preset reads `doc.approvals` natively (P7 — flow ≥ today bakes
+ * `approvals?: ApprovalChain` into the InventoryCount schema).
+ */
+interface StockAuditDoc extends ApprovableDoc {
+  organizationId?: string;
+  countNumber?: string;
+  countType?: 'full' | 'cycle' | 'spot';
+  status: string;
+  scope?: { nodeId?: string; locationId?: string; skuRefs?: string[] };
+}
 
 interface CreateCountSessionBody {
   countType: 'full' | 'cycle' | 'spot';
@@ -42,7 +62,7 @@ class StockAuditController extends BaseController {
       },
       ctx,
     );
-    return { success: true, data: session as unknown as Record<string, unknown>, status: 201 };
+    return { data: session as unknown as Record<string, unknown>, status: 201 };
   }
 }
 
@@ -68,6 +88,10 @@ export function createStockAuditResource() {
         createdBy: { systemManaged: true },
         modifiedBy: { systemManaged: true },
         approvedBy: { systemManaged: true },
+        // Mutated only via submit_for_approval / decide actions; never via PATCH.
+        approvals: { systemManaged: true },
+        approvalPolicyId: { systemManaged: true },
+        approvalPolicyVersion: { systemManaged: true },
       },
     }),
 
@@ -111,7 +135,7 @@ export function createStockAuditResource() {
             }>;
           };
           const result = await flow().services.counting.submitLines(id, lines, ctx);
-          return reply.send({ success: true, data: result });
+          return reply.send({ data: result });
         },
       },
       {
@@ -127,15 +151,53 @@ export function createStockAuditResource() {
           const { id } = req.params as { id: string };
           const ctx = flowCtxGuard.from(req);
           const variance = await flow().services.counting.calculateVariance(id, ctx);
-          return reply.send({ success: true, data: variance });
+          return reply.send({ data: variance });
         },
       },
     ],
 
     actions: {
+      // Chain workflow — submit_for_approval + decide come from the shared
+      // preset. Only `submitted` audits may enter the approval pipeline
+      // (counters submit lines first; THEN a supervisor reviews variance
+      // and approves before reconciliation moves are posted). For the
+      // simple SME path with no chain attached, `reconcile` runs directly.
+      ...withApprovalChain<StockAuditDoc>({
+        subjectType: 'stock_audit',
+        repository: engine.repositories.count as unknown as Repository<StockAuditDoc>,
+        allowedSubmitStatus: ['submitted'],
+        permissions: {
+          submit: permissions.inventory.adjust,
+          decide: permissions.inventory.adjust,
+        },
+        toEvaluationContext: (doc) => ({
+          branchId: String(doc.organizationId ?? ''),
+          ...(doc.countType ? { countType: doc.countType } : {}),
+        }),
+        resolveChain: createPolicyChainResolver(),
+        // No status flips here — `reconcile` is the terminal action that
+        // moves status forward. The chain just gates whether reconcile
+        // can run (see the gate in the action handler below).
+      }),
+
       reconcile: {
         handler: async (id, data, req) => {
           const ctx = flowCtxFromArcReq(req as unknown as IRequestContext);
+          // Chain gate (P7) — when an audit has an attached approval chain
+          // it must be approved before reconciliation moves are posted.
+          // SME path with no chain attached runs through unchanged.
+          const doc = (await engine.repositories.count.getById(id, {
+            organizationId: ctx.organizationId,
+            throwOnNotFound: false,
+            lean: true,
+          })) as StockAuditDoc | null;
+          if (doc?.approvals && !isApproved(doc.approvals)) {
+            throw createDomainError(
+              'approval.chain_incomplete',
+              `Cannot reconcile audit while approval chain is ${doc.approvals.status}.`,
+              422,
+            );
+          }
           return engine.services.counting.reconcile(
             id,
             { autoApproveThreshold: (data as { autoApproveThreshold?: number }).autoApproveThreshold },

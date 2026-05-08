@@ -16,7 +16,7 @@
 
 import { ArcError, handleRaw } from '@classytic/arc/utils';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import Branch from '#resources/commerce/branch/branch.model.js';
+import branchRepository from '#resources/commerce/branch/branch.repository.js';
 
 // Mirrors the engine's LoyaltyContext (extends OperationContext) — index
 // signature is required so the structural assignability check passes when
@@ -39,8 +39,12 @@ export async function resolveBranchCode(req: FastifyRequest): Promise<string | u
   const user = (req as { user?: { organizationId?: string; orgId?: string } }).user;
   const orgId = (req.headers['x-organization-id'] as string) || user?.organizationId || user?.orgId;
   if (!orgId) return undefined;
-  const branch = await Branch.findById(orgId).select('code').lean();
-  return (branch as { code?: string } | null)?.code || undefined;
+  const branch = (await branchRepository.getById(orgId, {
+    select: 'code',
+    lean: true,
+    throwOnNotFound: false,
+  })) as { code?: string } | null;
+  return branch?.code || undefined;
 }
 
 export function mapError(err: unknown): number {

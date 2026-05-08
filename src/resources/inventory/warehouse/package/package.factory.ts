@@ -28,7 +28,7 @@ class PackageController extends BaseController {
     // biome-ignore lint/suspicious/noExplicitAny: service contract opaque
     const body = req.body as any;
     const pkg = await flow().services.package.create(body, ctx);
-    return { success: true, data: pkg as unknown as Record<string, unknown>, status: 201 };
+    return { data: pkg as unknown as Record<string, unknown>, status: 201 };
   }
 }
 
@@ -83,7 +83,7 @@ export function createStockPackageResource() {
           const { id } = req.params as { id: string };
           const ctx = flowCtxGuard.from(req);
           const contents = await flow().services.package.getContents(id, ctx);
-          return reply.send({ success: true, data: contents });
+          return reply.send({ data: contents });
         },
       },
       {
@@ -98,7 +98,7 @@ export function createStockPackageResource() {
           const ctx = flowCtxGuard.from(req);
           const { childPackageId } = req.body as { childPackageId: string };
           await flow().services.package.nest(childPackageId, id, ctx);
-          return reply.send({ success: true, data: { nested: true } });
+          return reply.send({ data: { nested: true } });
         },
       },
       {
@@ -112,7 +112,7 @@ export function createStockPackageResource() {
           const { id } = req.params as { id: string };
           const ctx = flowCtxGuard.from(req);
           await flow().services.package.unnest(id, ctx);
-          return reply.send({ success: true, data: { unnested: true } });
+          return reply.send({ data: { unnested: true } });
         },
       },
       {
@@ -131,7 +131,7 @@ export function createStockPackageResource() {
             lines: Array<{ skuRef: string; lotId?: string; quantity: number }>;
           };
           const pkg = await flow().services.package.pack(id, lines, ctx);
-          return reply.send({ success: true, data: pkg });
+          return reply.send({ data: pkg });
         },
       },
       {
@@ -146,7 +146,7 @@ export function createStockPackageResource() {
           const { id } = req.params as { id: string };
           const ctx = flowCtxGuard.from(req);
           await flow().services.package.unpack(id, ctx);
-          return reply.send({ success: true, data: { unpacked: true } });
+          return reply.send({ data: { unpacked: true } });
         },
       },
       {
@@ -162,7 +162,7 @@ export function createStockPackageResource() {
           const ctx = flowCtxGuard.from(req);
           const { destinationLocationId } = req.body as { destinationLocationId: string };
           const group = await flow().services.package.relocate(id, destinationLocationId, ctx);
-          return reply.send({ success: true, data: group });
+          return reply.send({ data: group });
         },
       },
       // ── LPN (License Plate Number) identity verbs ─────────────────────
@@ -190,7 +190,7 @@ export function createStockPackageResource() {
             },
             ctx,
           );
-          return reply.send({ success: true, data: updated });
+          return reply.send({ data: updated });
         },
       },
       {
@@ -213,7 +213,7 @@ export function createStockPackageResource() {
             },
             ctx,
           );
-          return reply.send({ success: true, data: updated });
+          return reply.send({ data: updated });
         },
       },
     ],

@@ -17,18 +17,36 @@
  *
  * Idempotency key = `cod-cancelled-${orderId}` — one cancellation per
  * order. Re-cancelling is a no-op.
+ *
+ * Partner stamp: the A/R clearance line carries `partnerId = customerId`
+ * (NOT orderId). The order linkage lives in `sourceRef.sourceId` already,
+ * so we don't lose it. Stamping the customer here lets:
+ *   - A/R Aging group/render by customer instead of per-order
+ *   - PartnerResolver join Customer.displayName for the UI
+ *   - Customer Invoices "open" surface return rows where the partner is a
+ *     real Customer doc (resolvePartnerNames returns the name)
+ *
+ * Falls back to `orderId` for guest / walk-in orders without a customerId
+ * — preserves the kernel's `partnerId: { $ne: null }` filter invariant.
  */
 
 import { VAT_ACCOUNTS } from '../../tax/tax.accounts.js';
 import type { PostingInput, PostingItem } from '../posting.service.js';
+import { BD } from '../bd-account-codes.js';
+import { displayRef } from './_label-helpers.js';
 
-const AR_TRADE_DEBTORS = '1141';
-const SALES_REVENUE = '4111';
+const AR_TRADE_DEBTORS = BD.ar;
+const SALES_REVENUE = BD.revenue;
 const SALES_DISCOUNT = '4115';
 const VAT_PAYABLE = VAT_ACCOUNTS.OUTPUT;
 
 export interface CodCancellationData {
   orderId: string;
+  /** Human-readable order reference (e.g. `ORD-2026-04-1234`). */
+  orderReferenceNumber?: string;
+  /** Customer ObjectId — used as `partnerId` on the A/R line. Falls back to
+   *  `orderId` when absent (guest / walk-in checkout). */
+  customerId?: string | null;
   /** paisa — gross A/R that was originally posted at placement */
   grossAmount: number;
   /** paisa — VAT that was collected at placement */
@@ -45,6 +63,7 @@ export function codCancellationToPosting(
 ): PostingInput {
   const netSales = data.grossAmount - (data.tax || 0);
   const promoDiscount = data.promoDiscount && data.promoDiscount > 0 ? data.promoDiscount : 0;
+  const orderRef = displayRef(data.orderReferenceNumber, data.orderId);
 
   const items: PostingItem[] = [
     {
@@ -77,14 +96,17 @@ export function codCancellationToPosting(
     accountCode: AR_TRADE_DEBTORS,
     debit: 0,
     credit: data.grossAmount,
-    label: `Clear A/R on cancellation — order ${data.orderId}`,
-    partnerId: data.orderId,
-    partnerType: 'customer',
+    label: `Clear A/R on cancellation — order ${orderRef}`,
+    // partnerId mirrors the placement entry (customerId when present,
+    // falls back to orderId for guest / walk-in checkouts) so the
+    // reversal nets the original A/R line cleanly.
+    partnerId: data.customerId ?? data.orderId,
+    partnerType: 'customer' as const,
   });
 
   return {
     journalType: 'ECOM_SALES_COD_REVERSAL',
-    label: data.reason ? `COD cancelled — ${data.reason}` : `COD cancelled — order ${data.orderId}`,
+    label: data.reason ? `COD cancelled — ${data.reason}` : `COD cancelled — order ${orderRef}`,
     date: data.date,
     items,
     idempotencyKey: `cod-cancelled-${data.orderId}`,

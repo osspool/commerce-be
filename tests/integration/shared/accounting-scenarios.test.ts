@@ -128,7 +128,6 @@ describe('Scenario 1 — Chart of Accounts Setup', () => {
     expect([200, 201, 403]).toContain(res.statusCode);
     if (res.statusCode <= 201) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
     }
   });
 
@@ -159,9 +158,9 @@ describe('Scenario 1 — Chart of Accounts Setup', () => {
     const ctgBody = safeParseBody(resCtg.body);
 
     // Company-wide: both branches see the exact same accounts
-    if (dhkBody?.docs?.length > 0 && ctgBody?.docs?.length > 0) {
-      const dhkIds = new Set(dhkBody.docs.map((a: any) => a._id));
-      const ctgIds = new Set(ctgBody.docs.map((a: any) => a._id));
+    if (dhkBody?.data?.length > 0 && ctgBody?.data?.length > 0) {
+      const dhkIds = new Set(dhkBody.data.map((a: any) => a._id));
+      const ctgIds = new Set(ctgBody.data.map((a: any) => a._id));
       expect(dhkIds.size).toBe(ctgIds.size);
       const overlap = [...dhkIds].filter((id) => ctgIds.has(id));
       expect(overlap.length).toBe(dhkIds.size);
@@ -185,7 +184,7 @@ describe('Scenario 2 — Full Accounting Cycle (seed → entry → post → repo
       headers: h(),
     });
     const body = safeParseBody(res.body);
-    const accounts = body?.docs || [];
+    const accounts = body?.data || [];
 
     cashId = accounts.find((a: any) => a.accountTypeCode === '1111')?._id;
     revenueId = accounts.find((a: any) => a.accountTypeCode === '4111')?._id;
@@ -218,9 +217,9 @@ describe('Scenario 2 — Full Accounting Cycle (seed → entry → post → repo
 
     expect([200, 201, 400]).toContain(res.statusCode) // TODO: Arc subdoc schema fix pending;
     const body = safeParseBody(res.body);
-    if (body?.data) {
-      entryId = body.data._id;
-      expect(body.data.state).toBe('draft');
+    if (body?._id) {
+      entryId = body._id;
+      expect(body.state).toBe('draft');
     }
   });
 
@@ -236,7 +235,7 @@ describe('Scenario 2 — Full Accounting Cycle (seed → entry → post → repo
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.data.state).toBe('posted');
+      expect(body.state).toBe('posted');
     }
   });
 
@@ -250,11 +249,10 @@ describe('Scenario 2 — Full Accounting Cycle (seed → entry → post → repo
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
 
       // If we have posted entries, total debit should equal total credit
-      if (body.data?.totalDebit !== undefined) {
-        expect(body.data.totalDebit).toBe(body.data.totalCredit);
+      if (body.totalDebit !== undefined) {
+        expect(body.totalDebit).toBe(body.totalCredit);
       }
     }
   });
@@ -271,7 +269,6 @@ describe('Scenario 2 — Full Accounting Cycle (seed → entry → post → repo
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
     }
   });
 
@@ -285,7 +282,6 @@ describe('Scenario 2 — Full Accounting Cycle (seed → entry → post → repo
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body.success).toBe(true);
     }
   });
 });
@@ -309,10 +305,10 @@ describe('Scenario 3 — Branch Isolation (Branch A cannot see Branch B)', () =>
     const dhkBody = safeParseBody(resDhk.body);
     const ctgBody = safeParseBody(resCtg.body);
 
-    if (dhkBody?.docs?.length > 0) {
+    if (dhkBody?.data?.length > 0) {
       // CTG should have zero entries (or at least different ones)
-      const ctgEntries = ctgBody?.docs || [];
-      const dhkIds = dhkBody.docs.map((e: any) => e._id);
+      const ctgEntries = ctgBody?.data || [];
+      const dhkIds = dhkBody.data.map((e: any) => e._id);
       const leaked = ctgEntries.filter((e: any) => dhkIds.includes(e._id));
       expect(leaked.length).toBe(0);
     }
@@ -341,7 +337,7 @@ describe('Scenario 3 — Branch Isolation (Branch A cannot see Branch B)', () =>
       const ctg = safeParseBody(resCtg.body);
 
       // DHK should have some data (we posted entries), CTG should be empty
-      if (dhk?.data?.totalDebit !== undefined && ctg?.data?.totalDebit !== undefined) {
+      if (dhk?.totalDebit !== undefined && ctg?.totalDebit !== undefined) {
         // At minimum, they should not be identical if DHK has entries and CTG doesn't
         // (both could be 0 if no entries were posted in either)
       }
@@ -365,8 +361,8 @@ describe('Scenario 4 — POS Posting Status (shift-driven)', () => {
       // Status now returns shift-driven data (was day-close-state in the
       // legacy version). `activeShifts: []` is expected when nothing is
       // open for this branch.
-      expect(Array.isArray(body.data.activeShifts)).toBe(true);
-      expect(typeof body.data.currentBdDate).toBe('string');
+      expect(Array.isArray(body.activeShifts)).toBe(true);
+      expect(typeof body.currentBdDate).toBe('string');
     }
   });
 
@@ -389,7 +385,7 @@ describe('Scenario 5 — Manual Expense Entry (Rent Payment)', () => {
       url: `${API}/accounting/accounts?limit=1000`,
       headers: h(),
     });
-    const accounts = safeParseBody(res.body)?.docs || [];
+    const accounts = safeParseBody(res.body)?.data || [];
     cashId = accounts.find((a: any) => a.accountTypeCode === '1111')?._id;
     // Look for rent/office expense account
     rentExpenseId = accounts.find((a: any) =>
@@ -426,8 +422,8 @@ describe('Scenario 5 — Manual Expense Entry (Rent Payment)', () => {
     expect([200, 201, 400, 403]).toContain(res.statusCode);
     if (res.statusCode <= 201) {
       const body = safeParseBody(res.body);
-      expect(body.data.state).toBe('draft');
-      expect(body.data.label).toContain('Monthly Rent');
+      expect(body.state).toBe('draft');
+      expect(body.label).toContain('Monthly Rent');
     }
   });
 });

@@ -33,6 +33,7 @@ import type { OrderChannel } from '../orders/channel.js';
 import { ensureOrderEngine } from '../orders/order.engine.js';
 import { toFulfillmentAddress } from '../orders/shipping-address.js';
 import posShiftRepository from './shift.repository.js';
+import { ConflictError, ValidationError, createDomainError } from '@classytic/arc/utils';
 
 interface AuthenticatedUser {
   _id?: string;
@@ -40,11 +41,22 @@ interface AuthenticatedUser {
   [key: string]: unknown;
 }
 
+/**
+ * POS line item shape — discriminated union over `kind`.
+ *
+ * `sku` (default) — scanned product line; `productId` is required and
+ * resolves against the catalog. `service-fee` — ad-hoc charge added by
+ * the cashier; `label` is required (display + slug source) and `productId`
+ * is unused. Mirrors the Zod schema in `pos.schemas.ts` exactly so the
+ * controller never sees a malformed payload past validation.
+ */
 interface PosOrderItem {
-  productId: string;
+  kind?: 'sku' | 'service-fee';
+  productId?: string;
   variantSku?: string;
   quantity: number;
   price?: number;
+  label?: string;
 }
 
 interface PosOrderBody {
@@ -83,7 +95,6 @@ function buildOrderContext(req: FastifyRequest): OrderContext {
 class PosController {
   constructor() {
     this.createOrder = this.createOrder.bind(this);
-    this.getReceipt = this.getReceipt.bind(this);
   }
 
   /**
@@ -97,12 +108,12 @@ class PosController {
     const body = req.body as PosOrderBody;
 
     if (!body.items?.length) {
-      return reply.code(400).send({ success: false, message: 'At least one item is required' });
+      throw new ValidationError('At least one item is required');
     }
 
     const branchId = resolveAuthorizedBranchId(req, body.branchId);
     if (!branchId) {
-      return reply.code(400).send({ success: false, message: 'Invalid branch' });
+      throw new ValidationError('Invalid branch');
     }
 
     // Shift guard — every POS sale must flow through an open shift, so the
@@ -110,18 +121,10 @@ class PosController {
     // Paused / blind_closed / closed → reject with 409.
     const activeShift = await posShiftRepository.getActiveShift(branchId);
     if (!activeShift) {
-      return reply.code(409).send({
-        success: false,
-        code: 'NO_OPEN_SHIFT',
-        message: 'No open shift for this branch — open the register first',
-      });
+      throw createDomainError('NO_OPEN_SHIFT', 'No open shift for this branch — open the register first', 409);
     }
     if (activeShift.state !== 'open') {
-      return reply.code(409).send({
-        success: false,
-        code: 'SHIFT_NOT_OPEN',
-        message: `Shift is ${activeShift.state}; resume it before accepting sales`,
-      });
+      throw createDomainError('SHIFT_NOT_OPEN', `Shift is ${activeShift.state}; resume it before accepting sales`, 409);
     }
 
     const ctx: OrderContext = {
@@ -142,11 +145,21 @@ class PosController {
       // The order-stock-hook still fires on success — that's where the
       // authoritative atomic decrement happens. This pre-check just shortens
       // the failure path and gives the cashier a useful 4xx response.
+      //
+      // Service-fee lines (`kind: 'service-fee'` — gift wrap, damaged-product
+      // reimbursement, etc.) are skipped here: they have no catalog SKU
+      // behind them, no Flow stock to check, and no inventory impact.
       const flow = getFlowEngineOrNull();
       if (flow) {
         const flowCtx = buildFlowContext(branchId, ctx.actorRef);
         const shortages: Array<{ sku: string; requested: number; available: number }> = [];
         for (const item of body.items) {
+          if (item.kind === 'service-fee') continue;
+          // Schema's `superRefine` already enforces `productId` on sku
+          // items — non-null here. Asserting keeps the existing
+          // `skuRefFromProduct(string, string?)` signature unchanged
+          // (no need to cascade `string | undefined` through helpers).
+          if (!item.productId) continue;
           const skuRef = skuRefFromProduct(item.productId, item.variantSku);
           const avail = await flow.services.quant.getAvailability({ skuRef, locationId: DEFAULT_LOCATION }, flowCtx);
           const onHand = avail.quantityOnHand ?? 0;
@@ -155,28 +168,69 @@ class PosController {
           }
         }
         if (shortages.length > 0) {
-          return reply.code(409).send({
-            success: false,
-            code: 'INSUFFICIENT_STOCK',
-            message: 'One or more items are out of stock at this branch',
-            details: shortages,
-          });
+          throw createDomainError('INSUFFICIENT_STOCK', 'One or more items are out of stock at this branch', 409, { shortages });
         }
       }
 
-      const lines = body.items.map((item) => ({
-        kind: 'sku',
-        offerId: item.variantSku ?? item.productId,
-        quantity: item.quantity,
-        unitPriceOverride:
-          typeof item.price === 'number' ? { amount: Math.round(item.price * 100), currency: 'BDT' } : undefined,
-        metadata: { productId: item.productId, variantSku: item.variantSku },
-      }));
+      const lines = body.items.map((item) => {
+        // Service-fee lines carry a self-contained snapshot — no catalog
+        // lookup happens for them. The order kernel persists the snapshot
+        // verbatim and tags the line with `kind: 'service-fee'` so refund
+        // / RMA / reporting can branch on it.
+        if (item.kind === 'service-fee') {
+          // The cashier types a label; we slugify it for a stable code.
+          // The synthetic SKU `service:<slug>` doubles as both `offerId` and
+          // `snapshot.sku`, sidestepping any catalog-bridge resolve attempt.
+          const slug = (item.label ?? 'misc')
+            .toLowerCase()
+            .trim()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 64) || 'misc';
+          const syntheticSku = `service:${slug}`;
+          const unitPriceMinor =
+            typeof item.price === 'number' ? Math.round(item.price * 100) : 0;
+          return {
+            kind: 'service-fee',
+            offerId: syntheticSku,
+            quantity: item.quantity,
+            unitPriceOverride: { amount: unitPriceMinor, currency: 'BDT' },
+            // Pre-built snapshot — order.repository's create pipeline reads
+            // `snapshot.requiresShipping` (post 2026-04 kernel patch) and
+            // marks the line non-shippable, so routing / fulfillment skips it.
+            snapshot: {
+              sku: syntheticSku,
+              name: item.label,
+              unitPrice: unitPriceMinor,
+              currency: 'BDT',
+              requiresShipping: false,
+            },
+            metadata: { serviceCode: slug, label: item.label },
+          };
+        }
+        return {
+          kind: 'sku',
+          offerId: item.variantSku ?? item.productId,
+          quantity: item.quantity,
+          unitPriceOverride:
+            typeof item.price === 'number' ? { amount: Math.round(item.price * 100), currency: 'BDT' } : undefined,
+          metadata: { productId: item.productId, variantSku: item.variantSku },
+        };
+      });
 
       // Server-authoritative promo evaluation — same model as storefront
       // placement. See `promo-placement.ts`. Prices from the POS body are
       // in major units; convert to paisa (minor) for the engine.
-      const promoLines: PromoLineItem[] = body.items.map((item) => {
+      //
+      // Service-fee lines are excluded from promo evaluation — promotions
+      // target catalog products, not ad-hoc charges. Including them would
+      // let a "10% off the cart" rule eat into a ৳20 gift-wrap fee, which
+      // is rarely the merchant's intent.
+      const promoLines: PromoLineItem[] = body.items
+        .filter((item): item is PosOrderItem & { productId: string } =>
+          item.kind !== 'service-fee' && typeof item.productId === 'string',
+        )
+        .map((item) => {
         const unitPrice = typeof item.price === 'number' ? Math.round(item.price * 100) : 0;
         return {
           productId: item.productId,
@@ -232,6 +286,16 @@ class PosController {
               // shiftId is read by shift-aggregation.hook to increment the
               // active shift's sales counters atomically after create.
               shiftId: String((activeShift as { _id: unknown })._id),
+              // Per-method payment split, persisted on the doc (metadata is
+              // Mixed → survives mongoose strict-mode). The order schema has
+              // no top-level `payment` field, so `payment.paymentData.payments`
+              // we set on the input gets stripped — the shift-aggregation
+              // hook reads from here instead. Amounts are paisa.
+              payments: payments.map((p) => ({
+                method: p.method,
+                amount: typeof p.amount === 'number' ? Math.round(p.amount * 100) : 0,
+                ...(p.reference ? { reference: p.reference } : {}),
+              })),
               ...(promoReservation.evaluationId ? { promoEvaluationId: promoReservation.evaluationId } : {}),
               ...(promoReservation.appliedCodes.length > 0 ? { promoCodes: promoReservation.appliedCodes } : {}),
               ...(promoReservation.totalDiscount > 0 ? { promoTotalDiscount: promoReservation.totalDiscount } : {}),
@@ -309,34 +373,20 @@ class PosController {
         }
       }
 
-      return reply.code(201).send({ success: true, data: order, promoCommit });
+      return reply.code(201).send(order);
     } catch (err) {
-      logger.error({ err }, 'POS createOrder failed');
-      const message = (err as Error).message ?? 'POS order creation failed';
-      return reply.code(400).send({ success: false, message });
-    }
-  }
-
-  /**
-   * Fetch a POS order by `orderNumber` for receipt rendering. Scoped to
-   * the caller's branch via the multi-tenant plugin.
-   */
-  async getReceipt(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const { orderId } = req.params as { orderId: string };
-    const ctx = buildOrderContext(req);
-
-    try {
-      const engine = await ensureOrderEngine();
-      const order = await engine.repositories.order.getByQuery({ orderNumber: orderId }, repoOptionsFromCtx(ctx));
-      if (!order) {
-        return reply.code(404).send({ success: false, message: 'Order not found' });
+      // Re-throw domain errors (ConflictError 409, ValidationError 400, etc.)
+      // as-is so the correct HTTP status code propagates to the client.
+      // Only wrap truly unexpected errors (no statusCode) in a generic 500.
+      const e = err as { statusCode?: number; code?: string };
+      if (e?.statusCode) {
+        throw err;
       }
-      return reply.send({ success: true, data: order });
-    } catch (err) {
-      logger.error({ err }, 'POS getReceipt failed');
-      return reply.code(500).send({ success: false, message: 'Receipt fetch failed' });
+      logger.error({ err }, 'POS createOrder failed');
+      throw new ValidationError((err as Error).message ?? 'POS order creation failed');
     }
   }
+
 }
 
 const posController = new PosController();

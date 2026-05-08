@@ -91,7 +91,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? parse(res.body)) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     programId = (data?._id ?? data?.id) as string;
     expect(programId).toBeTruthy();
     expect(data.status).toBe('draft');
@@ -109,7 +109,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(data.programId).toBe(programId);
     expect(data.minimumAmount).toBe(1000);
   });
@@ -128,7 +128,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(data.rewardType).toBe('discount');
     expect(data.discountAmount).toBe(10);
   });
@@ -149,7 +149,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       headers: env.auth.as('admin').headers,
     });
     expect(get.statusCode, get.body).toBe(200);
-    const data = (parse(get.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(get.body) ?? {}) as Record<string, unknown>;
     expect(data.status).toBe('active');
   });
 
@@ -160,7 +160,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       headers: env.auth.as('admin').headers,
     });
     expect(res.statusCode, res.body).toBe(200);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(Array.isArray(data.rules)).toBe(true);
     expect(Array.isArray(data.rewards)).toBe(true);
     expect((data.rules as unknown[]).length).toBeGreaterThanOrEqual(1);
@@ -176,7 +176,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       payload: { programId, code: voucherCode },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(data.code).toBe(voucherCode);
   });
 
@@ -187,7 +187,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       headers: env.auth.as('admin').headers,
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     // Either { valid: true } or the voucher document itself — both are
     // acceptable contracts; the assertion is "this code passes validation."
     expect(data).toBeTruthy();
@@ -207,7 +207,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     // The evaluation result varies in shape between versions — assert the
     // discount magnitude rather than chasing a brittle field path.
     const discount = extractDiscountAmount(data);
@@ -229,7 +229,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
       },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     evaluationId = (data._id ?? data.id ?? data.evaluationId) as string;
     expect(evaluationId, 'evaluation id missing from response').toBeTruthy();
   });
@@ -265,7 +265,7 @@ describe('Promo evaluation — happy path: program → voucher → preview → e
     if (second.statusCode >= 400) {
       expect([400, 409, 410, 422]).toContain(second.statusCode);
     } else {
-      const data = (parse(second.body)?.data ?? {}) as Record<string, unknown>;
+      const data = (parse(second.body) ?? {}) as Record<string, unknown>;
       const discount = extractDiscountAmount(data) ?? 0;
       expect(discount, 'committed voucher must not redeem twice').toBe(0);
     }
@@ -290,7 +290,7 @@ describe('Promo evaluation — rollback releases the voucher', () => {
         stackingMode: 'exclusive',
       },
     });
-    const programData = (parse(programRes.body)?.data ?? {}) as Record<string, unknown>;
+    const programData = (parse(programRes.body) ?? {}) as Record<string, unknown>;
     programId = (programData._id ?? programData.id) as string;
 
     await env.server.inject({
@@ -338,7 +338,7 @@ describe('Promo evaluation — rollback releases the voucher', () => {
       },
     });
     expect(evalRes.statusCode, evalRes.body).toBeLessThan(400);
-    const evalData = (parse(evalRes.body)?.data ?? {}) as Record<string, unknown>;
+    const evalData = (parse(evalRes.body) ?? {}) as Record<string, unknown>;
     const evaluationId = (evalData._id ?? evalData.id ?? evalData.evaluationId) as string;
     expect(evaluationId).toBeTruthy();
 
@@ -387,7 +387,7 @@ describe('Promo evaluation — cart-hash tamper guard', () => {
       },
     });
     expect(programRes.statusCode, programRes.body).toBeLessThan(400);
-    const programData = (parse(programRes.body)?.data ?? {}) as Record<string, unknown>;
+    const programData = (parse(programRes.body) ?? {}) as Record<string, unknown>;
     programId = (programData._id ?? programData.id) as string;
 
     await env.server.inject({
@@ -435,7 +435,7 @@ describe('Promo evaluation — cart-hash tamper guard', () => {
       },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     evalId = (data._id ?? data.id ?? data.evaluationId) as string;
     evalCartHash = data.cartHash as string;
     expect(evalId).toBeTruthy();

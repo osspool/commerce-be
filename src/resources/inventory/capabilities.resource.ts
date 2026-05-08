@@ -31,17 +31,14 @@ const capabilitiesResource = defineResource({
         const mode = flow().services.mode;
         const inv = config.inventory;
         return reply.send({
-          success: true,
-          data: {
-            mode,
-            features: {
-              quality: inv.qualityEnabled,
-              tasks: inv.tasksEnabled,
-              dispatch: inv.dispatchEnabled,
-              rfid: inv.rfidEnabled,
-            },
-            valuationMethod: inv.valuationMethod,
+          mode,
+          features: {
+            quality: inv.qualityEnabled,
+            tasks: inv.tasksEnabled,
+            dispatch: inv.dispatchEnabled,
+            rfid: inv.rfidEnabled,
           },
+          valuationMethod: inv.valuationMethod,
         });
       },
     },

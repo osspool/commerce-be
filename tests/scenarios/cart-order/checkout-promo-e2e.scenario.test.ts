@@ -211,9 +211,8 @@ describe('Scenario A — client sends only codes; server evaluates + commits', (
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
     const body = parse(res.body) ?? {};
-    expect(body.success).toBe(true);
 
-    const order = (body.data as Record<string, unknown>) ?? {};
+    const order = (body as Record<string, unknown>) ?? {};
     const metadata = (order.metadata as Record<string, unknown>) ?? {};
     expect(metadata.promoEvaluationId, 'server must stamp a real evaluationId').toBeTruthy();
     expect(metadata.promoCodes).toEqual([voucherCode]);
@@ -240,9 +239,8 @@ describe('Scenario A — client sends only codes; server evaluates + commits', (
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
     const body = parse(res.body) ?? {};
-    expect(body.success).toBe(true);
 
-    const order = (body.data as Record<string, unknown>) ?? {};
+    const order = (body as Record<string, unknown>) ?? {};
     const metadata = (order.metadata as Record<string, unknown>) ?? {};
     // Either no evaluationId stamped OR zero discount — both valid outcomes.
     expect(metadata.promoTotalDiscount ?? 0).toBe(0);
@@ -300,9 +298,8 @@ describe('Scenario C — server ignores any client-evaluation fields (tamper imp
     expect(res.statusCode, res.body).toBeLessThan(400);
 
     const body = parse(res.body) ?? {};
-    expect(body.success).toBe(true);
 
-    const order = (body.data as Record<string, unknown>) ?? {};
+    const order = (body as Record<string, unknown>) ?? {};
     const metadata = (order.metadata as Record<string, unknown>) ?? {};
 
     // Stamped evaluationId MUST be server-generated (not the fake one).
@@ -330,9 +327,8 @@ describe('Scenario D — unknown code is echoed as rejected; order places withou
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
     const body = parse(res.body) ?? {};
-    expect(body.success).toBe(true);
 
-    const order = (body.data as Record<string, unknown>) ?? {};
+    const order = (body as Record<string, unknown>) ?? {};
     const metadata = (order.metadata as Record<string, unknown>) ?? {};
     expect(metadata.promoEvaluationId).toBeUndefined();
     expect(metadata.promoTotalDiscount).toBeUndefined();

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { isFeatureEnabled } from '#config/features.js';
 import streamlineInit from '#core/plugins/streamline.plugin.js';
 import accountingInit from '#resources/accounting/accounting.plugin.js';
+import approvalInit from '#resources/approval/approval.plugin.js';
 import invoiceInit from '#resources/accounting/invoice/invoice.plugin.js';
 import mediaInit from '#resources/content/media/media.plugin.js';
 import crmInit from '#resources/crm/crm.plugin.js';
@@ -15,6 +16,10 @@ import pricelistInit from '#resources/sales/pricelist/pricelist.plugin.js';
 export async function registerDomainBootstrap(fastify: FastifyInstance): Promise<void> {
   await fastify.register(
     async (scoped) => {
+      // Approval framework — wires RoleResolver before any subject's
+      // `submit_for_approval` handler can run. Always-on; no feature gate.
+      await scoped.register(approvalInit);
+
       await scoped.register(inventoryInit);
       await scoped.register(cartInit);
       await scoped.register(pricelistInit);

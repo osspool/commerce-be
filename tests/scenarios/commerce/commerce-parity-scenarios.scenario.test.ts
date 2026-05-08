@@ -157,8 +157,8 @@ describe('Parity — idempotent order placement (Saleor checkout-token parity)',
     expect(r1.statusCode, r1.body).toBe(201);
     expect(r2.statusCode, r2.body).toBe(201);
 
-    const o1 = parse(r1.body)?.data as { orderNumber: string };
-    const o2 = parse(r2.body)?.data as { orderNumber: string };
+    const o1 = parse(r1.body) as { orderNumber: string };
+    const o2 = parse(r2.body) as { orderNumber: string };
 
     // Both responses refer to the same persisted order.
     expect(o1.orderNumber).toBe(o2.orderNumber);
@@ -183,15 +183,15 @@ describe('Parity — idempotent order placement (Saleor checkout-token parity)',
 
     const first = await placeOrder(1, key);
     expect(first.statusCode).toBe(201);
-    const firstOrder = parse(first.body)?.data as { orderNumber: string };
+    const firstOrder = parse(first.body) as { orderNumber: string };
 
     // Later, twice more — must both return the same order and be flagged idempotent.
     const second = await placeOrder(1, key);
     const third = await placeOrder(1, key);
     expect(parse(second.body)?.idempotent).toBe(true);
     expect(parse(third.body)?.idempotent).toBe(true);
-    expect((parse(second.body)?.data as { orderNumber: string }).orderNumber).toBe(firstOrder.orderNumber);
-    expect((parse(third.body)?.data as { orderNumber: string }).orderNumber).toBe(firstOrder.orderNumber);
+    expect((parse(second.body) as { orderNumber: string }).orderNumber).toBe(firstOrder.orderNumber);
+    expect((parse(third.body) as { orderNumber: string }).orderNumber).toBe(firstOrder.orderNumber);
 
     // Reservation count unchanged — no rogue reservations from replays.
     const stock = await getStock();
@@ -206,8 +206,8 @@ describe('Parity — idempotent order placement (Saleor checkout-token parity)',
 
     expect(r1.statusCode).toBe(201);
     expect(r2.statusCode).toBe(201);
-    const o1 = parse(r1.body)?.data as { orderNumber: string };
-    const o2 = parse(r2.body)?.data as { orderNumber: string };
+    const o1 = parse(r1.body) as { orderNumber: string };
+    const o2 = parse(r2.body) as { orderNumber: string };
     expect(o1.orderNumber).not.toBe(o2.orderNumber);
 
     const stock = await getStock();
@@ -243,7 +243,7 @@ describe('Parity — FIFO cost layer drain on ship (Odoo stock_account parity)',
     // Place + fulfill + ship 7 units.
     const placeRes = await placeOrder(7, `par-fifo-${Date.now()}`);
     expect(placeRes.statusCode).toBe(201);
-    const order = parse(placeRes.body)?.data as { orderNumber: string };
+    const order = parse(placeRes.body) as { orderNumber: string };
 
     const fulRes = await env.server.inject({
       method: 'POST',
@@ -255,7 +255,7 @@ describe('Parity — FIFO cost layer drain on ship (Odoo stock_account parity)',
       },
     });
     expect(fulRes.statusCode).toBeLessThan(400);
-    const ful = parse(fulRes.body)?.data as { fulfillmentNumber: string };
+    const ful = parse(fulRes.body) as { fulfillmentNumber: string };
 
     const shipRes = await env.server.inject({
       method: 'POST',

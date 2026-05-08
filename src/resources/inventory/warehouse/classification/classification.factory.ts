@@ -19,6 +19,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
 import { flow, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 export function createSkuClassificationResource() {
   const engine = flow();
@@ -82,10 +83,7 @@ export function createSkuClassificationResource() {
             policyId?: string;
           };
           if (!body?.start || !body?.end) {
-            return reply.code(400).send({
-              success: false,
-              error: 'start and end (ISO date strings) are required',
-            });
+            throw new ValidationError('start and end (ISO date strings) are required');
           }
           const result =
             await flow().repositories.skuClassification.recomputeFromStockEvents(
@@ -97,7 +95,7 @@ export function createSkuClassificationResource() {
               },
               ctx,
             );
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         },
       },
     ],

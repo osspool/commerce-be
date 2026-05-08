@@ -151,6 +151,7 @@ export function initializeInvoiceEngine(fastifyEvents?: ArcFastifyEvents): Invoi
       : undefined,
     idempotency: true,
     silent: config.isProduction,
+    forceRecreate: process.env.NODE_ENV === 'test',
   });
 
   return engine;

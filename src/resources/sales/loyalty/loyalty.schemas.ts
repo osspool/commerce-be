@@ -12,6 +12,7 @@ const customerIdParam = z.object({ customerId: z.string() });
 const ruleIdParam = z.object({ ruleId: z.string() });
 const tierIdParam = z.object({ tierId: z.string() });
 const referralIdParam = z.object({ referralId: z.string() });
+const cardIdParam = z.object({ cardId: z.string().min(1).describe('Loyalty card ID printed on member card') });
 
 // ── Redemption Schemas ──
 
@@ -79,6 +80,9 @@ export const memberSchemas = {
       page: z.coerce.number().optional().default(1),
       limit: z.coerce.number().optional().default(20),
     }),
+  },
+  byCard: {
+    params: cardIdParam,
   },
 };
 

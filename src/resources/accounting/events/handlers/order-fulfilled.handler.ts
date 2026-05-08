@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import config from '#config/index.js';
 import { type CogsData, cogsToPosting } from '../../posting/contracts/inventory.contract.js';
 import { definePostingHandler } from '../define-posting-handler.js';
 import { OrderFulfilledEvent, orderFulfilledSchema } from '../event-definitions.js';
@@ -36,21 +35,27 @@ export const orderFulfilledHandler = definePostingHandler({
     let costMissing = payload.costMissing;
     let affectedLines = payload.affectedLines;
     let orderDate: Date | undefined;
+    // Order's human-readable reference (e.g. ORD-2026-04-1234) — used as
+    // the JE label so the GL doesn't show raw 24-char ObjectIds.
+    let orderReferenceNumber: string | undefined;
 
-    // Lookup is only needed when the bridge didn't pre-resolve the fields
-    // (legacy publisher path). New publishers carry costAmount + branchId.
-    if (branchId === undefined || costAmount === undefined || orderDate === undefined) {
+    // Lookup serves two purposes: legacy fallback (when bridge didn't
+    // pre-resolve costAmount/branchId) AND fetching the human-readable
+    // referenceNumber for the JE label. Always done — the cost is one
+    // lean projection round-trip and pays for itself in display quality.
+    {
       const order = await db
         .collection('orders')
         .findOne(
           { _id: new mongoose.Types.ObjectId(payload.orderId) },
-          { projection: { lines: 1, branch: 1, organizationId: 1, createdAt: 1 } },
+          { projection: { lines: 1, branch: 1, organizationId: 1, createdAt: 1, referenceNumber: 1 } },
         );
       if (!order) {
         log.warn({ orderId: payload.orderId }, 'COGS post: order not found');
         return null;
       }
       orderDate = (order.createdAt as Date | undefined) ?? new Date();
+      orderReferenceNumber = (order.referenceNumber as string | undefined) ?? undefined;
       if (branchId === undefined) {
         branchId =
           (order.organizationId as { toString: () => string } | undefined)?.toString() ??
@@ -70,6 +75,7 @@ export const orderFulfilledHandler = definePostingHandler({
 
     const data: CogsData = {
       orderId: payload.orderId,
+      orderReferenceNumber,
       costAmount: costAmount ?? 0,
       date: orderDate ?? new Date(),
       ...(costMissing
@@ -84,7 +90,7 @@ export const orderFulfilledHandler = definePostingHandler({
 
     return {
       branchId,
-      posting: cogsToPosting(data, { autoPost: config.accounting.autoPost }),
+      posting: cogsToPosting(data),
       logFields: { orderId: payload.orderId, costAmount: data.costAmount, costMissing: !!costMissing },
       successMessage: costMissing
         ? 'COGS journal entry created (zero-value, costMissing flag set)'

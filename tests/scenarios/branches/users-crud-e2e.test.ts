@@ -138,12 +138,11 @@ describe('GET /users — list', () => {
     });
     expect(res.statusCode, res.body).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
     const data = body?.data as Record<string, unknown> | undefined;
     const list =
-      (body?.docs as unknown[] | undefined) ??
+      (body?.data as unknown[] | undefined) ??
       (body?.items as unknown[] | undefined) ??
-      (data?.docs as unknown[] | undefined) ??
+      (data?.data as unknown[] | undefined) ??
       (data?.items as unknown[] | undefined) ??
       (Array.isArray(data) ? (data as unknown[]) : undefined) ??
       [];
@@ -167,9 +166,9 @@ describe('GET /users — list', () => {
     const body = parse(res.body);
     const data = body?.data as Record<string, unknown> | undefined;
     const list =
-      (body?.docs as unknown[] | undefined) ??
+      (body?.data as unknown[] | undefined) ??
       (body?.items as unknown[] | undefined) ??
-      (data?.docs as unknown[] | undefined) ??
+      (data?.data as unknown[] | undefined) ??
       (data?.items as unknown[] | undefined) ??
       (Array.isArray(data) ? (data as unknown[]) : undefined) ??
       [];
@@ -218,7 +217,7 @@ describe('POST /users — superadmin create', () => {
       },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? parse(res.body)) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     const id = (data?._id ?? data?.id) as string | undefined;
     expect(id, 'created user id missing from response').toBeTruthy();
     createdUserId = id!;
@@ -240,7 +239,7 @@ describe('GET /users/:id — admin read', () => {
       headers: auth.as('admin').headers,
     });
     expect(res.statusCode, res.body).toBe(200);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(data.email).toMatch(/^staff-/);
   });
 });
@@ -271,7 +270,7 @@ describe('GET /users/me — authenticated profile', () => {
       headers: auth.as('admin').headers,
     });
     expect(res.statusCode, res.body).toBe(200);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(typeof data.email).toBe('string');
     expect((data.email as string).startsWith('users-crud-admin-')).toBe(true);
   });
@@ -307,7 +306,7 @@ describe('PATCH /users/me — self-update', () => {
       method: 'GET', url: `${API}/users/me`,
       headers: auth.as('admin').headers,
     });
-    const data = (parse(followUp.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(followUp.body) ?? {}) as Record<string, unknown>;
     expect(data.name).toBe(newName);
   });
 });
@@ -329,7 +328,7 @@ describe('DELETE /users/:id — superadmin remove', () => {
     });
     // Either hard-deleted (404) or soft-deleted (still 200 but flagged).
     if (followUp.statusCode === 200) {
-      const data = (parse(followUp.body)?.data ?? {}) as Record<string, unknown>;
+      const data = (parse(followUp.body) ?? {}) as Record<string, unknown>;
       expect(Boolean(data.deleted) || data.isActive === false).toBe(true);
     } else {
       expect(followUp.statusCode).toBe(404);

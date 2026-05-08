@@ -32,6 +32,17 @@ function safeParseBody(body: string) {
   try { return JSON.parse(body); } catch { return null; }
 }
 
+/**
+ * Arc's `sendControllerResponse` flattens paginated controller results
+ * into the top-level envelope `{ success, data, total, page, limit, ... }`
+ * (see fastifyAdapter.ts:281-306). This helper extracts rows from the
+ * standard envelope.
+ */
+function auditRows(body: any): any[] {
+  if (!body) return [];
+  return Array.isArray(body.data) ? body.data : [];
+}
+
 async function seedPlatformConfig(): Promise<void> {
   const db = mongoose.connection.db;
   if (!db) return;
@@ -191,10 +202,9 @@ describe('Audit Trail via Supplier CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.length).toBeGreaterThan(0);
+    expect(auditRows(body).length).toBeGreaterThan(0);
 
-    const entry = body.data.find((e: any) => e.documentId === supplierId);
+    const entry = auditRows(body).find((e: any) => e.documentId === supplierId);
     expect(entry).toBeTruthy();
     expect(entry.action).toBe('create');
     expect(entry.resource).toBe('supplier');
@@ -209,9 +219,8 @@ describe('Audit Trail via Supplier CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
 
-    const entry = body.data.find((e: any) => e.documentId === supplierId);
+    const entry = auditRows(body).find((e: any) => e.documentId === supplierId);
     expect(entry).toBeTruthy();
     expect(entry.action).toBe('update');
     expect(entry.changes).toBeDefined();
@@ -229,9 +238,8 @@ describe('Audit Trail via Supplier CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
 
-    const entry = body.data.find((e: any) => e.documentId === supplierId);
+    const entry = auditRows(body).find((e: any) => e.documentId === supplierId);
     expect(entry).toBeTruthy();
     expect(entry.action).toBe('delete');
   });
@@ -249,12 +257,11 @@ describe('Audit Log Module Filter', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
     // Should include supplier and transfer entries from seed
-    expect(body.data.length).toBeGreaterThan(0);
+    expect(auditRows(body).length).toBeGreaterThan(0);
     // All entries should be from inventory-related resources
     const validResources = ['transfer', 'purchase', 'supplier', 'stock-request'];
-    for (const entry of body.data) {
+    for (const entry of auditRows(body)) {
       expect(validResources).toContain(entry.resource);
     }
   });
@@ -272,9 +279,8 @@ describe('Audit Log Action Filter', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.length).toBeGreaterThan(0);
-    for (const entry of body.data) {
+    expect(auditRows(body).length).toBeGreaterThan(0);
+    for (const entry of auditRows(body)) {
       expect(entry.action).toBe('create');
     }
   });
@@ -295,9 +301,8 @@ describe('Audit Log Date Range Filter', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
     // Entries from our seed should be within this range
-    expect(body.data.length).toBeGreaterThan(0);
+    expect(auditRows(body).length).toBeGreaterThan(0);
   });
 
   it('far-future date range returns empty', async () => {
@@ -309,8 +314,7 @@ describe('Audit Log Date Range Filter', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.length).toBe(0);
+    expect(auditRows(body).length).toBe(0);
   });
 });
 
@@ -376,7 +380,7 @@ describe('Audit Log Pagination', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.data.length).toBeLessThanOrEqual(2);
+    expect(auditRows(body).length).toBeLessThanOrEqual(2);
   });
 
   it('GET /audit-logs?limit=1&offset=0 vs offset=1 return different entries', async () => {
@@ -391,12 +395,12 @@ describe('Audit Log Pagination', () => {
       headers: h(),
     });
 
-    const body1 = safeParseBody(res1.body);
-    const body2 = safeParseBody(res2.body);
+    const rows1 = auditRows(safeParseBody(res1.body));
+    const rows2 = auditRows(safeParseBody(res2.body));
 
-    expect(body1.data.length).toBe(1);
-    if (body2.data.length > 0) {
-      expect(body1.data[0].id).not.toBe(body2.data[0].id);
+    expect(rows1.length).toBe(1);
+    if (rows2.length > 0) {
+      expect(rows1[0].id).not.toBe(rows2[0].id);
     }
   });
 });
@@ -413,8 +417,8 @@ describe('Audit Log Resource Filter', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.data.length).toBeGreaterThan(0);
-    for (const entry of body.data) {
+    expect(auditRows(body).length).toBeGreaterThan(0);
+    for (const entry of auditRows(body)) {
       expect(entry.resource).toBe('supplier');
     }
   });
@@ -428,7 +432,7 @@ describe('Audit Log Resource Filter', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.data.length).toBe(0);
+    expect(auditRows(body).length).toBe(0);
   });
 });
 
@@ -444,8 +448,8 @@ describe('Audit Log Combined Filters', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.data.length).toBeGreaterThan(0);
-    for (const entry of body.data) {
+    expect(auditRows(body).length).toBeGreaterThan(0);
+    for (const entry of auditRows(body)) {
       expect(entry.resource).toBe('supplier');
       expect(entry.action).toBe('create');
     }
@@ -460,8 +464,8 @@ describe('Audit Log Combined Filters', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.data.length).toBeGreaterThan(0);
-    for (const entry of body.data) {
+    expect(auditRows(body).length).toBeGreaterThan(0);
+    for (const entry of auditRows(body)) {
       expect(['create', 'update']).toContain(entry.action);
     }
   });
@@ -486,8 +490,8 @@ describe('Auto-Audit via Real Supplier CRUD', () => {
 
     expect([200, 201]).toContain(res.statusCode);
     const body = safeParseBody(res.body);
-    expect(body.data).toBeTruthy();
-    realSupplierId = body.data._id;
+    expect(body).toBeTruthy();
+    realSupplierId = body._id;
   });
 
   it('auto-audit writes entries to audit_logs collection', async () => {

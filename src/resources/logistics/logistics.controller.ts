@@ -16,8 +16,11 @@ import {
 } from '@classytic/bd-areas/pathao';
 import { buildPathaoBulkCsv, defaultPathaoCsvFilename, type PathaoCsvRow } from '@classytic/carrier-bd';
 import { type OrderContext, repoOptionsFromCtx } from '@classytic/order';
+import { getUserId } from '@classytic/arc/scope';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ensureOrderEngine } from '#resources/sales/orders/order.engine.js';
+import { sanitizeDisplayName } from '#resources/sales/customers/customer.name-utils.js';
+import { createError, NotFoundError, ValidationError } from '@classytic/arc/utils';
 import config from '../../config/index.js';
 import PlatformConfig from '#resources/platform/platform.model.js';
 import carrierRegistry from './services/carrier-registry.js';
@@ -26,16 +29,17 @@ import { computeEstimate } from './utils/resolve-zone.js';
 import { DELIVERY_ZONES } from './utils/zones.js';
 
 function getCtx(req: FastifyRequest): LogisticsContext {
-  const user = (req as unknown as { user?: { _id?: string; id?: string } }).user;
   return {
     organizationId: (req.headers['x-organization-id'] as string) ?? '',
-    actorRef: user?._id ?? user?.id ?? 'logistics-anonymous',
+    actorRef: getUserId(req.scope) ?? 'logistics-anonymous',
     correlationId: req.id ?? `logistics-${Date.now()}`,
   };
 }
 
-function fail(reply: FastifyReply, code: number, message: string): FastifyReply {
-  return reply.code(code).send({ success: false, message });
+function fail(_reply: FastifyReply, code: number, message: string): never {
+  if (code === 404) throw new NotFoundError(message);
+  if (code === 400) throw new ValidationError(message);
+  throw createError(code, message);
 }
 
 class LogisticsController {
@@ -52,28 +56,25 @@ class LogisticsController {
 
   async getConfig(_req: FastifyRequest, reply: FastifyReply) {
     return reply.send({
-      success: true,
-      data: {
-        defaultProvider: config.logistics.defaultProvider,
-        configured: carrierRegistry.configured(),
-        capabilities: Object.fromEntries(
-          carrierRegistry.configured().map((code) => [code, carrierRegistry.get(code).capabilities]),
-        ),
-        note: 'Configuration is managed via .env file. Restart server after changes.',
-      },
+      defaultProvider: config.logistics.defaultProvider,
+      configured: carrierRegistry.configured(),
+      capabilities: Object.fromEntries(
+        carrierRegistry.configured().map((code) => [code, carrierRegistry.get(code).capabilities]),
+      ),
+      note: 'Configuration is managed via .env file. Restart server after changes.',
     });
   }
 
   // ── Areas (legacy unified bd-areas — kept for RedX flows) ─────────
 
   async getDivisions(_req: FastifyRequest, reply: FastifyReply) {
-    return reply.send({ success: true, data: bdAreas.getDivisions() });
+    return reply.send(bdAreas.getDivisions());
   }
 
   async getDistricts(req: FastifyRequest<{ Params: { division: string } }>, reply: FastifyReply) {
     const districts = bdAreas.getDistrictsByDivision(req.params.division);
     if (!districts.length) return fail(reply, 404, `Division '${req.params.division}' not found`);
-    return reply.send({ success: true, data: districts });
+    return reply.send(districts);
   }
 
   async getAreas(req: FastifyRequest<{ Querystring: { zoneId?: string; district?: string } }>, reply: FastifyReply) {
@@ -81,24 +82,24 @@ class LogisticsController {
     let areas = bdAreas.getAllAreas();
     if (zoneId) areas = areas.filter((a) => a.zoneId === parseInt(zoneId, 10));
     if (district) areas = areas.filter((a) => a.districtId === district);
-    return reply.send({ success: true, data: areas });
+    return reply.send(areas);
   }
 
   async searchAreas(req: FastifyRequest<{ Querystring: { q: string; limit?: string } }>, reply: FastifyReply) {
     const { q, limit } = req.query;
     if (!q || q.length < 2) return fail(reply, 400, 'Search query must be at least 2 characters');
     const areas = bdSearchAreas(q, parseInt(limit as string, 10) || 20);
-    return reply.send({ success: true, data: areas });
+    return reply.send(areas);
   }
 
   async getAreasByPostCode(req: FastifyRequest<{ Querystring: { postCode: string } }>, reply: FastifyReply) {
     const code = Number(req.query.postCode);
     if (!Number.isFinite(code)) return fail(reply, 400, 'postCode must be numeric');
-    return reply.send({ success: true, data: getAreasByPostCode(code) });
+    return reply.send(getAreasByPostCode(code));
   }
 
   async getDeliveryZones(_req: FastifyRequest, reply: FastifyReply) {
-    return reply.send({ success: true, data: DELIVERY_ZONES });
+    return reply.send(DELIVERY_ZONES);
   }
 
   async estimateCharge(
@@ -118,13 +119,13 @@ class LogisticsController {
     const checkout = cfg?.checkout?.toObject ? cfg.checkout.toObject() : cfg?.checkout ?? {};
     const estimate = computeEstimate(area, amountNum, checkout);
 
-    return reply.send({ success: true, data: { area, ...estimate } });
+    return reply.send({ area, ...estimate });
   }
 
   // ── Pathao taxonomy (NEW — backed by @classytic/bd-areas/pathao) ──
 
   async getPathaoCities(_req: FastifyRequest, reply: FastifyReply) {
-    return reply.send({ success: true, data: PATHAO_CITIES });
+    return reply.send(PATHAO_CITIES);
   }
 
   async getPathaoZones(req: FastifyRequest<{ Params: { cityId: string } }>, reply: FastifyReply) {
@@ -132,14 +133,14 @@ class LogisticsController {
     if (!Number.isFinite(cityId)) return fail(reply, 400, 'cityId must be numeric');
     const city = findCity(cityId);
     if (!city) return fail(reply, 404, `Pathao city ${cityId} not found`);
-    return reply.send({ success: true, data: { city, zones: getZonesByCity(cityId) } });
+    return reply.send({ city, zones: getZonesByCity(cityId) });
   }
 
   async searchPathaoZones(req: FastifyRequest<{ Querystring: { q: string; limit?: string } }>, reply: FastifyReply) {
     const { q, limit } = req.query;
     if (!q || q.length < 2) return fail(reply, 400, 'Search query must be at least 2 characters');
     const results = searchPathaoZones(q, parseInt(limit as string, 10) || 20);
-    return reply.send({ success: true, data: results });
+    return reply.send(results);
   }
 
   // ── Quote ─────────────────────────────────────────────────────────
@@ -175,7 +176,7 @@ class LogisticsController {
         },
         getCtx(req),
       );
-      return reply.send({ success: true, data: quotes });
+      return reply.send(quotes);
     } catch (err) {
       return fail(reply, 400, (err as Error).message);
     }
@@ -203,7 +204,7 @@ class LogisticsController {
     }
     try {
       const result = await logisticsService.createShipment(body, getCtx(req));
-      return reply.send({ success: true, data: result });
+      return reply.send(result);
     } catch (err) {
       const e = err as Error;
       const notFound = /not found/i.test(e.message);
@@ -216,14 +217,11 @@ class LogisticsController {
       const result = await logisticsService.trackShipment(req.params.id, getCtx(req));
       const f = result.fulfillment as Record<string, unknown>;
       return reply.send({
-        success: true,
-        data: {
-          fulfillmentNumber: f.fulfillmentNumber,
-          orderNumber: f.orderNumber,
-          status: f.status,
-          trackingInfo: f.trackingInfo,
-          tracking: result.tracking,
-        },
+        fulfillmentNumber: f.fulfillmentNumber,
+        orderNumber: f.orderNumber,
+        status: f.status,
+        trackingInfo: f.trackingInfo,
+        tracking: result.tracking,
       });
     } catch (err) {
       const e = err as Error;
@@ -244,14 +242,11 @@ class LogisticsController {
       );
       const f = result.fulfillment as Record<string, unknown>;
       return reply.send({
-        success: true,
-        data: {
-          fulfillmentNumber: f.fulfillmentNumber,
-          orderNumber: f.orderNumber,
-          status: f.status,
-          trackingInfo: f.trackingInfo,
-          voided: result.voided,
-        },
+        fulfillmentNumber: f.fulfillmentNumber,
+        orderNumber: f.orderNumber,
+        status: f.status,
+        trackingInfo: f.trackingInfo,
+        voided: result.voided,
       });
     } catch (err) {
       const e = err as Error;
@@ -269,12 +264,12 @@ class LogisticsController {
         const adapter = carrierRegistry.get('redx') as unknown as {
           listPickupStores: () => Promise<unknown[]>;
         };
-        return reply.send({ success: true, data: await adapter.listPickupStores() });
+        return reply.send(await adapter.listPickupStores());
       }
       if (provider === 'pathao') {
         const adapter = carrierRegistry.pathao();
         if (!adapter) return fail(reply, 400, 'Pathao not configured');
-        return reply.send({ success: true, data: await adapter.listStores() });
+        return reply.send(await adapter.listStores());
       }
       return fail(reply, 400, `Pickup stores not supported for ${provider}`);
     } catch (err) {
@@ -322,7 +317,7 @@ class LogisticsController {
 
     // MongoKit Repository.getAll takes `{ filters, page, limit, sort }` as a
     // single options bag and returns an OffsetPaginationResult envelope
-    // `{ docs, total, page, limit, pages, hasNext, hasPrev }`. The previous
+    // `{ data, total, page, limit, pages, hasNext, hasPrev }`. The previous
     // `getAll(filter, opts)` call + array cast silently returned an object,
     // so `.map()` crashed at runtime on the first use. See order.resource.ts
     // line 240 for the canonical invocation.
@@ -331,10 +326,10 @@ class LogisticsController {
       limit,
       sort: '-createdAt',
       ...repoOptionsFromCtx(orderCtx),
-    })) as unknown as { docs?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
+    })) as unknown as { data?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
     const orders: Array<Record<string, unknown>> = Array.isArray(pageResult)
       ? pageResult
-      : (pageResult.docs ?? []);
+      : (pageResult.data ?? []);
 
     // Batch-fetch fulfillments keyed by orderNumber so we can read the
     // authoritative shippingAddress for each row. Per @classytic/order, the
@@ -351,11 +346,11 @@ class LogisticsController {
         limit: orderNumbers.length,
         ...repoOptionsFromCtx(orderCtx),
       })) as unknown as
-        | { docs?: Array<Record<string, unknown>> }
+        | { data?: Array<Record<string, unknown>> }
         | Array<Record<string, unknown>>;
       const fulfillmentDocs: Array<Record<string, unknown>> = Array.isArray(fulfillmentPage)
         ? fulfillmentPage
-        : (fulfillmentPage.docs ?? []);
+        : (fulfillmentPage.data ?? []);
       fulfillmentsByOrder = new Map(
         fulfillmentDocs.map((f) => [String(f.orderNumber), f] as const),
       );
@@ -392,7 +387,7 @@ class LogisticsController {
       const headers = req.headers as Record<string, string>;
       const carrier = req.params.provider as 'redx' | 'pathao' | 'steadfast';
       await logisticsService.processWebhook(carrier, req.body, headers, ctx);
-      return reply.send({ success: true });
+      return reply.send(null);
     } catch (err) {
       req.server.log.error({ err }, 'Webhook processing error');
       return fail(reply, 400, (err as Error).message);
@@ -480,10 +475,16 @@ export function orderToPathaoRow(
   const metadata = (order.metadata as Record<string, unknown> | undefined) ?? {};
   const notes = (metadata.notes as string | undefined) ?? (order.notes as string | undefined);
 
+  // Snapshot guard: `addr.name` lands on the order's shipping address from
+  // checkout (or POS) and could carry a Better Auth nanoid (e.g.
+  // `gcqAUBgGpRnDZbyPgKbS`) for OAuth users who never set a profile name.
+  // Pathao / RedX bulk-upload CSVs would expose that to the carrier — fall
+  // back to a generic "Customer" label so the courier label still prints.
+  const rawRecipient = String(addr.name ?? addr.recipientName ?? '').trim();
   return {
     itemType: 'parcel',
     merchantOrderId: String(order.orderNumber ?? order._id ?? '').slice(-12),
-    recipientName: String(addr.name ?? addr.recipientName ?? '').trim(),
+    recipientName: sanitizeDisplayName(rawRecipient, 'Customer'),
     recipientPhone: phone,
     recipientAddress: addressLines || line1,
     recipientCity: cityName,

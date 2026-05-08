@@ -82,13 +82,13 @@ class BranchRepository extends Repository<IBranchOrg> {
    * Get default branch, creating one if none exists
    */
   async getDefaultBranch(): Promise<IBranchOrg> {
-    let defaultBranch: any = await this.Model.findOne({ isDefault: true, isActive: true }).lean();
+    let defaultBranch: any = await this.getByQuery({ isDefault: true, isActive: true });
 
     if (!defaultBranch) {
-      const anyBranch = await this.Model.findOne({ isActive: true }).lean();
+      const anyBranch = await this.getByQuery({ isActive: true });
 
       if (anyBranch) {
-        await this.Model.updateOne({ _id: anyBranch._id }, { isDefault: true });
+        await this.update(String(anyBranch._id), { isDefault: true });
         defaultBranch = { ...anyBranch, isDefault: true };
       } else {
         // Create default branch as BA org
@@ -116,17 +116,17 @@ class BranchRepository extends Repository<IBranchOrg> {
    * Get head office branch
    */
   async getHeadOffice(): Promise<IBranchOrg | null> {
-    let headOffice: any = await this.Model.findOne({ branchRole: 'head_office', isActive: true }).lean();
+    let headOffice: any = await this.getByQuery({ branchRole: 'head_office', isActive: true });
 
     if (!headOffice) {
       // Try old field name
-      headOffice = await this.Model.findOne({ role: 'head_office', isActive: true }).lean();
+      headOffice = await this.getByQuery({ role: 'head_office', isActive: true });
     }
 
     if (!headOffice) {
       const defaultBranch = await this.getDefaultBranch();
       if (defaultBranch) {
-        await this.Model.updateOne({ _id: defaultBranch._id }, { branchRole: 'head_office' });
+        await this.update(String(defaultBranch._id), { branchRole: 'head_office' });
         headOffice = { ...defaultBranch, branchRole: 'head_office', role: 'head_office' };
       }
     }
@@ -139,7 +139,7 @@ class BranchRepository extends Repository<IBranchOrg> {
    * Check if a branch is head office
    */
   async isHeadOffice(branchId: string): Promise<boolean> {
-    const branch: any = await this.Model.findById(branchId).select('branchRole role').lean();
+    const branch: any = await this.getById(branchId);
     return branch?.branchRole === 'head_office' || branch?.role === 'head_office';
   }
 
@@ -147,12 +147,13 @@ class BranchRepository extends Repository<IBranchOrg> {
    * Get all sub-branches
    */
   async getSubBranches(): Promise<IBranchOrg[]> {
-    return this.Model.find({
-      branchRole: { $ne: 'head_office' },
-      isActive: true,
-    })
-      .sort({ name: 1 })
-      .lean() as Promise<IBranchOrg[]>;
+    return this.findAll(
+      {
+        branchRole: { $ne: 'head_office' },
+        isActive: true,
+      },
+      { sort: { name: 1 } },
+    ) as Promise<IBranchOrg[]>;
   }
 
   /**
@@ -163,17 +164,26 @@ class BranchRepository extends Repository<IBranchOrg> {
   }
 
   /**
-   * Get branch by code
+   * Get branch by code.
+   *
+   * Mongoose `strictQuery` strips filter keys that aren't declared in the
+   * schema. The OrgModel here uses an empty stub schema (`new Schema({},
+   * { strict: false })`), so a stricter Mongoose default at the connection
+   * level can silently drop `code` from the query, falling back to
+   * `findOne({ isActive: true })` and returning the first active org.
+   * Drop into the raw collection to keep the filter intact.
    */
   async getByCode(code: string): Promise<IBranchOrg | null> {
-    return this.Model.findOne({ code: code.toUpperCase(), isActive: true }).lean() as Promise<IBranchOrg | null>;
+    const collection = this.Model.collection;
+    const result = await collection.findOne({ code: code.toUpperCase(), isActive: true });
+    return result as IBranchOrg | null;
   }
 
   /**
    * Get all active branches
    */
   async getActiveBranches(): Promise<IBranchOrg[]> {
-    return this.Model.find({ isActive: true }).sort({ isDefault: -1, name: 1 }).lean() as Promise<IBranchOrg[]>;
+    return this.findAll({ isActive: true }, { sort: { isDefault: -1, name: 1 } }) as Promise<IBranchOrg[]>;
   }
 
   /**
@@ -184,10 +194,13 @@ class BranchRepository extends Repository<IBranchOrg> {
   }
 
   /**
-   * Override getById to normalize role field
+   * Override getById to normalize role field. Forwards mongokit options
+   * (`select`, `lean`, `throwOnNotFound`, `cache`) to the base implementation
+   * — narrowing the signature here would block consumers from using the
+   * standard repository contract.
    */
-  async getById(id: string): Promise<any> {
-    const doc: any = await super.getById(id);
+  async getById(id: string | mongoose.Types.ObjectId, options?: Record<string, unknown>): Promise<any> {
+    const doc: any = await super.getById(id as string, options);
     if (doc?.branchRole && !doc.role) {
       doc.role = doc.branchRole;
     }

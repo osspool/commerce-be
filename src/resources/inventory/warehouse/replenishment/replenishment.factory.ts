@@ -71,21 +71,15 @@ export function createReplenishmentResource() {
           );
 
           if (dryRun || !evaluation.triggers.length) {
-            return reply.send({
-              success: true,
-              data: { triggers: evaluation.triggers, ordersCreated: 0 },
-            });
+            return reply.send({ triggers: evaluation.triggers, ordersCreated: 0 });
           }
 
           const result = await flow().services.replenishment.generateDemand(evaluation, ctx);
           return reply.send({
-            success: true,
-            data: {
-              triggers: evaluation.triggers,
-              purchaseOrders: result.purchaseOrders,
-              transferGroups: result.transferGroups,
-              manufactureIntents: result.manufactureIntents,
-            },
+            triggers: evaluation.triggers,
+            purchaseOrders: result.purchaseOrders,
+            transferGroups: result.transferGroups,
+            manufactureIntents: result.manufactureIntents,
           });
         },
       },

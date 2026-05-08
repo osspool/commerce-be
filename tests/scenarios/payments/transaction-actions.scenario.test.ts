@@ -122,9 +122,9 @@ describe('action=verify', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = res.json();
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('verified');
-    expect(body.data.verifiedBy).toBe('tx-admin');
+
+    expect(body.status).toBe('verified');
+    expect(body.verifiedBy).toBe('tx-admin');
   });
 
   it('rejects callers without admin auth', async () => {
@@ -142,7 +142,6 @@ describe('action=refund', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = res.json();
-    expect(body.success).toBe(true);
 
     // Original is now refunded / partially_refunded; a refund-type doc was created.
     const { ensureRevenueEngine } = await import('#shared/revenue/engine.js');
@@ -169,8 +168,8 @@ describe('action=hold', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = res.json();
-    expect(body.success).toBe(true);
-    expect(body.data).toBeDefined();
+
+    expect(body).toBeDefined();
 
     const persisted = await mongoose.connection
       .collection('revenue_transactions')
@@ -199,7 +198,6 @@ describe('action=release', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = res.json();
-    expect(body.success).toBe(true);
 
     const { ensureRevenueEngine } = await import('#shared/revenue/engine.js');
     const txnModel = (await ensureRevenueEngine()).models.Transaction;
@@ -230,7 +228,6 @@ describe('action=split', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = res.json();
-    expect(body.success).toBe(true);
 
     const persisted = await mongoose.connection
       .collection('revenue_transactions')

@@ -22,15 +22,16 @@
  * No translation layer between the API surface and the DB schema.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineAggregation, defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { allowPublic, fields } from '@classytic/arc/permissions';
 import type { CatalogEngine } from '@classytic/catalog/engine';
-import type { OffsetPaginationResult } from '@classytic/mongokit';
+import type { OffsetPaginationResult } from '@classytic/repo-core/pagination';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import type { AppContext } from '#core/app/context.js';
 import { costPriceFilterMiddleware } from '#shared/middleware/cost-price-filter.js';
-import { getResourcePermissions } from '#shared/permissions.js';
+import { getResourcePermissions, platformAdminOnly } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import { idParam, productIdParam, slugParam } from './product.catalog.schemas.js';
 import { getBySlug, getRecommendations, syncStock } from './product.handlers.js';
@@ -100,7 +101,7 @@ function wrapProductRepo(cat: CatalogEngine): ProductRepo {
       );
       return {
         method: 'offset',
-        docs: result.items,
+        data: result.items,
         total: result.total,
         page: result.page,
         pages: result.pages,
@@ -165,6 +166,81 @@ export default (ctx: AppContext) =>
     permissions: {
       ...getResourcePermissions('product'),
       delete: permissions.products.deleted,
+    },
+
+    // Catalog is global (no `organizationId` on Product — see `tenantField:
+    // false` above). These aggregations roll up the entire product catalog.
+    // Routes mount under `GET /products/aggregations/<name>`.
+    aggregations: {
+      // Status mix — draft / active / archived. Drives the catalog health
+      // tile on the merchandising dashboard.
+      productsByStatus: defineAggregation({
+        summary: 'Product count grouped by status (draft/active/archived)',
+        groupBy: 'status',
+        measures: {
+          count: 'count',
+          avgBasePrice: 'avg:defaultMonetization.pricing.basePrice.amount',
+        },
+        sort: { count: -1 },
+        permissions: platformAdminOnly(),
+        cache: { staleTime: 60, tags: ['products'] },
+      }),
+
+      // Category mix with price stats — feeds the category-by-revenue chart.
+      // No date range; the catalog row count is bounded by category cardinality
+      // even on a 100k-SKU book. Prefer top 100 to keep payload small.
+      productsByCategory: defineAggregation({
+        summary: 'Product count and price stats grouped by category slug',
+        groupBy: 'categorySlug',
+        measures: {
+          count: 'count',
+          avgBasePrice: 'avg:defaultMonetization.pricing.basePrice.amount',
+          minBasePrice: 'min:defaultMonetization.pricing.basePrice.amount',
+          maxBasePrice: 'max:defaultMonetization.pricing.basePrice.amount',
+        },
+        having: { categorySlug: { ne: null } },
+        sort: { count: -1 },
+        limit: 100,
+        permissions: platformAdminOnly(),
+        cache: { staleTime: 300, tags: ['products'] },
+        indexHint: { leadingKeys: ['categorySlug'] },
+      }),
+
+      // Daily product creations — feeds the catalog-velocity sparkline on the
+      // merchandising dashboard. Bounded to 180 days because `createdAt` may
+      // not have a dedicated index on the Product collection.
+      dailyProductCreations: defineAggregation({
+        summary: 'New products created per day',
+        dateBuckets: {
+          day: { field: 'createdAt', interval: 'day' },
+        },
+        measures: {
+          count: 'count',
+        },
+        sort: { day: 1 },
+        permissions: platformAdminOnly(),
+        requireDateRange: { field: 'createdAt', maxRangeDays: 180 },
+        cache: { staleTime: 300, tags: ['products'] },
+        indexHint: { leadingKeys: ['createdAt'] },
+      }),
+
+      // Price-band rollup using bucketed measures (min/max/avg only — true
+      // histogram bucketing would need `$bucket` which is not in the
+      // portable AggregationConfig surface). Grouping by `productType`
+      // gives a useful per-type price profile and is a low-cardinality key.
+      priceStatsByProductType: defineAggregation({
+        summary: 'Base price min/avg/max grouped by product type',
+        groupBy: 'productType',
+        measures: {
+          count: 'count',
+          minBasePrice: 'min:defaultMonetization.pricing.basePrice.amount',
+          avgBasePrice: 'avg:defaultMonetization.pricing.basePrice.amount',
+          maxBasePrice: 'max:defaultMonetization.pricing.basePrice.amount',
+        },
+        sort: { count: -1 },
+        permissions: platformAdminOnly(),
+        cache: { staleTime: 60, tags: ['products'] },
+      }),
     },
 
     routes: [

@@ -7,7 +7,7 @@ import {
   resolveLocationCode,
 } from '#resources/inventory/flow/location-resolver.js';
 import { ensureBranchBootstrapped } from '#resources/inventory/inventory-management.plugin.js';
-import type { PurchaseOrderDocument } from '../models/purchase-order.model.js';
+import type { PurchaseOrderDocument } from '../purchase-order.constants.js';
 
 export async function receiveItemsIntoStock(
   purchase: PurchaseOrderDocument,

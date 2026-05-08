@@ -132,10 +132,14 @@ describe('Phase 1 — Vendor Bills (A/P)', () => {
       status: 'received',
       receivedAt: new Date(),
       creditDays: 30,
-      grandTotal: 100_000,
+      // Purchase totals are persisted as BDT-major (e.g. grandTotal: 1000 = ৳1,000).
+      // The vendor-bill action converts to paisa via *100 before posting, so the
+      // resulting A/P credit on the JE is 1000 * 100 = 100_000 paisa. Tests assert
+      // on the paisa-side amount.
+      grandTotal: 1000,
       taxTotal: 0,
       paidAmount: 0,
-      dueAmount: 100_000,
+      dueAmount: 1000,
       paymentStatus: 'unpaid',
       items: [],
       createdAt: new Date(),
@@ -156,8 +160,7 @@ describe('Phase 1 — Vendor Bills (A/P)', () => {
     if (res.statusCode >= 400) console.log('[POST BILL FAIL]', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    billJeId = body.data.journalEntryId;
+    billJeId = body.journalEntryId;
 
     // Inspect the JE: AP line must carry partnerId + maturityDate
     const JE = mongoose.connection.db!.collection('journalentries');
@@ -177,8 +180,7 @@ describe('Phase 1 — Vendor Bills (A/P)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.grandTotal).toBeGreaterThan(0);
+    expect(body.grandTotal).toBeGreaterThan(0);
   });
 
   it('POST /vendor-bills/:id/action {action:"pay"} with partial amount matches part of the bill', async () => {
@@ -191,8 +193,7 @@ describe('Phase 1 — Vendor Bills (A/P)', () => {
     if (res.statusCode >= 400) console.log('[PAY FAIL]', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.journalEntryId).toBeTruthy();
+    expect(body.journalEntryId).toBeTruthy();
   });
 
   it('GET /reports/partner-ledger returns the supplier statement', async () => {
@@ -209,10 +210,9 @@ describe('Phase 1 — Vendor Bills (A/P)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
     // Statement should have at least 2 lines (bill + payment)
-    expect(Array.isArray(body.data.lines)).toBe(true);
-    expect(body.data.lines.length).toBeGreaterThanOrEqual(2);
+    expect(Array.isArray(body.lines)).toBe(true);
+    expect(body.lines.length).toBeGreaterThanOrEqual(2);
   });
 
   // ─── Adapter routes (arc auto-CRUD, filtered to A/P) ──────────────────────
@@ -259,10 +259,9 @@ describe('Phase 1 — Vendor Bills (A/P)', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
       // Arc spreads OffsetPaginationResult onto the root response
-      // (success, docs, page, limit, total, pages).
-      const docs: Array<{ _id: string }> = body.docs ?? body.data?.docs ?? body.data ?? [];
+      // (success, data, page, limit, total, pages).
+      const docs: Array<{ _id: string }> = body.data ?? [];
       expect(Array.isArray(docs)).toBe(true);
       expect(docs.some((d) => String(d._id) === billJeId)).toBe(true);
       expect(docs.some((d) => String(d._id) === nonApJeId)).toBe(false);
@@ -276,8 +275,7 @@ describe('Phase 1 — Vendor Bills (A/P)', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
-      expect(String(body.data._id)).toBe(billJeId);
+      expect(String(body._id)).toBe(billJeId);
     });
 
     it('GET /accounting/vendor-bills/:id returns 404 for a non-A/P JE', async () => {
@@ -297,8 +295,7 @@ describe('Phase 1 — Vendor Bills (A/P)', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
-      expect(Array.isArray(body.data)).toBe(true);
+      expect(Array.isArray(body)).toBe(true);
     });
 
     it('POST /accounting/vendor-bills is disabled (405/404)', async () => {

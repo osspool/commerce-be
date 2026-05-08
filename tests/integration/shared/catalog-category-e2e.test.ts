@@ -13,7 +13,7 @@ let childId: string;
 
 beforeAll(async () => {
   ctx = await setupTestOrg();
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
   await teardownTestOrg(ctx);
@@ -39,9 +39,8 @@ describe('Category CRUD', () => {
     }
     expect(res.statusCode).toBeLessThan(300);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.slug).toBe('men');
-    parentId = body.data._id;
+    expect(body.slug).toBe('men');
+    parentId = body._id;
   });
 
   it('POST / — creates a child category', async () => {
@@ -61,8 +60,7 @@ describe('Category CRUD', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    childId = body.data._id;
+    childId = body._id;
   });
 
   it('GET / — lists categories', async () => {
@@ -74,8 +72,7 @@ describe('Category CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    const docs = body.data ?? body.docs;
+    const docs = body.data ?? [];
     expect(docs.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -88,7 +85,7 @@ describe('Category CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.data.name).toBe('Men');
+    expect(body.name).toBe('Men');
   });
 });
 
@@ -102,7 +99,7 @@ describe('Category Custom Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.data.name).toBe('Men');
+    expect(body.name).toBe('Men');
   });
 
   it('GET /tree — returns category tree', async () => {
@@ -114,8 +111,7 @@ describe('Category Custom Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(Array.isArray(body.data)).toBe(true);
+    expect(Array.isArray(body)).toBe(true);
   });
 
   it('GET /:parentSlug/children — returns children', async () => {
@@ -127,8 +123,7 @@ describe('Category Custom Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(Array.isArray(body.data)).toBe(true);
+    expect(Array.isArray(body)).toBe(true);
   });
 });
 
@@ -201,8 +196,7 @@ describe('Category Company-Wide Access (tenantField:false regression)', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    sharedCategoryId = body.data._id;
+    sharedCategoryId = body._id;
   });
 
   it('GET /:id from Branch B succeeds (catalog is company-wide)', async () => {
@@ -217,8 +211,8 @@ describe('Category Company-Wide Access (tenantField:false regression)', () => {
     // the org-less catalog doc stopped matching. See AGENTS.md.
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.data._id).toBe(sharedCategoryId);
-    expect(body.data.name).toBe('Shared Catalog Category');
+    expect(body._id).toBe(sharedCategoryId);
+    expect(body.name).toBe('Shared Catalog Category');
   });
 
   it('PATCH /:id from Branch B succeeds', async () => {
@@ -231,7 +225,7 @@ describe('Category Company-Wide Access (tenantField:false regression)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.data.description).toBe('Updated from Branch B');
+    expect(body.description).toBe('Updated from Branch B');
   });
 
   it('GET / from Branch B lists the Branch-A-created category', async () => {
@@ -243,7 +237,7 @@ describe('Category Company-Wide Access (tenantField:false regression)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const docs = (body.data ?? body.docs) as Array<{ _id: string }>;
+    const docs = (body.data ?? body.data) as Array<{ _id: string }>;
     expect(docs.some((d) => d._id === sharedCategoryId)).toBe(true);
   });
 

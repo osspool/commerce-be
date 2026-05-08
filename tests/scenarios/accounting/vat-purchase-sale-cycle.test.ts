@@ -217,11 +217,11 @@ describe('VAT Purchase-Sale Cycle', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.isValid).toBe(true);
-    expect(body.data.bin).toBe(VALID_BIN);
+
+    expect(body.isValid).toBe(true);
+    expect(body.bin).toBe(VALID_BIN);
     // Formatted output should not equal raw (some separator/style applied)
-    expect(typeof body.data.formatted).toBe('string');
+    expect(typeof body.formatted).toBe('string');
   });
 
   // ─── 2. BIN validation — invalid ───────────────────────────────────────
@@ -234,8 +234,8 @@ describe('VAT Purchase-Sale Cycle', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.isValid).toBe(false);
+
+    expect(body.isValid).toBe(false);
   });
 
   // ─── Purchase → Receive (standard-rated) ───────────────────────────────
@@ -256,8 +256,8 @@ describe('VAT Purchase-Sale Cycle', () => {
     if (res.statusCode !== 201) console.log('Purchase create:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    purchaseId = body.data._id;
+
+    purchaseId = body._id;
     expect(purchaseId).toBeTruthy();
   });
 
@@ -271,8 +271,8 @@ describe('VAT Purchase-Sale Cycle', () => {
     if (res.statusCode !== 200) console.log('Purchase receive:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('received');
+
+    expect(body.status).toBe('received');
   });
 
   // ─── 8. Input VAT posted to 1150.* on purchase receive ──────────────
@@ -342,9 +342,9 @@ describe('VAT Purchase-Sale Cycle', () => {
     if (res.statusCode !== 201) console.log('POS order:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    orderId = body.data._id;
-    orderNumber = body.data.orderNumber ?? body.data.publicId;
+
+    orderId = body._id;
+    orderNumber = body.orderNumber ?? body.publicId;
     expect(orderId).toBeTruthy();
   });
 
@@ -354,7 +354,7 @@ describe('VAT Purchase-Sale Cycle', () => {
       url: `${API}/orders/${orderId}`,
       headers: auth.as('admin').headers,
     });
-    const order = parse(orderRes.body)?.data;
+    const order = parse(orderRes.body);
     const lines = order?.lines ?? [];
 
     const ffRes = await server.inject({
@@ -370,7 +370,7 @@ describe('VAT Purchase-Sale Cycle', () => {
     });
     if (ffRes.statusCode !== 201) console.log('Fulfillment create:', ffRes.statusCode, ffRes.body);
     expect(ffRes.statusCode).toBe(201);
-    const ffBody = parse(ffRes.body)?.data as { _id?: string; fulfillmentNumber?: string };
+    const ffBody = parse(ffRes.body) as { _id?: string; fulfillmentNumber?: string };
     fulfillmentId = ffBody?._id ?? '';
     const fulfillmentNumber = ffBody?.fulfillmentNumber;
     expect(fulfillmentNumber).toBeTruthy();
@@ -447,9 +447,8 @@ describe('VAT Purchase-Sale Cycle', () => {
       console.log('Musok generate:', res.statusCode, res.body);
     }
     expect([200, 201]).toContain(res.statusCode);
-    const body = parse(res.body);
-    expect(body.success).toBe(true);
-    const data = body.data;
+    const data = parse(res.body);
+
     musokInvoiceId = data._id;
     musokSerial = data.mushakSerial;
     expect(musokInvoiceId).toBeTruthy();
@@ -488,10 +487,10 @@ describe('VAT Purchase-Sale Cycle', () => {
     });
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
+
     expect(body.idempotent).toBe(true);
-    expect(body.data.mushakSerial).toBe(musokSerial);
-    expect(body.data._id?.toString()).toBe(musokInvoiceId?.toString());
+    expect(body.mushakSerial).toBe(musokSerial);
+    expect(body._id?.toString()).toBe(musokInvoiceId?.toString());
   });
 
   // ─── 13. Invoice line items include VAT fields ─────────────────────────
@@ -503,7 +502,7 @@ describe('VAT Purchase-Sale Cycle', () => {
       headers: auth.as('admin').headers,
     });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data;
+    const data = parse(res.body);
     const lines = data?.lines ?? [];
     expect(lines.length).toBeGreaterThan(0);
     const line = lines[0];
@@ -530,7 +529,7 @@ describe('VAT Purchase-Sale Cycle', () => {
       },
     });
     expect(posRes.statusCode).toBe(201);
-    orderId2 = parse(posRes.body)?.data?._id;
+    orderId2 = parse(posRes.body)?._id;
     expect(orderId2).toBeTruthy();
 
     const genRes = await server.inject({
@@ -547,7 +546,7 @@ describe('VAT Purchase-Sale Cycle', () => {
       },
     });
     expect([200, 201]).toContain(genRes.statusCode);
-    const second = parse(genRes.body)?.data;
+    const second = parse(genRes.body);
     expect(second.mushakSerial).toBeTruthy();
     expect(second.mushakSerial).not.toBe(musokSerial);
     // Format match: branchCode/YYYY/NNNNNN
@@ -576,18 +575,18 @@ describe('VAT Purchase-Sale Cycle', () => {
     if (res.statusCode !== 200) console.log('Musok return:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data).toBeDefined();
-    expect(Array.isArray(body.data.aggregates)).toBe(true);
+
+    expect(body).toBeDefined();
+    expect(Array.isArray(body.aggregates)).toBe(true);
 
     // At least one aggregate bucket for the 15% standard rate
-    const std = body.data.aggregates.find((a: any) => a._id === 15);
+    const std = body.aggregates.find((a: any) => a._id === 15);
     expect(std).toBeDefined();
     expect(std.vatAmount).toBeGreaterThan(0);
     expect(std.taxableBase).toBeGreaterThan(0);
 
     // Mushak 9.1 return object
-    const ret = body.data.return;
+    const ret = body.return;
     expect(ret).toBeDefined();
   });
 
@@ -596,6 +595,24 @@ describe('VAT Purchase-Sale Cycle', () => {
   it('Mushak 9.1 inputVatCredit reflects input VAT from purchases', async () => {
     await outbox.relay();
     await new Promise((r) => setTimeout(r, 300));
+
+    // Vendor-bill JEs land as DRAFT (matches ERPNext / Odoo review
+    // semantics — see vendor-bill.contract.ts `autoPost: false`). The
+    // tax aggregator only sums `state: 'posted'` entries because draft
+    // amounts can still change. Post the bill JE before filing the
+    // monthly return — that's what a real cashier does in the UI.
+    const jeCol = mongoose.connection.db!.collection('journalentries');
+    const draftPurchaseJes = await jeCol
+      .find({ journalType: 'PURCHASES', state: 'draft' })
+      .toArray();
+    for (const je of draftPurchaseJes) {
+      await server.inject({
+        method: 'POST',
+        url: `${API}/accounting/journal-entries/${je._id}/action`,
+        headers: auth.as('admin').headers,
+        payload: { action: 'post' },
+      });
+    }
 
     const now = new Date();
     const period = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -606,7 +623,7 @@ describe('VAT Purchase-Sale Cycle', () => {
       headers: auth.as('admin').headers,
     });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data;
+    const data = parse(res.body);
     const ret = data?.return;
 
     // Mushak 9.1 return structured as NBR's 19-line format; line 9 is input VAT credit.
@@ -634,7 +651,7 @@ describe('VAT Purchase-Sale Cycle', () => {
       headers: auth.as('admin').headers,
     });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data;
+    const data = parse(res.body);
     const aggregates = data?.aggregates ?? [];
     const ret = data?.return ?? {};
 
@@ -650,49 +667,43 @@ describe('VAT Purchase-Sale Cycle', () => {
     expect(ret.netPayable).toBeGreaterThanOrEqual(0);
   });
 
-  // ─── 12. [GAP] Products don't store hsCode / vatRateCode ───────────────
+  // ─── 12. Products carry first-class hsCode (compliance module enabled) ───
 
-  it('documents GAP: catalog products lack hsCode / canonical vatRateCode fields', async () => {
+  it('catalog products carry first-class hsCode through ComplianceMetadata', async () => {
     const col = mongoose.connection.db!.collection('catalog_products');
     const product = await col.findOne({ _id: new mongoose.Types.ObjectId(productStdId) });
     expect(product).toBeDefined();
 
+    // Schema-level: compliance is now wired (catalog.engine.ts: modules.compliance=true).
+    // The Mushak generator pulls hsCode through the invoice catalog bridge,
+    // which reads `compliance.exportControl.hsCode` (canonical path) with a
+    // fallback to the legacy flat `compliance.hsCode`.
+    let schemaHasComplianceField = false;
+    try {
+      const ProductModel = mongoose.model('Product');
+      const paths = Object.keys((ProductModel.schema as any).paths || {});
+      schemaHasComplianceField = paths.some(
+        (p) => p === 'compliance' || p.toLowerCase().startsWith('compliance.'),
+      );
+    } catch {
+      // Model not registered — leave as false
+    }
+    expect(schemaHasComplianceField).toBe(true);
+
+    // The seeded product has tax metadata that survived persistence; the
+    // bridge happily resolves whatever the host wrote (either canonical
+    // `compliance.exportControl.hsCode` or the legacy flat shape).
     const hasHsCode = product && (
       'hsCode' in product ||
       (product.tax as any)?.hsCode ||
-      (product.identifiers as any)?.hsCode
+      (product.identifiers as any)?.hsCode ||
+      (product.compliance as any)?.hsCode ||
+      (product.compliance as any)?.exportControl?.hsCode
     );
     const hasVatRateCode = product && (
       'vatRateCode' in product ||
       (product.tax as any)?.vatRateCode
     );
-
-    // We seeded tax.vatRateCode manually — but the catalog SCHEMA has no such field.
-    // Query the schema paths on the mongoose model for truth.
-    let schemaHasHsCode = false;
-    let schemaHasVatRateCode = false;
-    try {
-      const ProductModel = mongoose.model('Product');
-      const paths = Object.keys((ProductModel.schema as any).paths || {});
-      schemaHasHsCode = paths.some((p) => p.toLowerCase().includes('hscode'));
-      schemaHasVatRateCode = paths.some((p) => p.toLowerCase().includes('vatratecode'));
-    } catch {
-      // Model not registered — treat as missing
-    }
-
-    if (!schemaHasHsCode || !schemaHasVatRateCode) {
-      console.warn(
-        '[GAP] Catalog product schema missing VAT compliance fields: ' +
-        `hsCode=${schemaHasHsCode ? 'present' : 'MISSING'}, ` +
-        `vatRateCode=${schemaHasVatRateCode ? 'present' : 'MISSING'}. ` +
-        'Mushak 6.3 line items require HS code for customs & NBR reporting. ' +
-        'Currently tax rate must be passed per-invoice at generation time.',
-      );
-    }
-    expect(schemaHasHsCode).toBe(false);
-    expect(schemaHasVatRateCode).toBe(false);
-
-    // Separately — whatever we stored ad-hoc survived, but it's not first-class
     expect(hasVatRateCode || hasHsCode).toBeTruthy();
   });
 
@@ -712,7 +723,7 @@ describe('VAT Purchase-Sale Cycle', () => {
       },
     });
     expect(posRes.statusCode).toBe(201);
-    const discountOrderId = parse(posRes.body)?.data?._id;
+    const discountOrderId = parse(posRes.body)?._id;
 
     const DISCOUNT = 10000; // 100 BDT discount
     const genRes = await server.inject({
@@ -736,7 +747,7 @@ describe('VAT Purchase-Sale Cycle', () => {
       },
     });
     expect([200, 201]).toContain(genRes.statusCode);
-    const inv = parse(genRes.body)?.data;
+    const inv = parse(genRes.body);
     const line = inv.lines?.[0];
     expect(line).toBeDefined();
 
@@ -769,10 +780,10 @@ describe('VAT Purchase-Sale Cycle', () => {
     if (res.statusCode !== 200) console.log('Cancel:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('cancelled');
-    expect(body.data.cancelReason).toBe('test cancellation');
-    expect(body.data.cancelledAt).toBeTruthy();
+
+    expect(body.status).toBe('cancelled');
+    expect(body.cancelReason).toBe('test cancellation');
+    expect(body.cancelledAt).toBeTruthy();
   });
 
   // ─── Final: Summary of remaining gaps ───────────────────────────────────

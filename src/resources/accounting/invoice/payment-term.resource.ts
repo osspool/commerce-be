@@ -13,7 +13,8 @@
  * (PaymentTermService.computeSchedule), not state mutation.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
 import { computeInstallmentSchedule } from './invoice.handlers.js';

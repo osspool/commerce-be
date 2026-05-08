@@ -58,6 +58,11 @@ export class ArchiveRepository extends Repository<IArchive> {
       throw new Error(`Unsupported archive type: ${type}. Supported types: transaction, stock_movement`);
     }
 
+    // NOTE: cannot route through `this.cursor(match)` here — `this.Model`
+    // is the IArchive collection, but `Model` is the FOREIGN model being
+    // archived (currently revenue's Transaction). `repo.cursor()` (mongokit
+    // 3.13) only streams `this.Model`, so it's the wrong primitive for
+    // archiving rows out of a different collection.
     const cursor = Model.find(match).lean().cursor();
     const fileName = `${type}-${organizationId || 'org'}.json`;
     const filePath = path.join(ARCHIVE_DIR, fileName);

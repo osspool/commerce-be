@@ -9,6 +9,7 @@ import { type OrderContext, repoOptionsFromCtx } from '@classytic/order';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ensureOrderEngine } from '#resources/sales/orders/order.engine.js';
 import { getRevenueEngine } from '#shared/revenue/engine.js';
+import { ConflictError, NotFoundError, UnauthorizedError, createError } from '@classytic/arc/utils';
 
 interface VerifyManualPaymentBody {
   transactionId: string;
@@ -31,7 +32,7 @@ export async function verifyManualPayment(request: FastifyRequest, reply: Fastif
   try {
     const verifiedBy = getUserId(request);
     if (!verifiedBy) {
-      return reply.code(401).send({ success: false, message: 'User authentication required for verification' });
+      throw new UnauthorizedError('User authentication required for verification');
     }
 
     const repo = getRevenueEngine().repositories.transaction;
@@ -43,9 +44,6 @@ export async function verifyManualPayment(request: FastifyRequest, reply: Fastif
     );
 
     return reply.code(200).send({
-      success: true,
-      message: 'Payment verified successfully',
-      data: {
         transactionId: String(txn._id),
         publicId: txn.publicId,
         status: txn.status,
@@ -53,17 +51,16 @@ export async function verifyManualPayment(request: FastifyRequest, reply: Fastif
         verifiedAt: txn.verifiedAt,
         verifiedBy: txn.verifiedBy,
         entity: txn.sourceModel && txn.sourceId ? { sourceModel: txn.sourceModel, sourceId: txn.sourceId } : null,
-      },
-    });
+      });
   } catch (error: unknown) {
     const err = error as Error & { name?: string };
     const statusCode =
       err.name === 'TransactionNotFoundError' ? 404 : err.name === 'InvalidStateTransitionError' ? 409 : 500;
 
     request.log.error({ transactionId, err: err.message, statusCode }, 'ERROR: Manual verification failed');
-    return reply
-      .code(statusCode)
-      .send({ success: false, message: err.message, error: err.name ?? 'VerificationError' });
+    if (err.name === 'TransactionNotFoundError') throw new NotFoundError(err.message);
+    if (err.name === 'InvalidStateTransitionError') throw new ConflictError(err.message);
+    throw createError(statusCode, err.message);
   }
 }
 
@@ -73,23 +70,23 @@ export async function rejectManualPayment(request: FastifyRequest, reply: Fastif
   try {
     const rejectedBy = getUserId(request);
     if (!rejectedBy) {
-      return reply.code(401).send({ success: false, message: 'User authentication required for rejection' });
+      throw new UnauthorizedError('User authentication required for rejection');
     }
 
     const repo = getRevenueEngine().repositories.transaction;
     const txn = (await repo.getById(transactionId)) as Record<string, unknown> | null;
     if (!txn) {
-      return reply.code(404).send({ success: false, message: 'Transaction not found' });
+      throw new NotFoundError('Transaction not found');
     }
 
     if (txn.status === 'verified') {
-      return reply.code(409).send({ success: false, message: 'Cannot reject an already verified payment' });
+      throw new ConflictError('Cannot reject an already verified payment');
     }
     if (txn.status === 'failed') {
-      return reply.code(409).send({ success: false, message: 'Payment already rejected' });
+      throw new ConflictError('Payment already rejected');
     }
 
-    const updated = await repo.update(transactionId, {
+    await repo.update(transactionId, {
       status: 'failed',
       failureReason: reason,
       failedAt: new Date(),
@@ -126,18 +123,22 @@ export async function rejectManualPayment(request: FastifyRequest, reply: Fastif
 
     request.log.info({ transactionId, rejectedBy, reason }, 'OK: Manual payment rejected');
     return reply.code(200).send({
-      success: true,
-      message: 'Payment rejected',
-      data: {
-        transactionId: String((updated as any)?._id ?? transactionId),
+        transactionId,
         status: 'failed',
         failedAt: new Date(),
         failureReason: reason,
-      },
-    });
+      });
   } catch (error: unknown) {
-    const err = error as Error & { name?: string };
+    const err = error as Error & { name?: string; statusCode?: number };
+    // Re-throw Arc error subclasses directly — they already carry the correct
+    // HTTP status and will be rendered by Arc's global error handler. Wrapping
+    // them as createError(500, …) would lose the original status code.
+    if (err.name === 'NotFoundError' || err.name === 'ConflictError' || err.name === 'UnauthorizedError') {
+      throw error;
+    }
+    if (err.name === 'TransactionNotFoundError') throw new NotFoundError(err.message);
+    if (err.name === 'InvalidStateTransitionError') throw new ConflictError(err.message);
     request.log.error({ transactionId, err: err.message }, 'ERROR: Manual rejection failed');
-    return reply.code(500).send({ success: false, message: err.message });
+    throw createError(500, err.message);
   }
 }

@@ -84,19 +84,21 @@ async function placePrepaidOrder(unitPrice: number, quantity: number): Promise<{
   if (res.statusCode >= 400) {
     throw new Error(`placeOrder failed: ${res.statusCode} ${res.body}`);
   }
-  return (parse(res.body) as { data: { _id: string; orderNumber: string } }).data;
+  return parse(res.body) as { _id: string; orderNumber: string };
 }
 
-async function forceOrderDelivered(orderId: string): Promise<void> {
-  // RMA's createReturn requires order.status === 'delivered'. We bypass the
-  // full ship → deliver FSM here so the test stays focused on the refund
-  // ledger math rather than exercising fulfillment flows covered elsewhere.
+async function forceOrderFulfilled(orderId: string): Promise<void> {
+  // The change-confirmed-ledger-restock-bridge skips orders not in
+  // `fulfilled` / `completed` status (no COGS was posted at placement, so
+  // there's nothing to reverse). The test bypasses the full ship → fulfill
+  // FSM here so it stays focused on the refund ledger math, not on
+  // fulfillment flows covered elsewhere.
   const oid = new mongoose.Types.ObjectId(orderId);
   await mongoose.connection.db!.collection('orders').updateOne(
     { _id: oid },
     {
       $set: {
-        status: 'delivered',
+        status: 'fulfilled',
         deliveredAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
         'shipping.status': 'delivered',
         'shipping.deliveredAt': new Date(Date.now() - 24 * 60 * 60 * 1000),
@@ -105,18 +107,46 @@ async function forceOrderDelivered(orderId: string): Promise<void> {
   );
 }
 
-async function returnAction(
-  returnId: string,
+async function requestChange(
+  orderNumber: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> | null }> {
+  const res = await server.inject({
+    method: 'POST',
+    url: `${API}/order-changes/for-order/${orderNumber}`,
+    headers: auth.as('admin').headers,
+    payload: body,
+  });
+  return { status: res.statusCode, body: parse(res.body) };
+}
+
+async function changeAction(
+  changeId: string,
   action: string,
   extra: Record<string, unknown> = {},
 ): Promise<{ status: number; body: Record<string, unknown> | null }> {
   const res = await server.inject({
     method: 'POST',
-    url: `${API}/sales/returns/${returnId}/action`,
+    url: `${API}/order-changes/${changeId}/action`,
     headers: auth.as('admin').headers,
     payload: { action, ...extra },
   });
   return { status: res.statusCode, body: parse(res.body) };
+}
+
+async function setPaymentDelta(changeNumber: string, refundAmount: number): Promise<void> {
+  // The kernel computes `paymentDelta.refundAmount` from the change actions
+  // and order-line prices when the change is requested. To test the
+  // "inspection override" invariant — that the refund handler uses whatever
+  // amount lands on the change, not the gross — we override the field
+  // before `confirm` fires. Mirrors what an inspection-mode disposition
+  // would do, just done directly so the test stays focused on the ledger.
+  await mongoose.connection.db!
+    .collection('order_changes')
+    .updateOne(
+      { changeNumber },
+      { $set: { 'paymentDelta.refundAmount': { amount: refundAmount, currency: 'BDT' } } },
+    );
 }
 
 async function drainOutbox(): Promise<number> {
@@ -170,18 +200,6 @@ async function creditOn(entry: Record<string, unknown>, code: string): Promise<n
   return itemsOf(entry).find((i) => i.account?.toString() === id)?.credit ?? 0;
 }
 
-// Return-source journals (COGS reversal posts with sourceRef.sourceModel='Return').
-async function getJournalEntriesForReturn(returnId: string): Promise<Record<string, unknown>[]> {
-  const col = mongoose.connection.db!.collection('journalentries');
-  const oid = mongoose.Types.ObjectId.isValid(returnId) ? new mongoose.Types.ObjectId(returnId) : null;
-  return col
-    .find({
-      'sourceRef.sourceModel': 'Return',
-      $or: [{ 'sourceRef.sourceId': returnId }, ...(oid ? [{ 'sourceRef.sourceId': oid }] : [])],
-    })
-    .sort({ createdAt: 1 })
-    .toArray() as Promise<Record<string, unknown>[]>;
-}
 
 // ─── Setup ──────────────────────────────────────────────────────────────────
 
@@ -215,7 +233,7 @@ const ctx = await setupBetterAuthTestApp({
       { key: 'admin', email: adminEmail, password: 'TestPass123!', name: 'RMA Admin', role: 'admin', isCreator: true },
     ],
     addMember: async (data) => {
-      const r = await getAuth().api.addMember({ body: { organizationId: data.organizationId ?? data.orgId, userId: data.userId, role: data.role } });
+      const r = await getAuth().api.addMember({ body: { organizationId: data.orgId, userId: data.userId, role: data.role } });
       return { statusCode: r ? 200 : 500, body: '' };
     },
   });
@@ -245,7 +263,14 @@ const ctx = await setupBetterAuthTestApp({
     productType: 'physical',
     status: 'active',
     defaultMonetization: {
-      pricing: { basePrice: { amount: 50000, currency: 'BDT' } },
+      pricing: {
+        basePrice: { amount: 50000, currency: 'BDT' },
+        // `defaultProductCostLookup` reads cost from
+        // `defaultMonetization.pricing.costPrice.amount` (paisa). The COGS
+        // reversal pipeline calls the lookup when `line.snapshot.costPrice`
+        // is missing on the order line.
+        costPrice: { amount: 30000, currency: 'BDT' },
+      },
       // Cost is required for the COGS-reversal assertion below — the catalog
       // bridge snaps this onto `line.snapshot.costPrice` and COGS / reversal
       // contracts both multiply it by line qty.
@@ -274,68 +299,61 @@ afterAll(async () => {
 
 // ─── Scenarios ──────────────────────────────────────────────────────────────
 
-describe('RMA partial refund — inspection override translates to ledger', () => {
-  it('partial refund posts a reversal for the inspection amount (not the gross line total)', async () => {
-    // 2 units × 500 BDT each = 1000 BDT line total. Admin inspects and
-    // decides only 60% is refundable (damaged on return, or customer
-    // used part of the product). Expected reversal: 600 BDT on revenue,
-    // not 1000.
+/**
+ * RMA partial-refund ledger invariants — driven through the `/order-changes`
+ * state machine (legacy `/sales/returns` API has been removed).
+ *
+ * Flow per test:
+ *   1. Place a prepaid order — placement JE posts.
+ *   2. Force `delivered` (RMA prerequisite).
+ *   3. POST /order-changes/for-order/:orderNumber  →  draft change.
+ *   4. (Partial-amount test only) override `paymentDelta.refundAmount` on
+ *      the change — mirrors what an inspection-mode disposition would do.
+ *   5. POST /order-changes/:id/action {action:'confirm'}  →  fires
+ *      `order:change.confirmed` → `change-confirmed-refund.handler` posts
+ *      the revenue reversal JE; `change-confirmed-ledger-restock-bridge`
+ *      publishes `accounting:return.restocked` for the COGS reversal JE.
+ *
+ * Load-bearing invariant: the DEBIT on 4111 in the reversal JE equals the
+ * `paymentDelta.refundAmount` on the change at confirm time, NOT the gross
+ * line total.
+ */
+describe('RMA partial refund — paymentDelta override translates to ledger', () => {
+  it('partial refund posts a reversal for the override amount (not the gross line total)', async () => {
+    // 2 units × 500 BDT = 1000 BDT line total. The override sets the
+    // refundable value to 600 BDT — what an inspection-mode disposition
+    // would land at. Expected reversal: 600 BDT on revenue, not 1000.
     const unitPrice = 50000; // paisa
     const quantity = 2;
     const order = await placePrepaidOrder(unitPrice, quantity);
     await flush();
 
-    // Sanity check: placement posted one journal entry (the sales capture).
     const afterPlacement = await getJournalEntriesForOrder(order._id);
     expect(afterPlacement.length).toBe(1);
 
-    await forceOrderDelivered(order._id);
+    await forceOrderFulfilled(order._id);
 
-    // Create the return — the full qty, but the refund amount will be
-    // overridden at inspection time. This mirrors the CS workflow: admin
-    // opens the return, then decides the refundable value on receipt.
-    const createRes = await server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns`,
-      headers: auth.as('admin').headers,
-      payload: {
-        orderId: order._id,
-        // The catalog bridge stamps `snapshot.sku = product._id` for simple
-        // products (Flow's skuRef convention). normalizeOrderItems compares
-        // `(line.sku || null) === (item.variantSku || null)`, so we pass the
-        // productId as variantSku to match the stamped snapshot. For real
-        // variants this would be the variant sku.
-        items: [{ productId, variantSku: productId, quantity, reason: 'damaged' }],
-        refundMethod: 'original',
-        notes: 'Customer reports product damaged in transit',
-      },
+    const create = await requestChange(order.orderNumber, {
+      changeType: 'return',
+      actions: [{ type: 'return_item', orderLineId: 'line_0', quantity }],
+      reason: 'Customer reports product damaged in transit',
     });
-    expect(createRes.statusCode, `create return failed: ${createRes.body}`).toBeLessThan(400);
-    const returnDoc = (parse(createRes.body) as { data: { _id: string } }).data;
+    expect(create.status, `requestChange failed: ${JSON.stringify(create.body)}`).toBeLessThan(400);
+    const change = (create.body as { changeNumber: string });
 
-    // Walk the FSM: approve → ship → receive → inspect → refund.
-    // Each action returns 200 and publishes its domain event.
-    expect((await returnAction(returnDoc._id, 'approve')).status).toBeLessThan(400);
-    expect((await returnAction(returnDoc._id, 'ship')).status).toBeLessThan(400);
-    expect((await returnAction(returnDoc._id, 'receive')).status).toBeLessThan(400);
-
-    // PARTIAL override — admin's inspection says refund only 60%.
+    // PARTIAL override — admin sets the refundable value before confirm.
     const PARTIAL_REFUND = 60000; // 600 BDT, in paisa
-    // inspectReturn matches by (productId, variantSku) — must supply both or
-    // the match falls through and refundAmount stays at the line default.
-    const inspect = await returnAction(returnDoc._id, 'inspect', {
-      results: [{ productId, variantSku: productId, result: 'partial', refundAmount: PARTIAL_REFUND }],
-    });
-    expect(inspect.status, `inspect failed: ${inspect.body?.error}`).toBeLessThan(400);
+    await setPaymentDelta(change.changeNumber, PARTIAL_REFUND);
 
-    const refund = await returnAction(returnDoc._id, 'refund');
-    expect(refund.status, `refund failed: ${refund.body?.error}`).toBeLessThan(400);
+    const confirm = await changeAction(change.changeNumber, 'confirm');
+    expect(confirm.status, `confirm failed: ${JSON.stringify(confirm.body)}`).toBeLessThan(400);
 
     await flush();
 
     // Final state: 2 journal entries on this order — the sales capture
-    // from placement, plus the refund reversal from RMA. The reversal's
-    // DEBIT on revenue (4111) must equal PARTIAL_REFUND, not quantity*unitPrice.
+    // from placement, plus the refund reversal from change-confirmed.
+    // The reversal's DEBIT on revenue (4111) must equal PARTIAL_REFUND,
+    // not quantity*unitPrice.
     const entries = await getJournalEntriesForOrder(order._id);
     expect(entries.length).toBe(2);
 
@@ -344,101 +362,83 @@ describe('RMA partial refund — inspection override translates to ledger', () =
 
     const revenueDebit = await debitOn(reversal, '4111');
     const cashCredit = await creditOn(reversal, '1111');
-    expect(revenueDebit, 'partial reversal must post the inspection amount, not the gross').toBe(PARTIAL_REFUND);
+    expect(revenueDebit, 'partial reversal must post the override amount, not the gross').toBe(
+      PARTIAL_REFUND,
+    );
     expect(cashCredit).toBe(PARTIAL_REFUND);
   });
 
-  it('restocking on refund posts a COGS reversal (Dr 1165 Inventory | Cr 5111 COGS) for qty × costPrice', async () => {
-    // Place 2 units; refund path will restock 1 (partial return). Expected
-    // COGS reversal: 1 × 30000 paisa = 30000. The reversal amount must
-    // match the RESTOCKED quantity, not the total order line qty — otherwise
-    // partial returns double-reverse cost when a second partial lands later.
+  it('restocking on confirm posts a COGS reversal (Dr 1164 Inventory | Cr 5111 COGS) for qty × costPrice', async () => {
+    // Place 2 units; change covers 1 (partial return). Expected COGS
+    // reversal: 1 × 30000 paisa = 30000. Reversal must match the RETURNED
+    // quantity, not the total order-line qty — otherwise partial returns
+    // double-reverse cost when a second partial lands later.
     const unitPrice = 50000; // retail 500 BDT
-    const costPerUnit = 30000; // cost 300 BDT (seeded via costManagement.costPrice)
+    const costPerUnit = 30000; // cost 300 BDT
     const order = await placePrepaidOrder(unitPrice, 2);
     await flush();
 
-    await forceOrderDelivered(order._id);
+    await forceOrderFulfilled(order._id);
 
-    // Return only 1 of the 2 units — partial.
-    const createRes = await server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns`,
-      headers: auth.as('admin').headers,
-      payload: {
-        orderId: order._id,
-        items: [{ productId, variantSku: productId, quantity: 1, reason: 'defective' }],
-        refundMethod: 'original',
-        notes: 'One unit arrived defective',
-      },
+    const create = await requestChange(order.orderNumber, {
+      changeType: 'return',
+      actions: [{ type: 'return_item', orderLineId: 'line_0', quantity: 1 }],
+      reason: 'Customer changed mind',
     });
-    expect(createRes.statusCode).toBeLessThan(400);
-    const returnDoc = (parse(createRes.body) as { data: { _id: string } }).data;
+    expect(create.status).toBeLessThan(400);
+    const change = (create.body as { changeNumber: string });
 
-    expect((await returnAction(returnDoc._id, 'approve')).status).toBeLessThan(400);
-    expect((await returnAction(returnDoc._id, 'ship')).status).toBeLessThan(400);
-    expect((await returnAction(returnDoc._id, 'receive')).status).toBeLessThan(400);
-    expect(
-      (await returnAction(returnDoc._id, 'inspect', {
-        results: [{ productId, variantSku: productId, result: 'approved' }],
-      })).status,
-    ).toBeLessThan(400);
-    expect((await returnAction(returnDoc._id, 'refund')).status).toBeLessThan(400);
-
+    expect((await changeAction(change.changeNumber, 'confirm')).status).toBeLessThan(400);
     await flush();
 
-    // The COGS reversal journal entry is keyed to the Return, not the Order
-    // (per cogsReversalToPosting's sourceRef). Look it up directly.
-    const returnJournals = await getJournalEntriesForReturn(returnDoc._id);
-    expect(returnJournals.length, 'exactly one COGS-reversal journal per return').toBe(1);
+    // The COGS reversal journal entry is keyed to a synthetic return id
+    // (`${orderId}:${changeNumber}`), per `_rma-ledger.ts`. Look it up via
+    // the Return sourceModel.
+    const returnJournals = (await mongoose.connection.db!
+      .collection('journalentries')
+      .find({
+        'sourceRef.sourceModel': 'Return',
+        'sourceRef.sourceId': new RegExp(`^${order._id}:`),
+      })
+      .sort({ createdAt: 1 })
+      .toArray()) as Record<string, unknown>[];
+    expect(returnJournals.length, 'exactly one COGS-reversal journal per change').toBe(1);
 
     const reversal = returnJournals[0];
     assertBalanced(reversal);
 
-    // Dr 1165 Inventory / Cr 5111 COGS for (costPerUnit × restocked qty).
+    // Dr 1164 Inventory / Cr 5111 COGS for (costPerUnit × returned qty).
     const expectedReversal = costPerUnit * 1;
-    expect(await debitOn(reversal, '1165')).toBe(expectedReversal);
+    expect(await debitOn(reversal, '1164')).toBe(expectedReversal);
     expect(await creditOn(reversal, '5111')).toBe(expectedReversal);
 
-    // Journal type is INVENTORY per the contract.
     expect(reversal.journalType).toBe('INVENTORY');
   });
 
-  it('full-amount refund (no override) posts a reversal for the full quantity × unitPrice', async () => {
-    // Control case: inspect with `approved` and no refundAmount override —
-    // the default is line-total. Confirms the refund path doesn't silently
-    // clamp to a wrong value when the admin doesn't explicitly set an
-    // override. This is the "normal" RMA happy path.
+  it('full-amount refund (no override) posts a reversal for quantity × unitPrice', async () => {
+    // Control case: confirm without paymentDelta override — kernel-computed
+    // amount equals unitPrice × quantity. Confirms the refund path doesn't
+    // silently clamp to a wrong value on the happy path.
     const unitPrice = 30000;
     const quantity = 1;
     const order = await placePrepaidOrder(unitPrice, quantity);
     await flush();
-    await forceOrderDelivered(order._id);
+    await forceOrderFulfilled(order._id);
 
-    const createRes = await server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns`,
-      headers: auth.as('admin').headers,
-      payload: {
-        orderId: order._id,
-        items: [{ productId, variantSku: productId, quantity, reason: 'wrong_item' }],
-        refundMethod: 'original',
-        notes: 'Wrong size shipped',
-      },
+    const create = await requestChange(order.orderNumber, {
+      changeType: 'return',
+      actions: [{ type: 'return_item', orderLineId: 'line_0', quantity }],
+      reason: 'Wrong size shipped',
     });
-    expect(createRes.statusCode).toBeLessThan(400);
-    const returnId = (parse(createRes.body) as { data: { _id: string } }).data._id;
+    expect(create.status).toBeLessThan(400);
+    const change = (create.body as { changeNumber: string });
 
-    expect((await returnAction(returnId, 'approve')).status).toBeLessThan(400);
-    expect((await returnAction(returnId, 'ship')).status).toBeLessThan(400);
-    expect((await returnAction(returnId, 'receive')).status).toBeLessThan(400);
-    expect(
-      (await returnAction(returnId, 'inspect', {
-        results: [{ productId, result: 'approved' }], // no refundAmount override
-      })).status,
-    ).toBeLessThan(400);
-    expect((await returnAction(returnId, 'refund')).status).toBeLessThan(400);
+    // Kernel initializes paymentDelta with zero amounts; admin sets the
+    // refundable value (mirrors the customer-RMA handler at
+    // my-order-rma.handler.ts:339). Full-amount control case = unit × qty.
+    await setPaymentDelta(change.changeNumber, unitPrice * quantity);
 
+    expect((await changeAction(change.changeNumber, 'confirm')).status).toBeLessThan(400);
     await flush();
 
     const entries = await getJournalEntriesForOrder(order._id);

@@ -5,7 +5,8 @@
  * Finance admins manage rates; the ManualRateBridge reads them.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
 import CurrencyExchangeRate from './exchange-rate.model.js';

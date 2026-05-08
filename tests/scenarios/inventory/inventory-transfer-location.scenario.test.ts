@@ -158,7 +158,7 @@ describe('Transfer — per-line source location', () => {
       },
     });
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const transfer = parse(createRes.body)?.data as { _id: string };
+    const transfer = parse(createRes.body) as { _id: string };
 
     for (const action of ['approve', 'dispatch'] as const) {
       const r = await env.server.inject({
@@ -199,7 +199,7 @@ describe('Transfer — per-line source location', () => {
       },
     });
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const transfer = parse(createRes.body)?.data as { _id: string };
+    const transfer = parse(createRes.body) as { _id: string };
 
     const approveRes = await env.server.inject({
       method: 'POST',
@@ -232,7 +232,7 @@ describe('Transfer — per-line source location', () => {
       },
     });
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const transfer = parse(createRes.body)?.data as { _id: string };
+    const transfer = parse(createRes.body) as { _id: string };
 
     const approveRes = await env.server.inject({
       method: 'POST',

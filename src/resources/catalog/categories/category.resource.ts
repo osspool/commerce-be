@@ -12,7 +12,8 @@
  * `category.handlers.ts` and are wired via `routes:` below.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import permissions from '#config/permissions.js';
 import type { AppContext } from '#core/app/context.js';
 import { getResourcePermissions } from '#shared/permissions.js';

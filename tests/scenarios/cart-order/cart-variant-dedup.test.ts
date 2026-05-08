@@ -156,18 +156,14 @@ describe('Cart add-item deduplication — variant kind', () => {
 
     const first = await addOnce();
     expect(first.statusCode).toBe(200);
-    const firstBody = parse(first.body);
-    expect(firstBody?.success).toBe(true);
-    const firstCart = firstBody?.data as { lines: { lineId: string; quantity: number; kind: string; payload: unknown }[] };
+    const firstCart = parse(first.body) as { lines: { lineId: string; quantity: number; kind: string; payload: unknown }[] };
     expect(firstCart.lines).toHaveLength(1);
     expect(firstCart.lines[0].quantity).toBe(1);
     const firstLineId = firstCart.lines[0].lineId;
 
     const second = await addOnce();
     expect(second.statusCode).toBe(200);
-    const secondBody = parse(second.body);
-    expect(secondBody?.success).toBe(true);
-    const secondCart = secondBody?.data as { lines: { lineId: string; quantity: number }[] };
+    const secondCart = parse(second.body) as { lines: { lineId: string; quantity: number }[] };
 
     // THE CORE ASSERTION: still ONE line, quantity bumped to 2.
     expect(secondCart.lines).toHaveLength(1);
@@ -211,8 +207,7 @@ describe('Cart add-item deduplication — variant kind', () => {
     });
     expect(addL.statusCode).toBe(200);
 
-    const body = parse(addL.body);
-    const cart = body?.data as { lines: { quantity: number; payload: { variantSku?: string } }[] };
+    const cart = parse(addL.body) as { lines: { quantity: number; payload: { variantSku?: string } }[] };
 
     // Two separate lines — one per distinct variant SKU.
     expect(cart.lines).toHaveLength(2);
@@ -248,8 +243,7 @@ describe('Cart add-item — client-supplied display snapshot', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const cart = body?.data as { lines: { display: typeof display }[] };
+    const cart = parse(res.body) as { lines: { display: typeof display }[] };
     expect(cart.lines).toHaveLength(1);
     const stored = cart.lines[0].display;
     // All client-supplied fields round-trip exactly — the backend did NOT
@@ -274,7 +268,7 @@ describe('Cart add-item — client-supplied display snapshot', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const cart = (parse(res.body)?.data as { lines: { display?: { name?: string } }[] });
+    const cart = (parse(res.body) as { lines: { display?: { name?: string } }[] });
     // The backend resolved the catalog and populated display from the product
     // record we seeded in beforeAll.
     expect(cart.lines[0].display?.name).toBe('Dedup Variant T-Shirt');
@@ -303,7 +297,7 @@ describe('Cart remove-item — incremental repricing', () => {
       payload: { productId: simpleProductId, quantity: 2 },
     });
     expect(addSimple.statusCode).toBe(200);
-    const twoLineCart = parse(addSimple.body)?.data as {
+    const twoLineCart = parse(addSimple.body) as {
       lines: { lineId: string; kind: string }[];
       pricing: { lines: { lineId: string; unitPrice: { amount: number } }[] };
     };
@@ -329,7 +323,7 @@ describe('Cart remove-item — incremental repricing', () => {
       headers: { 'x-organization-id': TEST_ORG_ID },
     });
     expect(removeRes.statusCode).toBe(200);
-    const afterRemove = parse(removeRes.body)?.data as {
+    const afterRemove = parse(removeRes.body) as {
       lines: { lineId: string }[];
       pricing: { lines: { lineId: string; unitPrice: { amount: number } }[] };
     };
@@ -368,7 +362,7 @@ describe('Cart add-item deduplication — sku kind (simple product)', () => {
     });
     expect(second.statusCode).toBe(200);
 
-    const cart = (parse(second.body)?.data as { lines: { quantity: number }[] });
+    const cart = (parse(second.body) as { lines: { quantity: number }[] });
     expect(cart.lines).toHaveLength(1);
     expect(cart.lines[0].quantity).toBe(5);
   });

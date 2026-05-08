@@ -31,6 +31,8 @@ import {
   resolveLocationCode,
 } from './flow/location-resolver.js';
 import posLookupService from './flow/pos-lookup.service.js';
+import inventoryRepository from './inventory.repository.js';
+import { createError, ForbiddenError, NotFoundError, ValidationError } from '@classytic/arc/utils';
 
 const loadPosUtils = createModuleLoader('#resources/sales/pos/pos.utils.js');
 
@@ -95,7 +97,7 @@ interface MoveDocument {
 
 class InventoryController extends BaseController {
   constructor() {
-    super(null as unknown as import('@classytic/arc').RepositoryLike, {});
+    super(null as unknown as import('@classytic/repo-core/adapter').RepositoryLike<unknown>, {});
     this.lookup = this.lookup.bind(this);
     this.getPosProducts = this.getPosProducts.bind(this);
     this.bulkImport = this.bulkImport.bind(this);
@@ -110,7 +112,7 @@ class InventoryController extends BaseController {
     const { code, branchId } = req.query as { code?: string; branchId?: string };
 
     if (!code || code.trim().length < 2) {
-      return reply.code(400).send({ success: false, message: 'Code must be at least 2 characters' });
+      throw new ValidationError('Code must be at least 2 characters');
     }
 
     const authorizedBranchId = resolveAuthorizedBranchId(req, branchId);
@@ -119,7 +121,7 @@ class InventoryController extends BaseController {
     const entry = await posLookupService.getByBarcodeOrSku(code, branch?._id);
 
     if (!entry) {
-      return reply.code(404).send({ success: false, message: 'Product not found' });
+      throw new NotFoundError('Product not found');
     }
 
     const matchedVariant =
@@ -128,17 +130,14 @@ class InventoryController extends BaseController {
         : null;
 
     return reply.send({
-      success: true,
-      data: {
-        product: filterCostPriceByRole(entry.product as unknown as Record<string, unknown>, req.user),
-        variantSku: entry.variantSku,
-        ...(matchedVariant
-          ? { matchedVariant: filterCostPriceByRole(matchedVariant as unknown as Record<string, unknown>, req.user) }
-          : {}),
-        quantity: entry.quantity,
-        availableQuantity: entry.availableQuantity ?? entry.quantity,
-        branchId: branch?._id,
-      },
+      product: filterCostPriceByRole(entry.product as unknown as Record<string, unknown>, req.user),
+      variantSku: entry.variantSku,
+      ...(matchedVariant
+        ? { matchedVariant: filterCostPriceByRole(matchedVariant as unknown as Record<string, unknown>, req.user) }
+        : {}),
+      quantity: entry.quantity,
+      availableQuantity: entry.availableQuantity ?? entry.quantity,
+      branchId: branch?._id,
     });
   }
 
@@ -157,14 +156,14 @@ class InventoryController extends BaseController {
     const branch = await branchRepository.getById(authorizedBranchId);
 
     if (!branch) {
-      return reply.code(400).send({ success: false, message: 'Invalid branch' });
+      throw new ValidationError('Invalid branch');
     }
 
     const { getPosProducts } = (await loadPosUtils()) as {
       getPosProducts: (
         branchId: unknown,
         params: Record<string, unknown>,
-      ) => Promise<{ docs: unknown[]; [key: string]: unknown }>;
+      ) => Promise<{ data: unknown[]; [key: string]: unknown }>;
     };
 
     // `getPosProducts` (catalog page + quant enrichment) and
@@ -177,14 +176,13 @@ class InventoryController extends BaseController {
       posLookupService.getBranchStockSummary(branch._id),
     ]);
 
-    const filteredDocs = filterCostPriceByRole(result.docs as Record<string, unknown>[], req.user);
+    const filteredDocs = filterCostPriceByRole(result.data as Record<string, unknown>[], req.user);
 
     return reply.send({
-      success: true,
       branch: { _id: branch._id, code: branch.code, name: branch.name },
       summary,
       ...result,
-      docs: filteredDocs,
+      data: filteredDocs,
     });
   }
 
@@ -226,10 +224,10 @@ class InventoryController extends BaseController {
         : [];
 
     if (!items.length) {
-      return reply.code(400).send({ success: false, message: 'Provide productId+quantity or adjustments array' });
+      throw new ValidationError('Provide productId+quantity or adjustments array');
     }
     if (items.length > 500) {
-      return reply.code(400).send({ success: false, message: 'Maximum 500 adjustments per request' });
+      throw new ValidationError('Maximum 500 adjustments per request');
     }
 
     const user = req.user as AuthUser | undefined;
@@ -237,13 +235,13 @@ class InventoryController extends BaseController {
     const branch = await branchRepository.getById(authorizedBranchId);
 
     if (!branch) {
-      return reply.code(400).send({ success: false, message: 'Invalid branch' });
+      throw new ValidationError('Invalid branch');
     }
 
     const isAdminUser = Array.isArray(user?.role) && (user.role.includes('admin') || user.role.includes('superadmin'));
 
     if (branch.role === 'head_office' && !isAdminUser) {
-      return reply.code(403).send({ success: false, message: 'Only admin users can adjust head office stock' });
+      throw new ForbiddenError('Only admin users can adjust head office stock');
     }
 
     const enforceNoIncreaseAtSubBranch = !isAdminUser && branch.role !== 'head_office';
@@ -281,7 +279,7 @@ class InventoryController extends BaseController {
       });
     } catch (err) {
       if (err instanceof LocationResolutionError) {
-        return reply.code(err.statusCode).send({ success: false, message: err.message });
+        throw createError(err.statusCode, err.message);
       }
       throw err;
     }
@@ -427,8 +425,17 @@ class InventoryController extends BaseController {
       for (let i = 0; i < journalRecords.length; i++) {
         const r = journalRecords[i];
         if (r.amountPaisa <= 0) continue;
+        // `adjustmentId` stays the deterministic concat (productId + sku +
+        // timestamp + index) — it's the idempotency key so re-publishes
+        // collapse onto the same JE. `referenceNumber` is the *display*
+        // string that lands in the GL: prefer the variantSku (what the
+        // user sees on packaging, e.g. `RED-M`), fall back to a short
+        // product-id tail when the SKU is missing.
+        const referenceNumber =
+          r.variantSku?.trim() || `Product …${r.productId.slice(-6)}`;
         await publish('accounting:inventory.adjusted', {
           adjustmentId: `${r.productId}-${r.variantSku ?? 'simple'}-${Date.now()}-${i}`,
+          referenceNumber,
           type: r.type,
           amount: r.amountPaisa,
           date: adjustedAt,
@@ -440,6 +447,11 @@ class InventoryController extends BaseController {
 
     // Expense transaction for inventory loss
     let transaction: any = null;
+    // Hoisted so both response branches (single + bulk) can read the
+    // canonical category back into the response shape — the Transaction
+    // doc stores it under `type`, not `category`, so the local var is the
+    // load-bearing source of truth at the wire boundary.
+    let txCategory: string | null = null;
     const normalizedLostAmount = lostAmount !== undefined && lostAmount !== null ? Number(lostAmount) : null;
 
     if (normalizedLostAmount && normalizedLostAmount > 0 && results.success.length > 0) {
@@ -449,6 +461,7 @@ class InventoryController extends BaseController {
         if (normalizedReason.includes('recount') || normalizedReason.includes('correction')) {
           category = 'inventory_adjustment';
         }
+        txCategory = category;
 
         transaction = await createVerifiedOperationalExpenseTransaction({
           amountBdt: normalizedLostAmount,
@@ -493,21 +506,27 @@ class InventoryController extends BaseController {
 
     if (items.length === 1 && results.success.length === 1) {
       return reply.send({
-        success: true,
-        data: results.success[0],
+        ...results.success[0],
         message: 'Stock updated',
         transaction: transaction
-          ? { _id: transaction._id, amount: transaction.amount, category: transaction.category }
+          // Revenue Transaction stores the category under `type` (the
+          // schema's discriminant), not `category`. `txCategory` holds the
+          // value we passed into the helper, which is the canonical intent
+          // — read it back instead of the doc field so the response shape
+          // matches the route schema regardless of upstream Transaction-model
+          // field renames.
+          ? { _id: transaction._id, amount: transaction.amount, category: txCategory ?? 'inventory_loss' }
           : null,
       });
     }
 
     return reply.send({
-      success: true,
-      data: { processed: results.success.length, failed: results.failed.length, results },
+      processed: results.success.length,
+      failed: results.failed.length,
+      results,
       message: `Processed ${results.success.length}, failed ${results.failed.length}`,
       transaction: transaction
-        ? { _id: transaction._id, amount: transaction.amount, category: transaction.category }
+        ? { _id: transaction._id, amount: transaction.amount, category: txCategory ?? 'inventory_loss' }
         : null,
     });
   }
@@ -521,15 +540,25 @@ class InventoryController extends BaseController {
     const branch = await branchRepository.getById(authorizedBranchId);
 
     if (!branch) {
-      return reply.code(400).send({ success: false, message: 'branchId is required' });
+      throw new ValidationError('branchId is required');
     }
 
     const flow = getFlowEngine();
     const ctx = buildFlowContext(branch._id);
     const reorderThreshold = parseInt(threshold || '', 10) || 10;
 
-    // Get all quants at the stock location for this branch
-    const avail = await flow.services.quant.getAvailability({ locationId: DEFAULT_LOCATION }, ctx);
+    // Run Flow's quant scan (for the per-row table) and the catalog-aware
+    // summary (for the stat cards) in parallel — they hit different
+    // collections so wall-clock = max(catalog, flow), not sum. Without the
+    // catalog-aware summary, "Out of Stock" reads 0 because never-received
+    // variants don't have Flow rows. See [inventory.repository.getStockSummary]
+    // for the full rationale.
+    const [avail, summary] = await Promise.all([
+      flow.services.quant.getAvailability({ locationId: DEFAULT_LOCATION }, ctx),
+      inventoryRepository.getStockSummary(String(branch._id), {
+        lowStockThreshold: reorderThreshold,
+      }),
+    ]);
 
     // Flow getAvailability returns breakdowns when queried without skuRef filter
     const breakdowns: Array<{
@@ -551,9 +580,9 @@ class InventoryController extends BaseController {
       .sort((a, b) => a.quantity - b.quantity);
 
     return reply.send({
-      success: true,
       data: lowStockItems,
       total: lowStockItems.length,
+      summary,
       branch: { _id: branch._id, code: branch.code, name: branch.name },
     });
   }
@@ -601,7 +630,7 @@ class InventoryController extends BaseController {
       organizationId: ctx.organizationId,
     } as Parameters<typeof flow.repositories.move.getAll>[0]);
 
-    return reply.send({ success: true, ...result });
+    return reply.send(result);
   }
 
   // ── EXPORT ─────────────────────────────────────────────
@@ -634,7 +663,7 @@ class InventoryController extends BaseController {
       lean: true,
       organizationId: ctx.organizationId,
     } as Parameters<typeof flow.repositories.move.getAll>[0]);
-    const docs = ((result as { docs?: unknown[] })?.docs ?? result) as unknown as MoveDocument[];
+    const docs = ((result as { data?: unknown[] })?.data ?? result) as unknown as MoveDocument[];
 
     const csvRows: string[] = [];
     csvRows.push(

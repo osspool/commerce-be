@@ -51,7 +51,6 @@ describe('Product view tracking (TRACK_PRODUCT_VIEWS)', () => {
 
     expect(incSpy).not.toHaveBeenCalled();
     expect(reply.statusCode).toBe(200);
-    expect(reply.payload?.success).toBe(true);
   });
 
   it('increments viewCount when TRACK_PRODUCT_VIEWS=1', async () => {

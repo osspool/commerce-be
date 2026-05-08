@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import platformConfigRepository from './platform.repository.js';
+import { createError } from '@classytic/arc/utils';
 
 interface ConfigQuery {
   select?: string;
@@ -20,20 +21,20 @@ class PlatformConfigController {
     try {
       const select = req.query.select || null;
       const config = await platformConfigRepository.getConfig(select);
-      return reply.code(200).send({ success: true, data: config });
+      return reply.code(200).send(config);
     } catch (error) {
       const err = error as Error;
-      return reply.code(500).send({ success: false, message: err.message });
+      throw createError(500, err.message);
     }
   }
 
   async updateConfig(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     try {
       const config = await platformConfigRepository.updateConfig(req.body as Record<string, unknown>);
-      return reply.code(200).send({ success: true, data: config });
+      return reply.code(200).send(config);
     } catch (error) {
       const err = error as Error;
-      return reply.code(500).send({ success: false, message: err.message });
+      throw createError(500, err.message);
     }
   }
 
@@ -42,30 +43,30 @@ class PlatformConfigController {
   async getActiveDeliveryOptions(_req: FastifyRequest, reply: FastifyReply): Promise<void> {
     try {
       const options = await platformConfigRepository.getActiveDeliveryOptions();
-      return reply.code(200).send({ success: true, data: options });
+      return reply.code(200).send(options);
     } catch (error) {
       const err = error as Error;
-      return reply.code(500).send({ success: false, message: err.message });
+      throw createError(500, err.message);
     }
   }
 
   async getAllDeliveryOptions(_req: FastifyRequest, reply: FastifyReply): Promise<void> {
     try {
       const options = await platformConfigRepository.getAllDeliveryOptions();
-      return reply.code(200).send({ success: true, data: options });
+      return reply.code(200).send(options);
     } catch (error) {
       const err = error as Error;
-      return reply.code(500).send({ success: false, message: err.message });
+      throw createError(500, err.message);
     }
   }
 
   async addDeliveryOption(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     try {
       const option = await platformConfigRepository.addDeliveryOption(req.body as Record<string, unknown>);
-      return reply.code(201).send({ success: true, data: option, message: 'Delivery option added' });
+      return reply.code(201).send(option);
     } catch (error) {
       const err = error as Error & { statusCode?: number };
-      return reply.code(err.statusCode || 500).send({ success: false, message: err.message });
+      throw createError(err.statusCode || 500, err.message);
     }
   }
 
@@ -75,20 +76,20 @@ class PlatformConfigController {
         req.params.id,
         req.body as Record<string, unknown>,
       );
-      return reply.code(200).send({ success: true, data: option, message: 'Delivery option updated' });
+      return reply.code(200).send(option);
     } catch (error) {
       const err = error as Error & { statusCode?: number };
-      return reply.code(err.statusCode || 500).send({ success: false, message: err.message });
+      throw createError(err.statusCode || 500, err.message);
     }
   }
 
   async removeDeliveryOption(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
     try {
       await platformConfigRepository.removeDeliveryOption(req.params.id);
-      return reply.code(200).send({ success: true, message: 'Delivery option removed' });
+      return reply.code(200).send(null);
     } catch (error) {
       const err = error as Error & { statusCode?: number };
-      return reply.code(err.statusCode || 500).send({ success: false, message: err.message });
+      throw createError(err.statusCode || 500, err.message);
     }
   }
 }

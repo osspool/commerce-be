@@ -7,11 +7,13 @@
  * not an `actions:` verb.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import { ensureLoyaltyEngine } from './loyalty.plugin.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 const engine = await ensureLoyaltyEngine();
 
@@ -29,6 +31,11 @@ const tierResource = defineResource({
   tag: 'Loyalty',
   prefix: '/loyalty/tiers',
   audit: true,
+
+  // Loyalty is company-wide (one tier ladder across all branches — see
+  // loyalty.plugin.ts). `tenantField: false` keeps the adapter from
+  // injecting an org filter on reads.
+  tenantField: false,
 
   adapter: createMongooseAdapter(engine.models.TierDefinition as never, engine.repositories.tierDefinition as never),
   queryParser,
@@ -51,10 +58,10 @@ const tierResource = defineResource({
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         try {
           const result = await engine.repositories.tierDefinition.evaluateAll(ctxFromReq(req));
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         } catch (err) {
           const e = err as { message?: string };
-          return reply.code(400).send({ success: false, message: e.message });
+          throw new ValidationError(e.message ?? 'Tier evaluation failed');
         }
       },
     },

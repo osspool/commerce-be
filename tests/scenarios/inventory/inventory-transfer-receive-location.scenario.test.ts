@@ -136,7 +136,7 @@ describe('Transfer receive — per-line destinationLocationId override (receiver
       },
     });
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const transfer = parse(createRes.body)?.data as {
+    const transfer = parse(createRes.body) as {
       _id: string;
       items: Array<{ _id: string }>;
     };
@@ -175,7 +175,7 @@ describe('Transfer receive — per-line destinationLocationId override (receiver
       },
     });
     expect(receiveRes.statusCode, receiveRes.body).toBeLessThan(400);
-    expect((parse(receiveRes.body)?.data as { status: string }).status).toBe('received');
+    expect((parse(receiveRes.body) as { status: string }).status).toBe('received');
 
     // 3. Sub-location got all 5; default stock bin remains at 0.
     expect(await getStockAtLocation(receiverOrgId, receiverSubLocationCode)).toBe(5);

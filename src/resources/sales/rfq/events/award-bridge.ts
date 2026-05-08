@@ -13,7 +13,7 @@
  * is a no-op. Crash recovery: a host cron could re-fire awards by
  * re-publishing the event; the idempotency check ensures no duplicate POs.
  */
-import type { DomainEvent } from '@classytic/arc/events';
+import type { DomainEvent } from '@classytic/primitives/events';
 import { repoOptionsFromCtx } from '@classytic/order';
 import { subscribe } from '#lib/events/arcEvents.js';
 import logger from '#lib/utils/logger.js';

@@ -17,6 +17,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
 import { flow, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 /**
  * Factory — called inside the inventory plugin after Flow engine init.
@@ -85,7 +86,7 @@ export function createRoutingResources() {
           const ctx = flowCtxGuard.from(req);
           const { skuRef, warehouseId } = req.query as { skuRef: string; warehouseId?: string };
           if (!skuRef) {
-            return reply.code(400).send({ success: false, error: 'skuRef query parameter is required' });
+            throw new ValidationError('skuRef query parameter is required');
           }
 
           const filter: Record<string, unknown> = {
@@ -110,7 +111,7 @@ export function createRoutingResources() {
           }
 
           const docs = await engine.repositories.stockRoute.findAll(filter, { lean: true });
-          return reply.send({ success: true, data: docs, total: docs.length });
+          return reply.send(docs);
         },
       },
     ],

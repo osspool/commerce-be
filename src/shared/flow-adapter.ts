@@ -12,7 +12,8 @@
  * they flow into mongokit's `buildCrudSchemasFromModel` via the inline
  * closure below.
  */
-import { createMongooseAdapter, type DataAdapter, type RepositoryLike } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
+import type { DataAdapter, RepositoryLike } from '@classytic/repo-core/adapter';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit';
 import type { Model } from 'mongoose';
 

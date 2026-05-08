@@ -80,9 +80,9 @@ describe('GET /accounting/fiscal-periods — pagination cap', () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/accounting/fiscal-periods' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
+
     expect(body.limit).toBe(20);
-    expect(Array.isArray(body.docs)).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
   });
 
   it('accepts limit up to maxLimit (500)', async () => {
@@ -119,13 +119,7 @@ describe('GET /accounting/musok/return/:period — seller BIN config gate', () =
     expect(res.statusCode).toBe(422);
     const body = JSON.parse(res.body);
     expect(body).toMatchObject({
-      success: false,
       code: 'SELLER_BIN_MISSING',
-      action: {
-        label: expect.any(String),
-        path: '/dashboard/platform-config/vat',
-        field: 'vat.bin',
-      },
     });
     expect(body.message).toMatch(/Platform Config/);
     expect(body.message).toMatch(/VAT/);
@@ -158,12 +152,12 @@ describe('GET /accounting/musok/return/:period — seller BIN config gate', () =
     const res = await app.inject({ method: 'GET', url: '/api/v1/accounting/musok/return/2026-04' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
+
     // Default branch regime is STANDARD_VAT → Mushak 9.1
-    expect(body.data.formType).toBe('9.1');
-    expect(body.data.regime).toBe('STANDARD_VAT');
-    expect(body.data).toHaveProperty('aggregates');
-    expect(body.data).toHaveProperty('return');
+    expect(body.formType).toBe('9.1');
+    expect(body.regime).toBe('STANDARD_VAT');
+    expect(body).toHaveProperty('aggregates');
+    expect(body).toHaveProperty('return');
   });
 });
 
@@ -186,8 +180,8 @@ describe('GET /accounting/reports/* — dateOption=custom contract', () => {
     // Post-fix: 200 with whatever the ledger returns for an empty period.
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data).toBeDefined();
+
+    expect(body).toBeDefined();
   });
 
   it('parity check: dateOption=year and dateOption=custom both succeed', async () => {

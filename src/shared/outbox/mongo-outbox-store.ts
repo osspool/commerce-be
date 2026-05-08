@@ -1,13 +1,5 @@
-import {
-  type DomainEvent,
-  type OutboxAcknowledgeOptions,
-  type OutboxClaimOptions,
-  type OutboxErrorInfo,
-  type OutboxFailOptions,
-  OutboxOwnershipError,
-  type OutboxStore,
-  type OutboxWriteOptions,
-} from '@classytic/arc/events';
+import { type OutboxAcknowledgeOptions, type OutboxClaimOptions, type OutboxErrorInfo, type OutboxFailOptions, OutboxOwnershipError, type OutboxStore, type OutboxWriteOptions } from '@classytic/arc/events';
+import type { DomainEvent } from '@classytic/primitives/events';
 import mongoose, { type ClientSession, Schema } from 'mongoose';
 
 function isConnected(): boolean {

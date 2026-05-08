@@ -225,7 +225,7 @@ describe('Cross-Branch Point Operations', () => {
       limit: 10,
       sort: { createdAt: -1 },
     });
-    const tx = history.docs[0] as any;
+    const tx = history.data[0] as any;
     expect(tx.metadata?.branchId).toBe('branch_syl');
     expect(tx.metadata?.branchCode).toBe('SYL');
   });
@@ -311,7 +311,7 @@ describe('Earning Rules', () => {
       limit: 10,
       sort: { priority: 1 },
     });
-    expect(list.docs.length).toBe(1);
+    expect(list.data.length).toBe(1);
 
     // Update
     const updated = await engine.repositories.earningRule.update(rule._id, {
@@ -603,7 +603,7 @@ describe('Full Multi-Branch Checkout', () => {
       limit: 50,
       sort: { createdAt: -1 },
     });
-    const branchCodes = history.docs
+    const branchCodes = history.data
       .map((tx: any) => tx.metadata?.branchCode)
       .filter(Boolean);
     expect(branchCodes).toContain('CTG');

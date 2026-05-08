@@ -156,7 +156,7 @@ describe('codSettlementToPosting', () => {
       courierCommission: 0,
       writeoff: 0,
     });
-    expect(findItem(posting, '1112')!.debit).toBe(gross);
+    expect(findItem(posting, '1113')!.debit).toBe(gross);
     expect(findItem(posting, '1141')!.credit).toBe(gross);
     expect(findItem(posting, '1141')!.partnerId).toBe('order_1');
     expectBalanced(posting);
@@ -169,7 +169,7 @@ describe('codSettlementToPosting', () => {
       courierCommission: 5000, // 50 BDT commission
       writeoff: 0,
     });
-    expect(findItem(posting, '1112')!.debit).toBe(110000);
+    expect(findItem(posting, '1113')!.debit).toBe(110000);
     expect(findItem(posting, '6423')!.debit).toBe(5000);
     expect(findItem(posting, '1141')!.credit).toBe(gross);
     expectBalanced(posting);
@@ -182,7 +182,7 @@ describe('codSettlementToPosting', () => {
       courierCommission: 0,
       writeoff: 15000,
     });
-    expect(findItem(posting, '1112')!.debit).toBe(100000);
+    expect(findItem(posting, '1113')!.debit).toBe(100000);
     expect(findItem(posting, '6702')!.debit).toBe(15000);
     expect(findItem(posting, '1141')!.credit).toBe(gross);
     expectBalanced(posting);
@@ -195,7 +195,7 @@ describe('codSettlementToPosting', () => {
       courierCommission: 10000,
       writeoff: 10000,
     });
-    expect(findItem(posting, '1112')!.debit).toBe(95000);
+    expect(findItem(posting, '1113')!.debit).toBe(95000);
     expect(findItem(posting, '6423')!.debit).toBe(10000);
     expect(findItem(posting, '6702')!.debit).toBe(10000);
     expect(findItem(posting, '1141')!.credit).toBe(gross);
@@ -211,7 +211,7 @@ describe('codSettlementToPosting', () => {
       cashAccount: '1111',
     });
     expect(findItem(posting, '1111')!.debit).toBe(gross);
-    expect(findItem(posting, '1112')).toBeUndefined();
+    expect(findItem(posting, '1113')).toBeUndefined();
     expectBalanced(posting);
   });
 
@@ -222,7 +222,7 @@ describe('codSettlementToPosting', () => {
       courierCommission: 0,
       writeoff: gross,
     });
-    expect(findItem(posting, '1112')).toBeUndefined();
+    expect(findItem(posting, '1113')).toBeUndefined();
     expect(findItem(posting, '6702')!.debit).toBe(gross);
     expectBalanced(posting);
   });

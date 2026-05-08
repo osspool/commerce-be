@@ -3,26 +3,21 @@ import { createCatalogBridge } from '../bridges/catalog.bridge.js';
 import type { OrderLineInput } from '../order-placement.js';
 import { resolveLineSkus } from '../order-placement.js';
 import { getEcomPinnedContext } from './shared.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 export async function validateStockHandler(req: FastifyRequest, reply: FastifyReply) {
   const body = req.body as { lines?: OrderLineInput[] };
   const rawLines = body.lines ?? [];
 
   if (rawLines.length === 0) {
-    return reply.status(400).send({
-      success: false,
-      error: 'lines is required and must be non-empty',
-    });
+    throw new ValidationError('lines is required and must be non-empty');
   }
 
   const ctx = await getEcomPinnedContext(req);
   const catalogBridge = createCatalogBridge();
   const resolvedLines = await resolveLineSkus(rawLines, catalogBridge, ctx);
   if (!resolvedLines) {
-    return reply.status(400).send({
-      success: false,
-      error: 'Failed to resolve one or more line SKUs',
-    });
+    throw new ValidationError('Failed to resolve one or more line SKUs');
   }
 
   const { getFlowEngineOrNull } = await import('#resources/inventory/flow/flow-engine.js');
@@ -30,11 +25,8 @@ export async function validateStockHandler(req: FastifyRequest, reply: FastifyRe
   const flow = getFlowEngineOrNull();
   if (!flow) {
     return reply.send({
-      success: true,
-      data: {
-        ok: true,
-        lines: resolvedLines.map((line) => ({ ...line, available: Infinity })),
-      },
+      ok: true,
+      lines: resolvedLines.map((line) => ({ ...line, available: Infinity })),
     });
   }
 
@@ -67,5 +59,5 @@ export async function validateStockHandler(req: FastifyRequest, reply: FastifyRe
   );
 
   const allOk = perLine.every((line) => line.ok);
-  return reply.send({ success: true, data: { ok: allOk, lines: perLine } });
+  return reply.send({ ok: allOk, lines: perLine });
 }

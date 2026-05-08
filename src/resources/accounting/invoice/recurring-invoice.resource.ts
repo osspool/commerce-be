@@ -12,7 +12,8 @@
  * active configs, so it doesn't fit either CRUD or per-doc actions.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
 

@@ -10,8 +10,8 @@ import { supplierSchemaOptions } from './supplier.schemas.js';
  *   - `create` / `update` inject `createdBy` / `updatedBy`, sanitize, hooks
  *   - `delete` soft-deletes via `mongokit.softDeletePlugin` wired on the
  *     repository; subsequent GETs return 404 automatically
- *   - Existence checks return canonical `{ success:false, status:404,
- *     details:{ code } }` from `notFoundResponse`
+ *   - Existence checks throw `NotFoundError` → Arc 2.13 ErrorContract
+ *     `{ code: 'arc.not_found', status: 404, message }`
  *
  * `tenantField: false` is critical — suppliers are company-wide per the
  * BigBoss single-tenant multi-branch model, so we opt out of the default

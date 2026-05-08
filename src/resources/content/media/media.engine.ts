@@ -73,8 +73,12 @@ export function ensureMediaEngine(): Promise<MediaEngine> {
       plugins: [
         cachePlugin({
           adapter: createMemoryCache(),
-          ttl: 60,
-          byIdTtl: 300,
+          // TanStack-shaped (mongokit 3.13+): `staleTime` = fresh window
+          // (replaces old `ttl`); `gcTime` = retention past stale.
+          defaults: { staleTime: 60, gcTime: 60 },
+          perOpDefaults: {
+            getById: { staleTime: 300 },
+          },
         }),
       ],
     };

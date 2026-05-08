@@ -8,6 +8,7 @@
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getRevenueEngine } from '#shared/revenue/engine.js';
+import { createError, NotFoundError, ValidationError } from '@classytic/arc/utils';
 
 interface ProviderWebhookParams {
   provider: string;
@@ -23,14 +24,14 @@ export async function handleProviderWebhook(request: FastifyRequest, reply: Fast
 
     if (!engine.providers.has(provider)) {
       request.log.warn({ provider }, 'Webhook received for unregistered provider');
-      return reply.code(404).send({ success: false, message: `Provider '${provider}' not registered` });
+      throw new NotFoundError(`Provider '${provider}' not registered`);
     }
 
     const txn = await engine.repositories.transaction.handleWebhook(provider, payload, headers);
 
     if (!txn) {
       request.log.info({ provider }, 'Webhook received but no matching transaction found (ignored)');
-      return reply.code(200).send({ success: true, message: 'No matching transaction' });
+      return reply.code(200).send(null);
     }
 
     request.log.info(
@@ -45,27 +46,30 @@ export async function handleProviderWebhook(request: FastifyRequest, reply: Fast
     );
 
     return reply.code(200).send({
-      success: true,
-      message: 'Webhook processed successfully',
-      data: {
         event: txn.webhook?.eventType,
         eventId: txn.webhook?.eventId,
         transactionId: String(txn._id),
         publicId: txn.publicId,
         status: txn.status,
         provider,
-      },
-    });
+      });
   } catch (error: unknown) {
-    const err = error as Error & { name?: string };
+    const err = error as Error & { name?: string; statusCode?: number };
     const statusCode = err.name === 'TransactionNotFoundError' ? 404 : err.name === 'ValidationError' ? 400 : 500;
+
+    // Re-throw Arc error subclasses directly — they already carry the correct
+    // HTTP status and will be rendered by Arc's global error handler.
+    if (err.name === 'NotFoundError' || err.name === 'ValidationError' || err.name === 'ForbiddenError') {
+      throw error;
+    }
 
     request.log.error({ provider, err: err.message, statusCode }, 'ERROR: Webhook processing failed');
 
     if (err.name === 'AlreadyVerifiedError') {
-      return reply.code(200).send({ success: true, message: 'Webhook already processed' });
+      return reply.code(200).send(null);
     }
 
-    return reply.code(statusCode).send({ success: false, message: err.message, error: err.name });
+    if (err.name === 'TransactionNotFoundError') throw new NotFoundError(err.message);
+    throw createError(statusCode, err.message);
   }
 }

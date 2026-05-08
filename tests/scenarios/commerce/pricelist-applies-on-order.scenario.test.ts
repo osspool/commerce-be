@@ -197,7 +197,7 @@ describe('Pricelist plumbing: customer.priceListId → /orders/place line snapsh
       },
     });
     expect([200, 201]).toContain(plRes.statusCode);
-    pricelistId = parse(plRes.body).data._id;
+    pricelistId = parse(plRes.body)._id;
     expect(pricelistId).toBeTruthy();
 
     // Stock so /orders/place doesn't 409 INSUFFICIENT_STOCK.
@@ -222,7 +222,7 @@ describe('Pricelist plumbing: customer.priceListId → /orders/place line snapsh
       },
     });
     expect([200, 201]).toContain(aRes.statusCode);
-    customerWithPricelistId = parse(aRes.body).data._id;
+    customerWithPricelistId = parse(aRes.body)._id;
 
     const assignRes = await server.inject({
       method: 'PATCH',
@@ -231,7 +231,7 @@ describe('Pricelist plumbing: customer.priceListId → /orders/place line snapsh
       payload: { priceListId: pricelistId },
     });
     expect(assignRes.statusCode).toBe(200);
-    expect(parse(assignRes.body).data.priceListId?.toString()).toBe(pricelistId);
+    expect(parse(assignRes.body).priceListId?.toString()).toBe(pricelistId);
 
     const tsB = Date.now() + 1;
     const bRes = await server.inject({
@@ -245,7 +245,7 @@ describe('Pricelist plumbing: customer.priceListId → /orders/place line snapsh
       },
     });
     expect([200, 201]).toContain(bRes.statusCode);
-    customerWithoutPricelistId = parse(bRes.body).data._id;
+    customerWithoutPricelistId = parse(bRes.body)._id;
   });
 
   it('places an order for customer A → line snapshot uses 15%-off price', async () => {
@@ -266,10 +266,7 @@ describe('Pricelist plumbing: customer.priceListId → /orders/place line snapsh
     if (res.statusCode >= 400) {
       throw new Error(`Order placement failed for customer-with-pricelist: ${res.statusCode} ${res.body}`);
     }
-    const body = parse(res.body);
-    expect(body.success).toBe(true);
-
-    const order = body.data;
+    const order = parse(res.body);
     expect(order).toBeDefined();
     expect(Array.isArray(order.lines)).toBe(true);
     expect(order.lines.length).toBe(1);
@@ -298,9 +295,8 @@ describe('Pricelist plumbing: customer.priceListId → /orders/place line snapsh
       throw new Error(`Order placement failed for customer-without-pricelist: ${res.statusCode} ${res.body}`);
     }
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
-    const line = body.data.lines[0];
+    const line = body.lines[0];
     const unitPrice = line.snapshot?.unitPrice ?? line.unitPrice;
     expect(unitPrice).toBe(BASE_PRICE);
   });

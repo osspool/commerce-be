@@ -61,7 +61,6 @@ GET /pos/products?branchId=X&category=…&search=…
 | GET | `/pos/products` | [inventory.controller.ts:139](src/resources/inventory/inventory.controller.ts#L139) `getPosProducts` | inventory | URL lives under /pos but logic is pure inventory. Reused by admin dashboard. |
 | GET | `/pos/lookup` | [inventory.controller.ts:101](src/resources/inventory/inventory.controller.ts#L101) `lookup` | inventory | Barcode/SKU scanner. LRU-cached. |
 | POST | `/pos/orders` | [sales/pos/pos.controller.ts:97](src/resources/sales/pos/pos.controller.ts#L97) `createOrder` | sales/pos | Delegates to @classytic/order. Enforces shift guard. |
-| GET | `/pos/orders/:id/receipt` | [sales/pos/pos.controller.ts:236](src/resources/sales/pos/pos.controller.ts#L236) `getReceipt` | sales/pos | — |
 | GET | `/pos/shifts/current` | [shift.handlers.ts:332](src/resources/sales/pos/shift.handlers.ts#L332) | sales/pos | Active shift (open/paused/blind_closed). |
 | POST | `/pos/shifts/open` | [shift.handlers.ts:338](src/resources/sales/pos/shift.handlers.ts#L338) | sales/pos | 409 if already active. Snapshots policy. |
 | CRUD | `/pos/shifts` | Arc adapter | sales/pos | `state`, `openingCashierId`, `businessDate` filter-able. |

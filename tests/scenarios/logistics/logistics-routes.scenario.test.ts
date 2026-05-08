@@ -48,8 +48,7 @@ describe('Logistics — public location taxonomy (bd-areas)', () => {
   it('GET /logistics/locations/divisions returns the 8 BD divisions', async () => {
     const res = await server.inject({ method: 'GET', url: `${API}/logistics/locations/divisions` });
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const data = body?.data as Array<{ name: string }>;
+    const data = parse(res.body) as Array<{ name: string }>;
     expect(Array.isArray(data)).toBe(true);
     expect(data.length).toBe(8);
   });
@@ -57,7 +56,7 @@ describe('Logistics — public location taxonomy (bd-areas)', () => {
   it('GET /logistics/locations/divisions/:division/districts returns a list', async () => {
     const list = parse(
       (await server.inject({ method: 'GET', url: `${API}/logistics/locations/divisions` })).body,
-    )?.data as Array<{ id?: string; name?: string }>;
+    ) as Array<{ id?: string; name?: string }>;
     const anyDivision = list[0]!.id ?? list[0]!.name ?? 'dhaka';
 
     const res = await server.inject({
@@ -66,7 +65,7 @@ describe('Logistics — public location taxonomy (bd-areas)', () => {
     });
     expect([200, 404]).toContain(res.statusCode);
     if (res.statusCode === 200) {
-      const data = parse(res.body)?.data as unknown[];
+      const data = parse(res.body) as unknown[];
       expect(Array.isArray(data)).toBe(true);
     }
   });
@@ -96,7 +95,7 @@ describe('Logistics — public location taxonomy (bd-areas)', () => {
     const res = await server.inject({ method: 'GET', url: `${API}/logistics/locations/zones` });
     expect(res.statusCode).toBe(200);
     // DELIVERY_ZONES is a Record<number, DeliveryZone> — keyed object, not array.
-    const data = parse(res.body)?.data as Record<string, { name: string; baseCharge: number }>;
+    const data = parse(res.body) as Record<string, { name: string; baseCharge: number }>;
     expect(typeof data).toBe('object');
     expect(Object.keys(data).length).toBeGreaterThan(0);
     const first = Object.values(data)[0]!;
@@ -114,7 +113,7 @@ describe('Logistics — Pathao taxonomy (static)', () => {
   it('GET /logistics/locations/pathao/cities returns the full list', async () => {
     const res = await server.inject({ method: 'GET', url: `${API}/logistics/locations/pathao/cities` });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data as Array<{ cityId: number; cityName: string }>;
+    const data = parse(res.body) as Array<{ cityId: number; cityName: string }>;
     expect(Array.isArray(data)).toBe(true);
     expect(data.length).toBeGreaterThan(0);
     expect(typeof data[0]!.cityId).toBe('number');
@@ -123,7 +122,7 @@ describe('Logistics — Pathao taxonomy (static)', () => {
   it('GET /logistics/locations/pathao/cities/:cityId/zones returns zones for a known city', async () => {
     const cities = parse(
       (await server.inject({ method: 'GET', url: `${API}/logistics/locations/pathao/cities` })).body,
-    )?.data as Array<{ cityId: number }>;
+    ) as Array<{ cityId: number }>;
     const cityId = cities[0]!.cityId;
 
     const res = await server.inject({
@@ -131,7 +130,7 @@ describe('Logistics — Pathao taxonomy (static)', () => {
       url: `${API}/logistics/locations/pathao/cities/${cityId}/zones`,
     });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data as { city: unknown; zones: unknown[] };
+    const data = parse(res.body) as { city: unknown; zones: unknown[] };
     expect(data.city).toBeTruthy();
     expect(Array.isArray(data.zones)).toBe(true);
   });
@@ -159,7 +158,7 @@ describe('Logistics — admin + manage guards', () => {
   it('GET /logistics/config returns configured carriers for admin', async () => {
     const res = await server.inject({ method: 'GET', url: `${API}/logistics/config`, headers: h() });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data as { configured: unknown[]; capabilities: unknown };
+    const data = parse(res.body) as { configured: unknown[]; capabilities: unknown };
     expect(Array.isArray(data.configured)).toBe(true);
     expect(typeof data.capabilities).toBe('object');
   });

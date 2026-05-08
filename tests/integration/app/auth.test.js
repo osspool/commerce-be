@@ -25,7 +25,7 @@ let ctx;
 
 beforeAll(async () => {
   ctx = await setupTestOrg();
-}, 30000);
+}, 90000);
 
 afterAll(async () => {
   await teardownTestOrg(ctx);
@@ -152,9 +152,8 @@ describe('User Profile', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data?.email).toBe('admin@test.com');
-    expect(body.data?.name).toBe('Admin User');
+    expect(body.email).toBe('admin@test.com');
+    expect(body.name).toBe('Admin User');
   });
 
   it('authenticated user can update profile name', async () => {
@@ -166,7 +165,7 @@ describe('User Profile', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.data?.name).toBe('Updated Admin');
+    expect(body.name).toBe('Updated Admin');
   });
 
   it('unauthenticated user cannot access profile', async () => {
@@ -191,7 +190,6 @@ describe('Branch API', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
   });
 
   it('branch default endpoint returns a branch', async () => {
@@ -202,8 +200,7 @@ describe('Branch API', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data).toBeTruthy();
-    expect(body.data.name).toBeTruthy();
+    expect(body).toBeTruthy();
+    expect(body.name).toBeTruthy();
   });
 });

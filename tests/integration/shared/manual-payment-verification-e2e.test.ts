@@ -85,11 +85,10 @@ describe('POST /webhooks/payments/manual/verify', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.success).toBe(true);
-    expect(body.data.transactionId).toBe(id);
-    expect(body.data.status).toBe('verified');
-    expect(body.data.verifiedBy).toBe('mp-super');
-    expect(body.data.verifiedAt).toBeTruthy();
+    expect(body.transactionId).toBe(id);
+    expect(body.status).toBe('verified');
+    expect(body.verifiedBy).toBe('mp-super');
+    expect(body.verifiedAt).toBeTruthy();
   });
 
   it('returns 404 for an unknown transaction id', async () => {
@@ -147,9 +146,8 @@ describe('POST /webhooks/payments/manual/reject', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('failed');
-    expect(body.data.failureReason).toBe('mismatched bKash trxId');
+    expect(body.status).toBe('failed');
+    expect(body.failureReason).toBe('mismatched bKash trxId');
   });
 
   it('returns 409 rejecting an already-verified transaction', async () => {

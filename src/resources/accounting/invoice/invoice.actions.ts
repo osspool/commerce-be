@@ -2,16 +2,33 @@
  * Invoice Action Registry — Stripe-style state transitions
  *
  * Wired via declarative `actions:` block → POST /accounting/invoices/:id/action
- * Body: { action: "post" | "cancel" | "void" | "unpost" | "record_payment" |
- *         "credit_note_full" | "credit_note_partial" | "mark_sent" |
- *         "mark_viewed" | "clone", ... }
+ * Body: { action: "submit_for_approval" | "decide" | "post" | "cancel" |
+ *         "void" | "unpost" | "record_payment" | "credit_note_full" |
+ *         "credit_note_partial" | "mark_sent" | "mark_viewed" | "clone" |
+ *         "create_deposit_invoice" | "send_email", ... }
  *
- * All actions map 1:1 to domain verbs on InvoiceRepository (PACKAGE_RULES §30).
+ * Approval gate (`submit_for_approval` + `decide`) is contributed by the
+ * shared `withApprovalChain` preset and replaces the legacy
+ * `submit_for_approval` / `approve` / `reject` action shortcuts. The hooks
+ * delegate to InvoiceRepository's `submit` / `approve` / `reject` so the
+ * invoice's heavy side effects (status flips, numbering, ledger journal
+ * entry on approve, domain events) are preserved end-to-end.
+ *
+ * Post-approval lifecycle verbs (post, cancel, void, …) map 1:1 to
+ * InvoiceRepository methods — see PACKAGE_RULES §30.
  */
 
 import { requireRoles } from '@classytic/arc/permissions';
 import { getOrgId, getUserId } from '@classytic/arc/scope';
 import type { RequestWithExtras } from '@classytic/arc/types';
+import type { Invoice } from '@classytic/invoice';
+import type { Repository } from '@classytic/mongokit';
+import {
+  withApprovalChain,
+  type ApprovableDoc,
+} from '#core/approval/with-approval-chain.js';
+import logger from '#lib/utils/logger.js';
+import { createPolicyChainResolver } from '#resources/approval/policy-resolver.js';
 import { invoice } from './invoice-engine.js';
 
 function ctx(req: RequestWithExtras) {
@@ -23,12 +40,82 @@ function ctx(req: RequestWithExtras) {
 
 const financeRoles = requireRoles('admin', 'finance_admin', 'finance_manager');
 
+// ─── Approval gate (submit_for_approval + decide) ──────────────────────────
+//
+// Replaces the legacy `submit_for_approval` / `approve` / `reject` shortcuts.
+// The preset attaches / mutates the `ApprovalChain` value object on the
+// invoice doc; the hooks below call into InvoiceRepository so existing side
+// effects (status transitions, numbering, ledger posting on approve, domain
+// events) keep firing.
+/** Local view of `Invoice` that satisfies `ApprovableDoc` (P7). */
+type InvoiceDoc = Invoice & ApprovableDoc;
+
+const approvalActions = withApprovalChain<InvoiceDoc>({
+  subjectType: 'invoice',
+  // `invoice()` is safe to call here — `invoice.actions.ts` is dynamically
+  // imported from `buildInvoiceResource()` AFTER `initializeInvoiceEngine()`
+  // runs in `invoice.plugin.ts`.
+  repository: invoice().repositories.invoices as unknown as Repository<InvoiceDoc>,
+  // Only `draft` is a valid submit-from status — `assertTransition('submit')`
+  // in the repo enforces the same. The preset additionally allows re-submit
+  // when the prior chain is in `rejected` status (post-rejection retry); by
+  // that point `repo.reject()` has already flipped the invoice back to draft.
+  allowedSubmitStatus: ['draft'],
+  // `status` is the default field; no `getStatus` override needed.
+  permissions: {
+    submit: financeRoles,
+    decide: financeRoles,
+  },
+  toEvaluationContext: (doc) => ({
+    branchId: String(doc.organizationId ?? ''),
+    amount: Number(doc.totalAmount ?? 0),
+    moveType: doc.moveType,
+    currency: doc.currency,
+  }),
+  resolveChain: createPolicyChainResolver(),
+  // Preset has already persisted the chain. `repo.submit` flips
+  // `draft → pending_approval` and emits `invoice:approval.submitted`. We
+  // omit the `{ chain }` option because the chain is already on the doc.
+  onSubmitted: async (doc, c) => {
+    return invoice().repositories.invoices.submit(String(doc._id), {
+      organizationId: c.organizationId,
+      ...(c.actorId !== null ? { actorId: c.actorId } : {}),
+    });
+  },
+  // Chain just resolved to `approved`. `repo.approve` re-checks
+  // `isApproved(chain)`, then transitions `pending_approval → draft → posted`
+  // (numbering, FX freeze, ledger journal entry, `invoice:posted` event)
+  // and emits `invoice:approval.approved`.
+  onApproved: async (doc, c) => {
+    return invoice().repositories.invoices.approve(String(doc._id), {
+      organizationId: c.organizationId,
+      ...(c.actorId !== null ? { actorId: c.actorId } : {}),
+    });
+  },
+  // Chain just resolved to `rejected`. `repo.reject` flips
+  // `pending_approval → draft` and emits `invoice:approval.rejected`. The
+  // decision note becomes the human-readable rejection reason.
+  onRejected: async (doc, decision, c) => {
+    return invoice().repositories.invoices.reject(
+      String(doc._id),
+      decision.note ?? 'rejected',
+      {
+        organizationId: c.organizationId,
+        ...(c.actorId !== null ? { actorId: c.actorId } : {}),
+      },
+    );
+  },
+});
+
 /**
  * Arc 2.8 declarative actions — imported by invoice.resource.ts.
  * All actions use financeRoles via actionPermissions fallback.
  * Only actions with schemas use the full ActionDefinition format.
  */
 export const invoiceActions = {
+  // Approval gate — submit_for_approval + decide come from the shared preset
+  ...approvalActions,
+
   post: async (id: string, _data: Record<string, unknown>, req: RequestWithExtras) => {
     return invoice().repositories.invoices.post(id, ctx(req));
   },
@@ -145,7 +232,14 @@ export const invoiceActions = {
                 : '',
             },
           })
-          .catch(() => {}); // don't fail the action if email fails
+          .catch((err: unknown) => {
+            // don't fail the action if email fails — but surface it so we
+            // can debug delivery problems without losing the invoice send.
+            logger.warn(
+              { err, invoiceId: inv._id, invoiceNumber: inv.number },
+              'invoice send_email: notification.send failed',
+            );
+          });
       }
       return inv;
     },
@@ -162,25 +256,6 @@ export const invoiceActions = {
 
   clone: async (id: string, data: Record<string, unknown>, req: RequestWithExtras) => {
     return invoice().repositories.invoices.clone(id, data as any, ctx(req));
-  },
-
-  submit_for_approval: async (id: string, _data: Record<string, unknown>, req: RequestWithExtras) => {
-    return invoice().repositories.invoices.submit(id, ctx(req));
-  },
-
-  approve: async (id: string, _data: Record<string, unknown>, req: RequestWithExtras) => {
-    return invoice().repositories.invoices.approve(id, ctx(req));
-  },
-
-  reject: {
-    handler: async (id: string, data: Record<string, unknown>, req: RequestWithExtras) => {
-      return invoice().repositories.invoices.reject(id, (data.reason as string) ?? 'rejected', ctx(req));
-    },
-    schema: {
-      type: 'object',
-      properties: { reason: { type: 'string', description: 'Rejection reason' } },
-      required: [],
-    },
   },
 
   // Quote lifecycle lives in @classytic/order's QuotationRepository, not here.

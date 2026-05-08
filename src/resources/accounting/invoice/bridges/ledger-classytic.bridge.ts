@@ -18,23 +18,36 @@
  */
 
 import type { LedgerBridge } from '@classytic/invoice/domain/contracts';
-import { createLedgerBridge } from '@classytic/ledger/sync';
+// `createLedgerBridge` was hosted at `@classytic/ledger/sync` until
+// ledger 0.11.0; the subpath was removed and the helper moved into the
+// host (PACKAGE_RULES P1 — ledger cannot depend on `@classytic/invoice`).
+import { createLedgerBridge } from '#shared/ledger-sync/ledger-bridge.js';
+import { BD_ACCOUNT_CODES } from '@classytic/ledger-bd';
 import mongoose from 'mongoose';
 import accounting, { JournalEntry } from '../../accounting.engine.js';
 
 /**
  * Bangladesh chart-of-account codes — maps invoice move types to the right GL account.
- * These align with `@classytic/ledger-bd`'s reference BD chart (1141 AR, 2111 AP, etc.).
- * A different country pack would supply its own account map.
+ * Canonical mappings live in `@classytic/ledger-bd` `BD_ACCOUNT_CODES`; the
+ * shape this bridge needs (`receivable / payable / revenue / expense /
+ * taxPayable / taxReceivable / cash`) is `@classytic/ledger`'s contract,
+ * so we adapt domain-named keys to the bridge's expected ones here.
+ *
+ * Pre-0.2.2 this map had two pre-existing bugs: `taxPayable` pointed at
+ * `2141` (Land Development Tax) instead of `2132` (VAT Output Payable),
+ * and `cash` pointed at `1112` (Cash in Hand — Foreign Currency) instead
+ * of `1113` (Cash at Bank — Current Account). Both fixed by routing
+ * through the canonical `BD_ACCOUNT_CODES`.
  */
+
 export const BD_ACCOUNTS = {
-  receivable: '1141', // Accounts Receivable
-  payable: '2111', // Accounts Payable
-  revenue: '4111', // Sales Revenue
-  expense: '5111', // Cost of Goods Sold
-  taxPayable: '2141', // VAT Payable
-  taxReceivable: '1151', // VAT Receivable (Input Tax)
-  cash: '1112', // Bank Account (POS receipts debit here directly)
+  receivable: BD_ACCOUNT_CODES.AR,
+  payable: BD_ACCOUNT_CODES.AP,
+  revenue: BD_ACCOUNT_CODES.SALES_REVENUE,
+  expense: BD_ACCOUNT_CODES.COGS_MATERIALS,
+  taxPayable: BD_ACCOUNT_CODES.VAT_OUTPUT_PAYABLE,
+  taxReceivable: BD_ACCOUNT_CODES.VAT_RECEIVABLE,
+  cash: BD_ACCOUNT_CODES.CASH,
 } as const;
 
 /**
@@ -78,7 +91,7 @@ export function createClassyticLedgerBridge(): LedgerBridge {
   async function stampPartner(
     jeId: string,
     partnerId: string,
-    partnerType: 'customer' | 'vendor',
+    partnerType: 'customer' | 'supplier',
     accountTypeCode: string, // '1141' for AR, '2111' for AP, '1112' for cash
   ): Promise<void> {
     const Account = accounting.models.Account as {
@@ -100,8 +113,13 @@ export function createClassyticLedgerBridge(): LedgerBridge {
     return BD_ACCOUNTS.receivable; // out_invoice, out_refund
   }
 
-  function partnerSide(moveType: string): 'customer' | 'vendor' {
-    return moveType === 'in_invoice' || moveType === 'in_refund' ? 'vendor' : 'customer';
+  // Canonical partner taxonomy: { 'customer' | 'supplier' }. Earlier
+  // revisions used 'vendor' here, which broke PartnerResolver (resolves
+  // 'supplier' against the Supplier model) — so AP-aging + vendor-bills
+  // showed bare ObjectIds. Aligned terminology with the resolver and the
+  // Mongoose Supplier model name.
+  function partnerSide(moveType: string): 'customer' | 'supplier' {
+    return moveType === 'in_invoice' || moveType === 'in_refund' ? 'supplier' : 'customer';
   }
 
   return {

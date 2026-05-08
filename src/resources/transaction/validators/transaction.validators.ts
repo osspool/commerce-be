@@ -6,8 +6,8 @@
  */
 
 import { blockIf } from '@classytic/mongokit';
-import createError from 'http-errors';
 import { validateTransactionUpdate } from '../transaction.helpers.js';
+import { createError } from '@classytic/arc/utils';
 
 interface ValidatorContext {
   request?: {
@@ -68,9 +68,9 @@ export const validateTransactionUpdateData = () => ({
     );
 
     if (!validation.valid) {
-      const error = createError(400, validation.message || 'Update not allowed');
-      (error as Record<string, unknown>).violations = validation.violations;
-      throw error;
+      throw createError(400, validation.message || 'Update not allowed', {
+        violations: validation.violations,
+      });
     }
   },
 });

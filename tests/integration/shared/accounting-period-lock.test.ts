@@ -138,7 +138,7 @@ async function tryPostJournalEntry(opts: {
   revenueId: string;
   branchId?: string;
   amount?: number;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<{ ok: boolean; message?: string }> {
   const { journalEntryRepository: repo } = await import('../../../src/resources/accounting/accounting.engine.js');
   const amount = opts.amount ?? 100000;
   try {
@@ -157,7 +157,7 @@ async function tryPostJournalEntry(opts: {
     await repo.post(id, undefined, { actorId: TEST_ACTOR_ID });
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: (err as Error).message };
+    return { ok: false, message: (err as Error).message };
   }
 }
 
@@ -270,7 +270,7 @@ describe('Fiscal Period Lock (built-in ledger plugin)', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/fiscal period|closed/i);
+    expect(result.message).toMatch(/fiscal period|closed/i);
   });
 
   it('posting on the boundary date is rejected', async () => {
@@ -311,60 +311,77 @@ describe('Fiscal Period Lock (built-in ledger plugin)', () => {
     expect(after.ok).toBe(true);
   });
 
-  it('reverse() into closed period is rejected (reversal date matters)', async () => {
+  it('reverse() into closed period creates a draft (period check deferred to post)', async () => {
+    // Industry standard (Odoo `_reverse_moves`, ERPNext `make_reverse_journal_entry`):
+    // a reversal is always created as a Draft. Drafts are allowed in any period —
+    // the fiscal-lock plugin only fires when state transitions to `posted`.
     const { cashId, revenueId } = await resolveAccounts();
-    // Period is open right now — post the original
     await seedOpenFiscalPeriod('2026-04-01', '2026-04-30');
-    const post = await tryPostJournalEntry({
-      date: '2026-04-15',
-      cashId,
-      revenueId,
-    });
+    const post = await tryPostJournalEntry({ date: '2026-04-15', cashId, revenueId });
     expect(post.ok).toBe(true);
 
-    // Now close a DIFFERENT period in the past, then try to reverse INTO it
     await seedClosedFiscalPeriod('2026-02-01', '2026-02-28');
     const { journalEntryRepository: repo } = await import('../../../src/resources/accounting/accounting.engine.js');
     const db = mongoose.connection.db!;
     const original = await db.collection('journalentries').findOne({ state: 'posted' });
 
-    let threw = false;
-    try {
-      await repo.reverse(original!._id, undefined, {
-        reversalDate: new Date('2026-02-15T12:00:00Z'), actorId: TEST_ACTOR_ID,
-      });
-    } catch (err) {
-      threw = true;
-      expect((err as Error).message).toMatch(/fiscal period|closed/i);
-    }
-    expect(threw).toBe(true);
+    const result = await repo.reverse(original!._id, undefined, {
+      reversalDate: new Date('2026-02-15T12:00:00Z'), actorId: TEST_ACTOR_ID,
+    });
+
+    const reversal = await db.collection('journalentries').findOne({ _id: result.reversal._id });
+    expect(reversal?.state).toBe('draft');
   });
 
-  it('reverse() with reversalDate in an open period succeeds (forward correction)', async () => {
+  it('reverse({ autoPost: true }) into closed period is rejected at post time', async () => {
+    // Odoo's `cancel=True` semantic — reverse + post atomically. The post step
+    // hits fiscal-lock and throws. On a transactional DB the whole call rolls
+    // back; standalone MongoDB (test env) commits the draft and only the post
+    // is rejected. Either way the contract is the same observable invariant:
+    // no NEW entry transitions to `posted`.
     const { cashId, revenueId } = await resolveAccounts();
     await seedOpenFiscalPeriod('2026-04-01', '2026-04-30');
-    const post = await tryPostJournalEntry({
-      date: '2026-04-10',
-      cashId,
-      revenueId,
-    });
+    const post = await tryPostJournalEntry({ date: '2026-04-15', cashId, revenueId });
+    expect(post.ok).toBe(true);
+
+    await seedClosedFiscalPeriod('2026-02-01', '2026-02-28');
+    const { journalEntryRepository: repo } = await import('../../../src/resources/accounting/accounting.engine.js');
+    const db = mongoose.connection.db!;
+    const original = await db.collection('journalentries').findOne({ state: 'posted' });
+
+    await expect(
+      repo.reverse(original!._id, undefined, {
+        reversalDate: new Date('2026-02-15T12:00:00Z'),
+        actorId: TEST_ACTOR_ID,
+        autoPost: true,
+      }),
+    ).rejects.toThrow(/fiscal period|closed/i);
+
+    // Only the original is posted — the post step truly failed.
+    const posted = await db.collection('journalentries').find({ state: 'posted' }).toArray();
+    expect(posted).toHaveLength(1);
+    expect(posted[0]._id.toString()).toBe(original!._id.toString());
+  });
+
+  it('reverse() with reversalDate in an open period creates a draft counter-entry', async () => {
+    const { cashId, revenueId } = await resolveAccounts();
+    await seedOpenFiscalPeriod('2026-04-01', '2026-04-30');
+    const post = await tryPostJournalEntry({ date: '2026-04-10', cashId, revenueId });
     expect(post.ok).toBe(true);
 
     const { journalEntryRepository: repo } = await import('../../../src/resources/accounting/accounting.engine.js');
     const db = mongoose.connection.db!;
     const original = await db.collection('journalentries').findOne({ state: 'posted' });
 
-    // Reverse with reversalDate in same open period — Odoo-style forward correction
-    const reversed = await repo.reverse(original!._id, undefined, {
+    await repo.reverse(original!._id, undefined, {
       reversalDate: new Date('2026-04-20T12:00:00Z'), actorId: TEST_ACTOR_ID,
     });
 
-    expect(reversed).toBeDefined();
-    // Original stays posted, new counter-entry created
+    // Industry standard: original stays posted, reversal is created as draft for review.
     const all = await db.collection('journalentries').find({}).toArray();
-    expect(all.length).toBe(2);
-    const posted = all.filter((e) => e.state === 'posted');
-    expect(posted.length).toBe(2);
+    expect(all).toHaveLength(2);
+    expect(all.filter((e) => e.state === 'posted')).toHaveLength(1);
+    expect(all.filter((e) => e.state === 'draft')).toHaveLength(1);
   });
 });
 
@@ -395,7 +412,7 @@ describe('Day-Close Lock (be-prod plugin)', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/closed|locked|day/i);
+    expect(result.message).toMatch(/closed|locked|day/i);
   });
 
   it('posting ON lastClosedDate itself is rejected', async () => {
@@ -442,61 +459,50 @@ describe('Day-Close Lock (be-prod plugin)', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('reverse() with forward reversalDate succeeds even if original is in closed day', async () => {
+  it('reverse() with forward reversalDate creates a draft when original is in closed day', async () => {
     const { cashId, revenueId } = await resolveAccounts();
 
-    // Step 1: post original on 2026-04-03 (no lock yet)
-    const post = await tryPostJournalEntry({
-      date: '2026-04-03',
-      cashId,
-      revenueId,
-      branchId: ctx.orgId,
-    });
+    const post = await tryPostJournalEntry({ date: '2026-04-03', cashId, revenueId, branchId: ctx.orgId });
     expect(post.ok).toBe(true);
-
-    // Step 2: close days through 2026-04-05
     await seedClosedShift(ctx.orgId, '2026-04-05');
 
-    // Step 3: reverse with reversalDate in OPEN range (after lock) — should succeed
     const { journalEntryRepository: repo } = await import('../../../src/resources/accounting/accounting.engine.js');
     const db = mongoose.connection.db!;
     const original = await db.collection('journalentries').findOne({ state: 'posted' });
 
-    const reversed = await repo.reverse(original!._id, undefined, {
+    const result = await repo.reverse(original!._id, undefined, {
       reversalDate: new Date('2026-04-10T12:00:00Z'), actorId: TEST_ACTOR_ID,
     });
 
-    expect(reversed).toBeDefined();
+    const reversal = await db.collection('journalentries').findOne({ _id: result.reversal._id });
+    expect(reversal?.state).toBe('draft');
   });
 
-  it('reverse() with reversalDate in closed day is rejected', async () => {
+  it('reverse({ autoPost: true }) with reversalDate in closed day is rejected at post', async () => {
+    // Day-close watermark sits on the post step. Pure reverse() always creates
+    // a draft (which is allowed); only the autoPost path attempts to transition
+    // it to `posted`, which trips the lock.
     const { cashId, revenueId } = await resolveAccounts();
-    // Post original first (no lock yet)
-    const post = await tryPostJournalEntry({
-      date: '2026-04-10',
-      cashId,
-      revenueId,
-      branchId: ctx.orgId,
-    });
+    const post = await tryPostJournalEntry({ date: '2026-04-10', cashId, revenueId, branchId: ctx.orgId });
     expect(post.ok).toBe(true);
-
-    // Close through 2026-04-05 (original at 04-10 is fine, but reversal target is locked)
     await seedClosedShift(ctx.orgId, '2026-04-05');
 
     const { journalEntryRepository: repo } = await import('../../../src/resources/accounting/accounting.engine.js');
     const db = mongoose.connection.db!;
     const original = await db.collection('journalentries').findOne({ state: 'posted' });
 
-    let threw = false;
-    try {
-      await repo.reverse(original!._id, undefined, {
-        reversalDate: new Date('2026-04-03T12:00:00Z'), actorId: TEST_ACTOR_ID,
-      });
-    } catch (err) {
-      threw = true;
-      expect((err as Error).message).toMatch(/close|locked/i);
-    }
-    expect(threw).toBe(true);
+    await expect(
+      repo.reverse(original!._id, undefined, {
+        reversalDate: new Date('2026-04-03T12:00:00Z'),
+        actorId: TEST_ACTOR_ID,
+        autoPost: true,
+      }),
+    ).rejects.toThrow(/close|locked/i);
+
+    // Only the original is posted — the post step truly failed.
+    const posted = await db.collection('journalentries').find({ state: 'posted' }).toArray();
+    expect(posted).toHaveLength(1);
+    expect(posted[0]._id.toString()).toBe(original!._id.toString());
   });
 });
 
@@ -516,6 +522,6 @@ describe('Combined: Fiscal + Day Lock interaction', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/fiscal|closed/i);
+    expect(result.message).toMatch(/fiscal|closed/i);
   });
 });

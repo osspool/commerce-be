@@ -94,9 +94,12 @@ async function getFulfillmentStatus(fulNumber: string, forOrderNumber: string = 
     headers: adminHeaders(),
   });
   if (res.statusCode >= 400) return null;
-  const body = parse(res.body);
-  const data = body?.data as { docs?: Array<Record<string, unknown>> } | Array<Record<string, unknown>> | undefined;
-  const list = Array.isArray(data) ? data : (data?.docs ?? []);
+  const body = parse(res.body) as Record<string, unknown> | null;
+  // The handler spreads mongokit's pagination result at the top level —
+  // `docs` is a sibling of `success`, not under `data` (matches the
+  // arc-next list convention). Older test helpers read `body.docs`
+  // and silently got zero items.
+  const list = (body?.data as Array<Record<string, unknown>> | undefined) ?? [];
   const match = list.find((f) => f.fulfillmentNumber === fulNumber);
   return (match?.status as string) ?? null;
 }
@@ -130,7 +133,7 @@ async function createOrderAndFulfillment(idempotencyKey: string): Promise<{ orde
     throw new Error(`Order place failed: ${orderRes.statusCode} ${orderRes.body}`);
   }
   const orderBody = parse(orderRes.body);
-  const newOrderNumber = ((orderBody?.data as Record<string, unknown>)?.orderNumber) as string;
+  const newOrderNumber = ((orderBody as Record<string, unknown>)?.orderNumber) as string;
 
   const fulRes = await server.inject({
     method: 'POST',
@@ -145,7 +148,7 @@ async function createOrderAndFulfillment(idempotencyKey: string): Promise<{ orde
     throw new Error(`Fulfillment create failed: ${fulRes.statusCode} ${fulRes.body}`);
   }
   const fulBody = parse(fulRes.body);
-  const newFulNumber = ((fulBody?.data as Record<string, unknown>)?.fulfillmentNumber) as string;
+  const newFulNumber = ((fulBody as Record<string, unknown>)?.fulfillmentNumber) as string;
   return { orderNumber: newOrderNumber, fulfillmentNumber: newFulNumber };
 }
 
@@ -225,8 +228,8 @@ beforeAll(async () => {
     throw new Error(`Order place failed: ${orderRes.statusCode} ${orderRes.body}`);
   }
   const orderBody = parse(orderRes.body);
-  orderNumber = ((orderBody?.data as Record<string, unknown>)?.orderNumber
-    ?? (orderBody?.data as Record<string, unknown>)?.order_number) as string;
+  orderNumber = ((orderBody as Record<string, unknown>)?.orderNumber
+    ?? (orderBody as Record<string, unknown>)?.order_number) as string;
   if (!orderNumber) {
     throw new Error(`Order number not found in response: ${orderRes.body}`);
   }
@@ -244,7 +247,7 @@ beforeAll(async () => {
     throw new Error(`Fulfillment create failed: ${fulRes.statusCode} ${fulRes.body}`);
   }
   const fulBody = parse(fulRes.body);
-  fulfillmentNumber = ((fulBody?.data as Record<string, unknown>)?.fulfillmentNumber) as string;
+  fulfillmentNumber = ((fulBody as Record<string, unknown>)?.fulfillmentNumber) as string;
   expect(fulfillmentNumber).toMatch(/^FUL-/);
 }, 180_000);
 
@@ -446,7 +449,7 @@ describe('Order action permissions — branch_manager can drive their branch ord
     if (orderRes.statusCode >= 400) {
       throw new Error(`Order place failed: ${orderRes.statusCode} ${orderRes.body}`);
     }
-    return ((parse(orderRes.body)?.data as Record<string, unknown>)?.orderNumber) as string;
+    return ((parse(orderRes.body) as Record<string, unknown>)?.orderNumber) as string;
   }
 
   it('branch_manager can cancel an order placed at their branch', async () => {
@@ -458,7 +461,7 @@ describe('Order action permissions — branch_manager can drive their branch ord
       payload: { action: 'cancel', reason: 'customer request' },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(data.status).toBe('canceled');
   });
 
@@ -471,7 +474,7 @@ describe('Order action permissions — branch_manager can drive their branch ord
       payload: { action: 'confirm' },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     expect(data.status).toBe('confirmed');
   });
 

@@ -1,5 +1,6 @@
 import { stringify as csvStringify } from 'csv-stringify/sync';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { sanitizeDisplayName } from '#resources/sales/customers/customer.name-utils.js';
 import { getTransactionModel } from '#shared/revenue/engine.js';
 
 interface AggregatedDoc {
@@ -76,7 +77,12 @@ export function formatStatementRows(docs: AggregatedDoc[]): StatementRow[] {
     sourceModel: d.sourceModel,
     sourceId: d.sourceId ? String(d.sourceId) : null,
     orderId: d.order?._id ? String(d.order._id) : null,
-    orderCustomerName: d.order?.customerName || null,
+    // Snapshot guard: an order's `customerName` is denormalised at order
+    // creation time. Prior to the customer.name-utils hardening it could
+    // carry a Better Auth nanoid (e.g. `gcqAUBgGpRnDZbyPgKbS`). Sanitize
+    // before exposing to the finance CSV — empty/token-shaped → null so
+    // the column degrades gracefully instead of leaking an internal id.
+    orderCustomerName: d.order?.customerName ? sanitizeDisplayName(d.order.customerName, '') || null : null,
     vatInvoiceNumber:
       ((d.order?.vat as Record<string, unknown>)?.invoiceNumber as string) ||
       ((d.metadata as Record<string, unknown>)?.vatInvoiceNumber as string) ||
@@ -175,7 +181,7 @@ export async function getStatement(
   const rows = formatStatementRows(docs as AggregatedDoc[]);
 
   if (format === 'json') {
-    return reply.send({ success: true, count: rows.length, data: rows });
+    return reply.send(rows);
   }
 
   const csv = csvStringify(rows, { header: true });

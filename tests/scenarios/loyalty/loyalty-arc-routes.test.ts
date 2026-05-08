@@ -140,12 +140,12 @@ describe('Loyalty Arc Routes', () => {
 
       const body = res.json();
       expect(res.statusCode).toBe(201);
-      expect(body.success).toBe(true);
-      expect(body.data.externalId).toBe(customerId);
-      expect(body.data.status).toBe('active');
-      expect(body.data.cardId).toBeDefined();
-      expect(body.data.referralCode).toBeDefined();
-      expect(body.data.cardId).not.toBe(body.data.referralCode);
+
+      expect(body.externalId).toBe(customerId);
+      expect(body.status).toBe('active');
+      expect(body.cardId).toBeDefined();
+      expect(body.referralCode).toBeDefined();
+      expect(body.cardId).not.toBe(body.referralCode);
     });
 
     it('POST /loyalty/members — duplicate returns 409', async () => {
@@ -167,8 +167,8 @@ describe('Loyalty Arc Routes', () => {
 
       const body = res.json();
       expect(res.statusCode).toBe(200);
-      expect(body.data.member).toBeDefined();
-      expect(body.data.balance).toBeDefined();
+      expect(body.member).toBeDefined();
+      expect(body.balance).toBeDefined();
     });
 
     it('POST /loyalty/members/:customerId/action { action: "adjust" } — credits points', async () => {
@@ -180,7 +180,7 @@ describe('Loyalty Arc Routes', () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.balanceAfter).toBe(500);
+      expect(res.json().balanceAfter).toBe(500);
     });
 
     it('GET /loyalty/members/:customerId/history — paginated', async () => {
@@ -192,7 +192,7 @@ describe('Loyalty Arc Routes', () => {
 
       const body = res.json();
       expect(res.statusCode).toBe(200);
-      expect(body.data.docs.length).toBeGreaterThan(0);
+      expect(body.data.length).toBeGreaterThan(0);
     });
 
     it('POST /loyalty/members/:id/action { deactivate | reactivate } lifecycle', async () => {
@@ -203,7 +203,7 @@ describe('Loyalty Arc Routes', () => {
         payload: { action: 'deactivate' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.status).toBe('inactive');
+      expect(res.json().status).toBe('inactive');
 
       res = await app.inject({
         method: 'POST',
@@ -212,7 +212,7 @@ describe('Loyalty Arc Routes', () => {
         payload: { action: 'reactivate' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.status).toBe('active');
+      expect(res.json().status).toBe('active');
     });
   });
 
@@ -237,7 +237,7 @@ describe('Loyalty Arc Routes', () => {
       });
 
       expect(res.statusCode).toBe(201);
-      ruleId = res.json().data._id;
+      ruleId = res.json()._id;
     });
 
     it('GET /loyalty/earning-rules — lists (Arc adapter pagination shape)', async () => {
@@ -250,7 +250,7 @@ describe('Loyalty Arc Routes', () => {
       // Arc adapter returns mongokit's OffsetPaginationResult — `data` is the
       // array of docs in Arc's standard envelope, with pagination meta alongside.
       const body = res.json();
-      const docs = (body.data?.docs ?? body.data ?? body.docs) as unknown[];
+      const docs = (body.data ?? []) as unknown[];
       expect(Array.isArray(docs)).toBe(true);
       expect((docs as unknown[]).length).toBeGreaterThan(0);
     });
@@ -265,7 +265,7 @@ describe('Loyalty Arc Routes', () => {
         payload: { name: 'Updated Rule' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.name).toBe('Updated Rule');
+      expect(res.json().name).toBe('Updated Rule');
 
       // Stripe-style action: POST /:id/action { action: "deactivate" }
       res = await app.inject({
@@ -275,7 +275,7 @@ describe('Loyalty Arc Routes', () => {
         payload: { action: 'deactivate' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.status).toBe('paused');
+      expect(res.json().status).toBe('paused');
     });
   });
 
@@ -299,7 +299,7 @@ describe('Loyalty Arc Routes', () => {
         },
       });
       expect(res.statusCode).toBe(201);
-      tierId = res.json().data._id;
+      tierId = res.json()._id;
     });
 
     it('GET + PATCH + DELETE lifecycle (Arc adapter)', async () => {
@@ -348,7 +348,7 @@ describe('Loyalty Arc Routes', () => {
         },
       });
       expect(res.statusCode).toBe(201);
-      overrideTierId = res.json().data._id;
+      overrideTierId = res.json()._id;
       expect(overrideTierId).toBeDefined();
     });
 
@@ -365,7 +365,7 @@ describe('Loyalty Arc Routes', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.success).toBe(true);
+
     });
 
     it('POST /loyalty/members/:id/action { clear_tier_override } — removes override', async () => {
@@ -376,7 +376,7 @@ describe('Loyalty Arc Routes', () => {
         payload: { action: 'clear_tier_override' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().success).toBe(true);
+
     });
 
     it('POST /loyalty/members/:id/action { set_tier_override } missing schema — 400', async () => {
@@ -409,7 +409,7 @@ describe('Loyalty Arc Routes', () => {
         headers: headers(),
       });
       expect(memberRes.statusCode).toBe(200);
-      referrerCode = memberRes.json().data.member.referralCode;
+      referrerCode = memberRes.json().member.referralCode;
       expect(referrerCode).toBeTruthy();
 
       const Customer = mongoose.models.Customer;
@@ -443,7 +443,7 @@ describe('Loyalty Arc Routes', () => {
         headers: headers(),
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.referrerMemberId).toBeDefined();
+      expect(res.json().referrerMemberId).toBeDefined();
     });
 
     it('GET /loyalty/referrals/lookup/:code — unknown code 404s', async () => {
@@ -464,9 +464,9 @@ describe('Loyalty Arc Routes', () => {
       });
       expect(res.statusCode).toBe(201);
       const body = res.json();
-      expect(body.success).toBe(true);
-      expect(body.data._id).toBeDefined();
-      referralId = body.data._id;
+
+      expect(body._id).toBeDefined();
+      referralId = body._id;
     });
 
     it('GET /loyalty/referrals?referrerId=... — adapter list with queryParser filter', async () => {
@@ -476,7 +476,7 @@ describe('Loyalty Arc Routes', () => {
         url: `/api/v1/loyalty/referrals/lookup/${referrerCode}`,
         headers: headers(),
       });
-      const referrerMemberId = lookup.json().data.referrerMemberId;
+      const referrerMemberId = lookup.json().referrerMemberId;
 
       const res = await app.inject({
         method: 'GET',
@@ -486,8 +486,8 @@ describe('Loyalty Arc Routes', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       // Arc adapter flattens OffsetPaginationResult into the envelope.
-      expect(Array.isArray(body.docs)).toBe(true);
-      expect(body.docs.length).toBeGreaterThan(0);
+      expect(Array.isArray(body.data)).toBe(true);
+      expect(body.data.length).toBeGreaterThan(0);
     });
 
     it('POST /loyalty/referrals/:id/action { approve } — wired to engine.approve', async () => {
@@ -505,7 +505,7 @@ describe('Loyalty Arc Routes', () => {
       expect([200, 400]).toContain(res.statusCode);
       const body = res.json();
       if (res.statusCode === 200) {
-        expect(body.data.status).toBe('approved');
+        expect(body.status).toBe('approved');
       } else {
         expect(body.code).toBe('VALIDATION_ERROR');
       }
@@ -541,7 +541,7 @@ describe('Loyalty Arc Routes', () => {
         payload: { referralCode: referrerCode, refereeCustomerId: c._id.toString() },
       });
       expect(recordRes.statusCode).toBe(201);
-      const id = recordRes.json().data._id;
+      const id = recordRes.json()._id;
 
       // reject without reason → AJV 400 (referralSchemas.reject.body requires it).
       const bad = await app.inject({
@@ -582,7 +582,7 @@ describe('Loyalty Arc Routes', () => {
         payload: { action: 'adjust', points: 1000, reason: 'redemption test bootstrap' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.balanceAfter).toBeGreaterThanOrEqual(1000);
+      expect(res.json().balanceAfter).toBeGreaterThanOrEqual(1000);
     });
 
     it('POST /loyalty/redemptions/validate — returns RedemptionValidation', async () => {
@@ -594,8 +594,8 @@ describe('Loyalty Arc Routes', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.success).toBe(true);
-      expect(body.data).toMatchObject({
+
+      expect(body).toMatchObject({
         valid: expect.any(Boolean),
         pointsToRedeem: expect.any(Number),
         discountAmount: expect.any(Number),
@@ -618,11 +618,11 @@ describe('Loyalty Arc Routes', () => {
       });
       expect(res.statusCode).toBe(201);
       const body = res.json();
-      expect(body.success).toBe(true);
-      expect(body.data._id).toBeDefined();
-      expect(body.data.status).toBe('reserved');
-      expect(body.data.pointsReserved).toBe(200);
-      redemptionId = body.data._id;
+
+      expect(body._id).toBeDefined();
+      expect(body.status).toBe('reserved');
+      expect(body.pointsReserved).toBe(200);
+      redemptionId = body._id;
     });
 
     it('GET /loyalty/redemptions/:id — fetches the reserved redemption', async () => {
@@ -632,7 +632,7 @@ describe('Loyalty Arc Routes', () => {
         headers: headers(),
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data._id).toBe(redemptionId);
+      expect(res.json()._id).toBe(redemptionId);
     });
 
     it('POST /loyalty/redemptions/:id/action { release } — restores points', async () => {
@@ -643,7 +643,7 @@ describe('Loyalty Arc Routes', () => {
         payload: { action: 'release' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().data.status).toBe('released');
+      expect(res.json().status).toBe('released');
     });
 
     it('POST /loyalty/redemptions/reserve → confirm — debits pointsConfirmed', async () => {
@@ -660,7 +660,7 @@ describe('Loyalty Arc Routes', () => {
         },
       });
       expect(reserveRes.statusCode).toBe(201);
-      const id = reserveRes.json().data._id as string;
+      const id = reserveRes.json()._id as string;
 
       const confirmRes = await app.inject({
         method: 'POST',
@@ -670,8 +670,8 @@ describe('Loyalty Arc Routes', () => {
       });
       expect(confirmRes.statusCode).toBe(200);
       const body = confirmRes.json();
-      expect(body.data.status).toBe('confirmed');
-      expect(body.data.pointsConfirmed).toBe(150);
+      expect(body.status).toBe('confirmed');
+      expect(body.pointsConfirmed).toBe(150);
     });
 
     it('GET /loyalty/redemptions/:id — 404 when missing', async () => {

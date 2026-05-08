@@ -43,7 +43,7 @@ async function openShift(openingCash: number): Promise<string> {
   if (res.statusCode !== 201) {
     throw new Error(`openShift failed: ${res.statusCode} ${res.body}`);
   }
-  return String((parse(res.body)!.data as { _id: string })._id);
+  return String((parse(res.body)! as { _id: string })._id);
 }
 
 async function closeShift(shiftId: string, counted: Record<string, number>) {

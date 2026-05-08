@@ -46,11 +46,45 @@ export const lookupSchema = {
 // `anyOf: [{ type: 'string' }, { type: 'object' }]`.
 const stringOrObject = z.union([z.string(), z.object({}).passthrough()]);
 
+// POS line items support two flavors today:
+//   - `kind: 'sku'` (default) — scanned product line; `productId` resolves
+//     against the catalog, stock check fires against Flow, promo applies.
+//   - `kind: 'service-fee'` — ad-hoc charge added by the cashier from the
+//     POS UI (gift wrap, damaged-product reimbursement, custom handling).
+//     `label` carries the user-typed display string; `productId` is optional
+//     and (when present) holds the synthetic `service:<slug>` code derived
+//     from the label client-side. The controller branches on `kind` to skip
+//     stock check + promo evaluation and to build a self-contained order
+//     line snapshot — there is no catalog product behind a fee.
+//
+// Schema stays backward-compatible: pre-existing clients that omit `kind`
+// keep the legacy `'sku'` semantics unchanged.
 const orderItem = z.object({
-  productId: stringOrObject,
+  kind: z.enum(['sku', 'service-fee']).optional(),
+  productId: stringOrObject.optional(),
   variantSku: z.string().optional(),
   quantity: z.number().min(1),
   price: z.number().optional(),
+  label: z.string().min(1).max(120).optional(),
+}).superRefine((item, ctx) => {
+  // `kind: 'sku'` (or omitted = sku) requires a productId. `kind: 'service-fee'`
+  // requires a label. Hard-failing here is friendlier than a downstream
+  // 500 from the order kernel when a malformed line slips through.
+  const kind = item.kind ?? 'sku';
+  if (kind === 'sku' && !item.productId) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'productId is required for sku items',
+      path: ['productId'],
+    });
+  }
+  if (kind === 'service-fee' && !item.label) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'label is required for service-fee items',
+      path: ['label'],
+    });
+  }
 });
 
 const customerInput = z.object({
@@ -104,12 +138,6 @@ export const createOrderSchema = {
   }),
 };
 
-export const receiptSchema = {
-  params: z.object({
-    orderId: z.string(),
-  }),
-};
-
 // Note: stock-adjustment schemas live in the inventory module — POS never
 // adjusts stock directly. (See inventory-management.plugin.ts.)
 
@@ -117,5 +145,4 @@ export default {
   posProductsSchema,
   lookupSchema,
   createOrderSchema,
-  receiptSchema,
 };

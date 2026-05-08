@@ -94,9 +94,8 @@ describe('Availability API', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = JSON.parse(res.body);
-      expect(body.success).toBe(true);
-      expect(body.data).toHaveProperty('quantityOnHand');
-      expect(body.data).toHaveProperty('quantityAvailable');
+      expect(body).toHaveProperty('quantityOnHand');
+      expect(body).toHaveProperty('quantityAvailable');
     }
   });
 
@@ -107,7 +106,7 @@ describe('Availability API', () => {
     });
     // 500 = Flow engine not seeded for this branch yet (no warehouse bootstrap)
     expect([200, 403, 500]).toContain(res.statusCode);
-    if (res.statusCode === 200) expect(JSON.parse(res.body).success).toBe(true);
+
   });
 
   it('GET /availability without auth should return 401', async () => {
@@ -162,7 +161,7 @@ describe('Scan API', () => {
     });
     // 400 = scan token format not GS1-compliant (plain string, expected barcode)
     expect([200, 400, 403]).toContain(res.statusCode);
-    if (res.statusCode === 200) expect(JSON.parse(res.body).success).toBe(true);
+
   });
 
   it('POST /scan/resolve without auth should return 401', async () => {
@@ -274,7 +273,7 @@ describe('Movement API', () => {
   it('GET /movements should list', async () => {
     const res = await server.inject({ method: 'GET', url: `${API}/inventory/movements`, headers: h() });
     expect([200, 403]).toContain(res.statusCode);
-    if (res.statusCode === 200) expect(JSON.parse(res.body).success).toBe(true);
+
   });
 
   it('GET /movements without auth should return 401', async () => {
@@ -291,7 +290,9 @@ describe('Transfer Actions', () => {
       method: 'POST', url: `${API}/inventory/transfers/000000000000000000000000/action`, headers: h(),
       payload: { action: 'approve' },
     });
-    expect([200, 201, 400, 403, 404, 500]).toContain(res.statusCode);
+    // 422 covers the unified-approval-framework gate when an attached chain
+    // isn't yet approved (APPROVAL_CHAIN_INCOMPLETE).
+    expect([200, 201, 400, 403, 404, 422, 500]).toContain(res.statusCode);
   });
 
   it('POST /transfers/:id/action with invalid action should return 400', async () => {
@@ -300,7 +301,6 @@ describe('Transfer Actions', () => {
       payload: { action: 'invalid_action' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).success).toBe(false);
   });
 
   it('POST /transfers/:id/action without auth should return 401', async () => {

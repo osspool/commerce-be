@@ -1,36 +1,53 @@
 import { auditPlugin } from '@classytic/arc/audit';
-import { batchOperationsPlugin, methodRegistryPlugin, mongoOperationsPlugin, Repository } from '@classytic/mongokit';
+import { healthPlugin, type HealthCheck } from '@classytic/arc/plugins';
+import {
+  batchOperationsPlugin,
+  methodRegistryPlugin,
+  mongoOperationsPlugin,
+  Repository,
+} from '@classytic/mongokit';
 import type { FastifyInstance } from 'fastify';
 import mongoose, { Schema } from 'mongoose';
 import { getMongoConnection } from '#config/connections/index.js';
 import mongoosePlugin from '#config/db.plugin.js';
 import setupFastifyDocs from '#config/fastify-docs.js';
 import config from '#config/index.js';
-import { registerHealthRoutes } from '#core/health.js';
 import registerCorePlugins from '#core/plugins/register-core-plugins.js';
 import sseManagerPlugin from '#core/plugins/sse-manager.plugin.js';
 import { setEventApi } from '#lib/events/arcEvents.js';
+import { setupAuditCollection } from '#resources/audit/audit.indexes.js';
+import auditRepository from '#resources/audit/audit.repository.js';
+import {
+  getFlowEngineOrNull,
+  isFlowEngineReady,
+} from '#resources/inventory/flow/flow-engine.js';
 import revenuePlugin from '#shared/revenue/revenue.plugin.js';
 
 /**
- * Open mongoose schemas for arc's infrastructure collections. Both are
- * `strict: false` so arc owns the document shape — our mongoose layer is
- * only here to give mongokit a Model to attach its Repository to.
+ * Open mongoose schema for arc's idempotency collection.
  *
- * Indexes come from arc's documented schema guidance (see arc's audit +
- * idempotency README) rather than being declared here; they can be managed
- * via migration scripts or Atlas. Arc no longer creates indexes
- * automatically in 2.9.1+ — the user owns the schema.
+ * `strict: false` so arc owns the document shape — our mongoose layer is
+ * only here to give mongokit a `Model` to attach its `Repository` to.
+ *
+ * `_id: false` is intentional: arc's idempotency plugin uses the
+ * idempotency-key header value (a string) directly as the doc `_id`, and
+ * Mongoose's default ObjectId casting would reject that. Suppressing the
+ * default lets arc write whatever string it gets through.
+ *
+ * The audit-log model's schema, pre-save hook, and TTL index management
+ * live with the resource (`#resources/audit/*`) — this file just imports
+ * the repository for the audit plugin and calls `setupAuditCollection`
+ * once the connection is open.
  */
-function buildInfraModels() {
-  const auditSchema = new Schema({}, { strict: false, timestamps: false, _id: false });
-  const idempotencySchema = new Schema({}, { strict: false, timestamps: false, _id: false });
-
-  const AuditModel = mongoose.models.ArcAuditEntry || mongoose.model('ArcAuditEntry', auditSchema, 'audit_logs');
-  const IdempotencyModel =
-    mongoose.models.ArcIdempotency || mongoose.model('ArcIdempotency', idempotencySchema, 'arc_idempotency');
-
-  return { AuditModel, IdempotencyModel };
+function buildIdempotencyModel() {
+  const idempotencySchema = new Schema(
+    {},
+    { strict: false, timestamps: false, _id: false },
+  );
+  return (
+    mongoose.models.ArcIdempotency ||
+    mongoose.model('ArcIdempotency', idempotencySchema, 'arc_idempotency')
+  );
 }
 
 export async function registerInfraPlugins(fastify: FastifyInstance): Promise<void> {
@@ -40,15 +57,10 @@ export async function registerInfraPlugins(fastify: FastifyInstance): Promise<vo
   // mongoose's default connection.
   await getMongoConnection('primary');
 
-  const { AuditModel, IdempotencyModel } = buildInfraModels();
+  const IdempotencyModel = buildIdempotencyModel();
 
-  // arc 2.9.1+ accepts a `RepositoryLike` directly — no wrapper classes,
-  // no `mongoose.connection as any` casts. Pass a mongokit `Repository`
-  // and arc calls `create` / `findAll` / `findOneAndUpdate` on it.
-  const auditRepo = new Repository(AuditModel);
-
-  // Idempotency additionally needs `bulkWrite` + mongo-operations — install
-  // the methodRegistryPlugin base + batchOperationsPlugin + mongoOperationsPlugin.
+  // Idempotency needs `bulkWrite` + mongo-operations — install
+  // methodRegistryPlugin base + batchOperationsPlugin + mongoOperationsPlugin.
   const idempotencyRepo = new Repository(IdempotencyModel, [
     methodRegistryPlugin(),
     batchOperationsPlugin(),
@@ -57,47 +69,16 @@ export async function registerInfraPlugins(fastify: FastifyInstance): Promise<vo
 
   await fastify.register(auditPlugin, {
     enabled: true,
-    repository: auditRepo,
+    repository: auditRepository,
     autoAudit: {
       operations: ['create', 'update', 'delete'],
       perResource: true,
     },
   });
 
-  // Index management. arc 2.9.1+ does not auto-create indexes — the host
-  // owns the schema. Audit lookups filter by resource/documentId/timestamp;
-  // the TTL index drops entries older than 90 days.
-  //
-  // The canonical ascending `{ timestamp: 1 }` index is named `ttl_timestamp`
-  // with `expireAfterSeconds`. Any other ascending-timestamp index (e.g. the
-  // Mongo-default `timestamp_1`, or one with a different TTL value) conflicts
-  // on name/options — drop it first, then (re)create with the canonical shape.
-  try {
-    const existing = (await AuditModel.collection.indexes()) as Array<{
-      name: string;
-      key: Record<string, number>;
-      expireAfterSeconds?: number;
-    }>;
-    const legacyTs = existing.find(
-      (ix) =>
-        ix.name !== 'ttl_timestamp' &&
-        ix.key?.timestamp === 1 &&
-        Object.keys(ix.key).length === 1,
-    );
-    if (legacyTs) {
-      await AuditModel.collection.dropIndex(legacyTs.name);
-    }
-    await Promise.all([
-      AuditModel.collection.createIndex({ resource: 1, documentId: 1, timestamp: -1 }),
-      AuditModel.collection.createIndex({ timestamp: -1 }),
-      AuditModel.collection.createIndex(
-        { timestamp: 1 },
-        { expireAfterSeconds: 90 * 24 * 60 * 60, name: 'ttl_timestamp' },
-      ),
-    ]);
-  } catch (err) {
-    fastify.log.warn({ err }, 'Failed to create audit_logs indexes');
-  }
+  // Index management + legacy-row `expiresAt` backfill for `audit_logs`.
+  // Idempotent — safe to run on every boot.
+  await setupAuditCollection(fastify);
 
   setEventApi(fastify.events);
   await fastify.register(sseManagerPlugin);
@@ -121,6 +102,25 @@ export async function registerInfraPlugins(fastify: FastifyInstance): Promise<vo
   await fastify.register(setupFastifyDocs);
   await fastify.register(revenuePlugin);
 
-  registerHealthRoutes(fastify);
+  // Health endpoints — Arc's auto-registration is disabled in
+  // `create-arc-app-options.ts` (`arcPlugins.health: false`) and we
+  // re-register with domain-aware critical checks. `/_health/ready`
+  // returns 503 until Mongo is connected AND Flow's index materialisation
+  // has resolved — k8s won't route traffic to a half-booted pod.
+  const healthChecks: HealthCheck[] = [
+    {
+      name: 'mongo',
+      check: () => mongoose.connection.readyState === 1,
+      critical: true,
+    },
+    {
+      name: 'flow-engine',
+      check: () => getFlowEngineOrNull() !== null && isFlowEngineReady(),
+      critical: true,
+    },
+  ];
+
+  await fastify.register(healthPlugin, { checks: healthChecks });
+
   fastify.log.info({ trackProductViews: config.app.trackProductViews === true }, 'Feature flags');
 }

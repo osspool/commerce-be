@@ -42,32 +42,6 @@ export default defineResource({
       raw: true,
       schema: {
         querystring: analyticsSchemas.dashboardQuery,
-        response: {
-          200: {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean' },
-              data: {
-                type: 'object',
-                additionalProperties: true,
-              },
-            },
-          },
-          400: {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean' },
-              error: { type: 'string' },
-            },
-          },
-          403: {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean' },
-              error: { type: 'string' },
-            },
-          },
-        },
       },
     },
   ],

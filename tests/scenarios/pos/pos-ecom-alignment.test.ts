@@ -200,8 +200,7 @@ describe('POS is goods-leave-on-sale — stock decrements immediately at the cas
 
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    expect((body?.data as { channel?: string })?.channel).toBe('pos');
+    expect((body as { channel?: string })?.channel).toBe('pos');
 
     const after = await getStockOnHand(testSku, orgId);
     expect(after).toBe(before - 3);
@@ -222,9 +221,8 @@ describe('POS is goods-leave-on-sale — stock decrements immediately at the cas
 
     expect(res.statusCode).toBe(409);
     const body = parse(res.body);
-    expect(body?.success).toBe(false);
     expect(body?.code).toBe('INSUFFICIENT_STOCK');
-    expect(Array.isArray(body?.details)).toBe(true);
+    expect(Array.isArray(body?.meta?.shortages)).toBe(true);
 
     // Stock must be unchanged — no phantom decrement.
     const after = await getStockOnHand(testSku, orgId);
@@ -242,8 +240,7 @@ describe('Branch-wise order visibility — admins see orders scoped to their act
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    const docs = (body?.docs ?? body?.data) as Array<Record<string, unknown>>;
+    const docs = (body?.data ?? []) as Array<Record<string, unknown>>;
     expect(Array.isArray(docs)).toBe(true);
 
     // Every returned order must belong to the active branch — the
@@ -280,6 +277,15 @@ describe('Branch-wise order visibility — admins see orders scoped to their act
 
 describe('E-commerce branch pin — opt-in via the `fulfillsEcommerce` capability flag', () => {
   it('getEcomBranchId() returns null when no branch has fulfillsEcommerce set (backward compatible)', async () => {
+    // Earlier tests / bootstrap may seed branches with `fulfillsEcommerce`
+    // true. Force every org to false so the resolver's `findOne` matches
+    // nothing — this is the backward-compat case (operator hasn't picked
+    // an ecom branch yet).
+    const { default: BranchModel } = await import(
+      '#resources/commerce/branch/branch.model.js'
+    );
+    await BranchModel.updateMany({}, { $set: { fulfillsEcommerce: false } });
+
     const { getEcomBranchId, resetEcomBranchCache } = await import(
       '#resources/sales/orders/ecom-branch.js'
     );
@@ -288,6 +294,13 @@ describe('E-commerce branch pin — opt-in via the `fulfillsEcommerce` capabilit
   });
 
   it('getEcomBranchId() resolves a branch flagged fulfillsEcommerce:true', async () => {
+    // Drop the flag from any pre-existing branch first — otherwise
+    // `findOne` could return whichever was seeded earliest, not the
+    // freshly-flagged ecom warehouse this test is asserting against.
+    const { default: BranchModel } = await import(
+      '#resources/commerce/branch/branch.model.js'
+    );
+    await BranchModel.updateMany({}, { $set: { fulfillsEcommerce: false } });
     const ecomOrgId = new mongoose.Types.ObjectId();
     // Branch model is registered on the `organization` collection with a
     // strict:false stub — we can insert an org doc with the extra branch

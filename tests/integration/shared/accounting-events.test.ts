@@ -151,25 +151,13 @@ async function insertTransaction(overrides: Record<string, unknown> = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Feature Gate — Config Validation', () => {
-  it('registerAccountingEventHandlers is a no-op when config.accounting.enabled = false', async () => {
-    // We test the gate logic directly by importing the config module
-    // In our running server, accounting IS enabled (standard mode).
-    // The actual gate is tested by checking that the function returns early.
+  it('registerAccountingEventHandlers fires only when config.accounting.enabled', async () => {
+    // The single deployment-level switch is `enabled`. The previous
+    // `mode: simple|standard|enterprise` gate was removed — feature
+    // visibility is now an FE/permissions concern, not a config-shape
+    // one. Whatever runs in the test app has accounting on, end of.
     const config = await import('../../../src/config/index.js');
-    const cfg = config.default;
-
-    // In this test run, accounting is enabled
-    expect(cfg.accounting.enabled).toBe(true);
-    expect(cfg.accounting.mode).toBe('standard');
-  });
-
-  it('registerAccountingEventHandlers skips when mode = simple', async () => {
-    // Verify the guard condition: mode === 'simple' returns early
-    // (In accounting.events.ts line 60: if (!config.accounting.enabled || config.accounting.mode === 'simple') return;)
-    // We test this by verifying the config parsing logic
-    const { default: accountingConfig } = await import('../../../src/config/sections/accounting.config.js');
-    expect(accountingConfig.accounting).toBeDefined();
-    expect(['simple', 'standard', 'enterprise']).toContain(accountingConfig.accounting.mode);
+    expect(config.default.accounting.enabled).toBe(true);
   });
 
   it('accounting routes are registered when enabled', async () => {
@@ -198,50 +186,35 @@ describe('Feature Gate — Config Validation', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PART 1b: Accounting Mode Config Parsing
+// PART 1b: Accounting Config Shape
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('Accounting Config — Mode Parsing', () => {
-  it('should parse "simple" mode', () => {
-    // Directly test the parseMode logic via valid mode values
-    const validModes = ['simple', 'standard', 'enterprise'];
-    expect(validModes).toContain('simple');
-    expect(validModes).toContain('standard');
-    expect(validModes).toContain('enterprise');
-  });
-
-  it('should default to "standard" for invalid mode values', async () => {
-    // The parseMode function returns 'standard' for any unknown value
-    // This is tested by verifying the config shape
+describe('Accounting Config — Shape', () => {
+  it('exposes the operational flags the runtime actually uses', async () => {
+    // Single-tenant means single-deployment: there is no `mode` toggle
+    // any more. Granular feature gating is handled in the FE/permissions
+    // layer. The remaining fields are the ones that change behaviour at
+    // boot — `enabled`, `autoSeedAccounts`, `fiscalYearStartMonth`.
     const { default: accountingConfig } = await import('../../../src/config/sections/accounting.config.js');
-    expect(['simple', 'standard', 'enterprise']).toContain(accountingConfig.accounting.mode);
+    expect(accountingConfig.accounting).toHaveProperty('enabled');
+    expect(accountingConfig.accounting).toHaveProperty('autoSeedAccounts');
+    expect(accountingConfig.accounting).toHaveProperty('fiscalYearStartMonth');
+    expect(accountingConfig.accounting).not.toHaveProperty('mode');
   });
 
-  it('enterprise mode should NOT block event handler registration', async () => {
-    // The guard in accounting.events.ts line 60:
-    //   if (!config.accounting.enabled || config.accounting.mode === 'simple') return;
-    // Enterprise is NOT in the block list — it should register handlers like standard
+  it('event-handler registration entrypoint exists and is callable', async () => {
     const eventsSource = await import('../../../src/resources/accounting/accounting.events.js');
     expect(eventsSource.registerAccountingEventHandlers).toBeTypeOf('function');
-
-    // Enterprise mode passes the gate (mode !== 'simple')
-    // In our running server with standard mode, handlers ARE registered.
-    // The same gate logic applies to enterprise: it's not 'simple', so it passes.
   });
 
-  it('all three modes should be valid config values', async () => {
+  it('config exposes the runtime operational flags', async () => {
+    // The config holds boot-level switches the runtime reads. Per-flow
+    // posting behaviour (Odoo-style draft-document / posted-automation
+    // split) lives in the contracts themselves — see
+    // tests/unit/posting-contracts-defaults.test.ts.
     const { default: accountingConfig } = await import('../../../src/config/sections/accounting.config.js');
-    const validModes: string[] = ['simple', 'standard', 'enterprise'];
-    expect(validModes).toContain(accountingConfig.accounting.mode);
-  });
-
-  it('enterprise mode keeps autoPost and autoSeedAccounts flags', async () => {
-    // Enterprise inherits the same config flags as standard
-    const { default: accountingConfig } = await import('../../../src/config/sections/accounting.config.js');
-    expect(accountingConfig.accounting).toHaveProperty('autoPost');
-    expect(accountingConfig.accounting).toHaveProperty('autoSeedAccounts');
-    expect(typeof accountingConfig.accounting.autoPost).toBe('boolean');
     expect(typeof accountingConfig.accounting.autoSeedAccounts).toBe('boolean');
+    expect(typeof accountingConfig.accounting.fiscalYearStartMonth).toBe('number');
   });
 
   it('fiscalYearStartMonth defaults to 7 (July, BD standard)', async () => {
@@ -596,128 +569,6 @@ describe('accounting:order.paid — Online Order Events', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PART 3: POS Day-Close Events
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe.skip('POS Day-Close Events (LEGACY, removed — see pos-shift-* scenarios)', () => {
-  const testDate = '2026-03-15';
-
-  describe('accounting:pos.day.close — Explicit Close', () => {
-    it('should aggregate POS transactions into a single journal entry', async () => {
-      const db = mongoose.connection.db!;
-      const branchOid = new mongoose.Types.ObjectId(ctx.orgId);
-
-      // Insert POS transactions for the test date (BD timezone)
-      await db.collection('revenue_transactions').insertMany([
-        {
-          _id: new mongoose.Types.ObjectId(),
-          flow: 'inflow', status: 'verified', amount: 50000, tax: 7500,
-          method: 'cash', source: 'pos', branch: branchOid, branchCode: 'STD-001',
-          date: new Date(`${testDate}T10:00:00.000+06:00`),
-          sourceModel: 'POS', type: 'order_purchase',
-          currency: 'BDT', fee: 0, net: 42500, refundedAmount: 0,
-          createdAt: new Date(), updatedAt: new Date(),
-        },
-        {
-          _id: new mongoose.Types.ObjectId(),
-          flow: 'inflow', status: 'verified', amount: 80000, tax: 12000,
-          method: 'cash', source: 'pos', branch: branchOid, branchCode: 'STD-001',
-          date: new Date(`${testDate}T14:00:00.000+06:00`),
-          sourceModel: 'POS', type: 'order_purchase',
-          currency: 'BDT', fee: 0, net: 68000, refundedAmount: 0,
-          createdAt: new Date(), updatedAt: new Date(),
-        },
-        {
-          _id: new mongoose.Types.ObjectId(),
-          flow: 'inflow', status: 'verified', amount: 120000, tax: 18000,
-          method: 'bkash', source: 'pos', branch: branchOid, branchCode: 'STD-001',
-          date: new Date(`${testDate}T16:30:00.000+06:00`),
-          sourceModel: 'POS', type: 'order_purchase',
-          currency: 'BDT', fee: 0, net: 102000, refundedAmount: 0,
-          createdAt: new Date(), updatedAt: new Date(),
-        },
-      ]);
-
-      const { publish } = await import('../../../src/lib/events/arcEvents.js');
-      await publish('accounting:pos.day.close', { branchId: ctx.orgId, date: testDate });
-      await new Promise((r) => setTimeout(r, 3000));
-
-      const entry = await db.collection('journalentries').findOne({
-        idempotencyKey: `pos-daily-${ctx.orgId}-${testDate}`,
-      });
-
-      if (entry) {
-        expect(entry.journalType).toBe('POS_SALES');
-        expect(entry.label).toContain('POS Daily Sales');
-        expect(entry.label).toContain(testDate);
-
-        // Should have: cash debit + bkash debit + revenue credit + VAT credit = 4 items
-        expect(entry.journalItems.length).toBeGreaterThanOrEqual(3);
-
-        // Double-entry balance
-        const totalDebit = entry.journalItems.reduce((s: number, i: any) => s + (i.debit || 0), 0);
-        const totalCredit = entry.journalItems.reduce((s: number, i: any) => s + (i.credit || 0), 0);
-        expect(totalDebit).toBe(totalCredit);
-
-        // Total = 50000 + 80000 + 120000 = 250000
-        expect(totalDebit).toBe(250000);
-      }
-    });
-
-    it('should be idempotent — closing same day twice creates only one entry', async () => {
-      const { publish } = await import('../../../src/lib/events/arcEvents.js');
-
-      await publish('accounting:pos.day.close', { branchId: ctx.orgId, date: testDate });
-      await new Promise((r) => setTimeout(r, 2000));
-
-      const db = mongoose.connection.db!;
-      const count = await db.collection('journalentries').countDocuments({
-        idempotencyKey: `pos-daily-${ctx.orgId}-${testDate}`,
-      });
-      expect(count).toBeLessThanOrEqual(1);
-    });
-
-    it('should skip when no POS transactions exist for the date', async () => {
-      const emptyDate = '2025-01-01';
-      const { publish } = await import('../../../src/lib/events/arcEvents.js');
-
-      await publish('accounting:pos.day.close', { branchId: ctx.orgId, date: emptyDate });
-      await new Promise((r) => setTimeout(r, 1500));
-
-      const db = mongoose.connection.db!;
-      const entry = await db.collection('journalentries').findOne({
-        idempotencyKey: `pos-daily-${ctx.orgId}-${emptyDate}`,
-      });
-      expect(entry).toBeNull();
-    });
-  });
-
-  // POS posting routes (`/close-day`, `/backfill`, `/reopen-day`) and the
-  // legacy day-aggregator events (`accounting:day.auto-close`,
-  // `accounting:pos.day.close`) were removed. POS journal entries are now
-  // emitted by `@classytic/pos`'s LedgerBridge at shift close — full
-  // coverage lives in:
-  //   - tests/scenarios/pos/pos-shift-lifecycle.test.ts
-  //   - tests/scenarios/pos/pos-full-lifecycle.scenario.test.ts
-  //   - packages/pos/tests/integration/* (cash-drawer, blind-close,
-  //     tax-tracking, find-stale-shifts, etc.)
-  //
-  // The only remaining HTTP surface on `/accounting/posting/*` is GET
-  // /status (active shifts for current branch) and GET /oversight
-  // (cross-branch active + stale roll-up).
-  describe('GET /accounting/posting/status', () => {
-    it('returns active shifts for the current branch', async () => {
-      const res = await server.inject({
-        method: 'GET',
-        url: `${API}/accounting/posting/status`,
-        headers: auth.as('admin').headers,
-      });
-      expect([200, 403]).toContain(res.statusCode);
-    });
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
 // PART 4: Posting Contract Unit Tests (pure functions, no DB needed)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -778,13 +629,17 @@ describe('Posting Contracts — Pure Function Tests', () => {
     });
 
     it('should map all payment methods to correct accounts', () => {
+      // Each instrument routes to the account that *holds the money* at
+      // the moment of payment — not "the bank" universally. Card sits in
+      // gateway clearing 1-3 days; mobile money in operator clearing
+      // until same-day payout; cash hits the drawer immediately.
       const methods: Record<string, string> = {
-        cash: '1111',
-        card: '1112',
-        bkash: '1122',
-        nagad: '1122',
-        rocket: '1122',
-        bank_transfer: '1112',
+        cash: '1111',          // Petty Cash (drawer)
+        card: '1125',          // Gateway Clearing (Stripe / SSLCommerz hold)
+        bkash: '1126',         // Mobile Money Merchant Clearing
+        nagad: '1126',
+        rocket: '1126',
+        bank_transfer: '1113', // Bank Current Account (direct deposit)
       };
 
       for (const [method, expectedCode] of Object.entries(methods)) {
@@ -873,10 +728,12 @@ describe('Posting Contracts — Pure Function Tests', () => {
       const cashDebit = posting.items.find((i) => i.accountCode === '1111' && i.debit > 0);
       expect(cashDebit?.debit).toBe(500000);
 
-      const bkashDebit = posting.items.find((i) => i.accountCode === '1122' && i.debit > 0);
+      const bkashDebit = posting.items.find((i) => i.accountCode === '1126' && i.debit > 0);
       expect(bkashDebit?.debit).toBe(300000);
 
-      const cardDebit = posting.items.find((i) => i.accountCode === '1112' && i.debit > 0);
+      // Card receipts route to 1125 Gateway Clearing (held by Stripe /
+      // SSLCommerz / ShurjoPay until daily settlement reaches the bank).
+      const cardDebit = posting.items.find((i) => i.accountCode === '1125' && i.debit > 0);
       expect(cardDebit?.debit).toBe(200000);
 
       const revenueCredit = posting.items.find((i) => i.accountCode === '4111');
@@ -946,7 +803,7 @@ describe('Posting Contracts — Pure Function Tests', () => {
       expect(posting.items.length).toBe(2);
 
       const debit = posting.items.find((i) => i.debit > 0)!;
-      expect(debit.accountCode).toBe('1165'); // Merchandise
+      expect(debit.accountCode).toBe('1164'); // Merchandise
       expect(debit.debit).toBe(500000);
 
       const credit = posting.items.find((i) => i.credit > 0)!;
@@ -954,7 +811,7 @@ describe('Posting Contracts — Pure Function Tests', () => {
       expect(credit.credit).toBe(500000);
     });
 
-    it('should credit Bank (1112) when purchase is paid immediately', () => {
+    it('should credit Bank (1113) when purchase is paid immediately', () => {
       const posting = purchaseToPosting({
         purchaseId: 'po-002',
         supplierId: 'sup-002',
@@ -965,15 +822,15 @@ describe('Posting Contracts — Pure Function Tests', () => {
       });
 
       const credit = posting.items.find((i) => i.credit > 0)!;
-      expect(credit.accountCode).toBe('1112');
+      expect(credit.accountCode).toBe('1113');
     });
 
     it('should use correct inventory type accounts', () => {
       const types: Record<string, string> = {
         raw_materials: '1161',
         finished_goods: '1163',
-        merchandise: '1165',
-        packing: '1167',
+        merchandise: '1164',
+        packing: '1165',
       };
 
       for (const [type, code] of Object.entries(types)) {
@@ -1000,7 +857,7 @@ describe('Posting Contracts — Pure Function Tests', () => {
       stockAdjustmentToPosting = mod.stockAdjustmentToPosting;
     });
 
-    it('should create loss: debit shrinkage (6703), credit inventory (1165)', () => {
+    it('should create loss: debit shrinkage (6711), credit inventory (1164)', () => {
       const posting = stockAdjustmentToPosting({
         adjustmentId: 'adj-001',
         type: 'loss',
@@ -1013,13 +870,13 @@ describe('Posting Contracts — Pure Function Tests', () => {
       expect(posting.items.length).toBe(2);
 
       const debit = posting.items.find((i) => i.debit > 0)!;
-      expect(debit.accountCode).toBe('6703');
+      expect(debit.accountCode).toBe('6711');
 
       const credit = posting.items.find((i) => i.credit > 0)!;
-      expect(credit.accountCode).toBe('1165');
+      expect(credit.accountCode).toBe('1164');
     });
 
-    it('should create gain: debit inventory (1165), credit shrinkage (6703)', () => {
+    it('should create gain: debit inventory (1164), credit inventory gain (4317)', () => {
       const posting = stockAdjustmentToPosting({
         adjustmentId: 'adj-002',
         type: 'gain',
@@ -1028,10 +885,10 @@ describe('Posting Contracts — Pure Function Tests', () => {
       });
 
       const debit = posting.items.find((i) => i.debit > 0)!;
-      expect(debit.accountCode).toBe('1165');
+      expect(debit.accountCode).toBe('1164');
 
       const credit = posting.items.find((i) => i.credit > 0)!;
-      expect(credit.accountCode).toBe('6703');
+      expect(credit.accountCode).toBe('4317');
     });
   });
 
@@ -1043,7 +900,7 @@ describe('Posting Contracts — Pure Function Tests', () => {
       cogsToPosting = mod.cogsToPosting;
     });
 
-    it('should create balanced COGS entry: debit 5111, credit 1165', () => {
+    it('should create balanced COGS entry: debit 5111, credit 1164', () => {
       const posting = cogsToPosting({
         orderId: 'order-001',
         costAmount: 80000,
@@ -1057,7 +914,7 @@ describe('Posting Contracts — Pure Function Tests', () => {
       expect(debit.accountCode).toBe('5111');
 
       const credit = posting.items.find((i) => i.credit > 0)!;
-      expect(credit.accountCode).toBe('1165');
+      expect(credit.accountCode).toBe('1164');
 
       expect(debit.debit).toBe(credit.credit);
       expect(debit.debit).toBe(80000);
@@ -1178,7 +1035,7 @@ describe('Full Revenue → Ledger Integration', () => {
       // so we check the ones that are confirmed to resolve during event tests.
       const coreCodes = [
         '1111', // Cash in Hand
-        '1112', // Bank Account — Current
+        '1113', // Bank Account — Current
         '4111', // Domestic Sales Revenue
         '2132', // VAT Output Payable
       ];
@@ -1197,7 +1054,7 @@ describe('Full Revenue → Ledger Integration', () => {
 
     it('should have accounts for all payment method mappings', async () => {
       // Verify that the codes used by PAYMENT_METHOD_ACCOUNTS in sales.contract.ts exist
-      const paymentCodes = ['1111', '1112', '1122'];
+      const paymentCodes = ['1111', '1113', '1126'];
       const found: string[] = [];
       for (const code of paymentCodes) {
         const account = await db().collection('accounts').findOne({
@@ -1209,7 +1066,7 @@ describe('Full Revenue → Ledger Integration', () => {
       }
       // At minimum, cash (1111) and bank (1112) must exist
       expect(found).toContain('1111');
-      expect(found).toContain('1112');
+      expect(found).toContain('1113');
     });
 
     it('seeded accounts are company-wide (no org scope)', async () => {
@@ -1363,12 +1220,13 @@ describe('Full Revenue → Ledger Integration', () => {
       });
 
       expect(entry).not.toBeNull();
-      expect(entry!.journalItems.length).toBe(2); // debit bank, credit revenue
+      expect(entry!.journalItems.length).toBe(2); // debit gateway clearing, credit revenue
 
-      // Verify debit → Bank Account (1112)
+      // Verify debit → Gateway Clearing (1125) — held by the processor
+      // until daily settlement reaches the bank.
       const debitItem = entry!.journalItems.find((i: any) => (Number(i.debit) || 0) > 0);
       const debitAccount = await db().collection('accounts').findOne({ _id: debitItem!.account });
-      expect(debitAccount!.accountTypeCode).toBe('1112');
+      expect(debitAccount!.accountTypeCode).toBe('1125');
       expect(Number(debitItem!.debit)).toBe(400000);
 
       // Verify credit → Sales Revenue (4111)
@@ -1406,7 +1264,7 @@ describe('Full Revenue → Ledger Integration', () => {
       // Debit → Mobile Banking (1122)
       const debitItem = entry!.journalItems.find((i: any) => (Number(i.debit) || 0) > 0);
       const debitAccount = await db().collection('accounts').findOne({ _id: debitItem!.account });
-      expect(debitAccount!.accountTypeCode).toBe('1122');
+      expect(debitAccount!.accountTypeCode).toBe('1126');
       expect(Number(debitItem!.debit)).toBe(172500);
 
       // Credit → Sales Revenue (net = 172500 - 22500 = 150000)
@@ -1424,173 +1282,6 @@ describe('Full Revenue → Ledger Integration', () => {
       expect(vatItem).toBeDefined();
       const vatAccount = await db().collection('accounts').findOne({ _id: vatItem!.account });
       expect(vatAccount!.accountTypeCode).toBe('2132');
-    });
-  });
-
-  // ── 4. POS posting moved to shift-driven (was: POS day-close aggregator) ──
-  // The legacy `accounting:pos.day.close` event + `pos-daily-{branch}-{date}`
-  // idempotency key were removed. POS journal entries are now emitted
-  // by `@classytic/pos`'s LedgerBridge at shift close, with idempotency key
-  // `pos-shift-{shiftId}` and per-method tax tracking. The full-verification
-  // coverage moved to `tests/scenarios/pos/pos-shift-je-correctness.scenario.test.ts`.
-
-  describe.skip('POS Day-Close → Aggregated Journal Entry (LEGACY, removed)', () => {
-    const dayCloseDate = '2026-02-15';
-    let dayCloseEntryId: string | null = null;
-
-    it('should create aggregated entry from multiple POS transactions', async () => {
-      const branchOid = new mongoose.Types.ObjectId(ctx.orgId);
-
-      // 3 POS transactions: 2 cash, 1 bkash
-      await db().collection('revenue_transactions').insertMany([
-        {
-          _id: new mongoose.Types.ObjectId(),
-          flow: 'inflow', status: 'verified', amount: 100000, tax: 15000,
-          method: 'cash', source: 'pos', branch: branchOid, branchCode: 'INT-001',
-          date: new Date(`${dayCloseDate}T09:00:00.000+06:00`),
-          sourceModel: 'POS', type: 'order_purchase', currency: 'BDT',
-          fee: 0, net: 85000, refundedAmount: 0,
-          createdAt: new Date(), updatedAt: new Date(),
-        },
-        {
-          _id: new mongoose.Types.ObjectId(),
-          flow: 'inflow', status: 'verified', amount: 200000, tax: 30000,
-          method: 'cash', source: 'pos', branch: branchOid, branchCode: 'INT-001',
-          date: new Date(`${dayCloseDate}T13:00:00.000+06:00`),
-          sourceModel: 'POS', type: 'order_purchase', currency: 'BDT',
-          fee: 0, net: 170000, refundedAmount: 0,
-          createdAt: new Date(), updatedAt: new Date(),
-        },
-        {
-          _id: new mongoose.Types.ObjectId(),
-          flow: 'inflow', status: 'verified', amount: 150000, tax: 22500,
-          method: 'bkash', source: 'pos', branch: branchOid, branchCode: 'INT-001',
-          date: new Date(`${dayCloseDate}T17:00:00.000+06:00`),
-          sourceModel: 'POS', type: 'order_purchase', currency: 'BDT',
-          fee: 0, net: 127500, refundedAmount: 0,
-          createdAt: new Date(), updatedAt: new Date(),
-        },
-      ]);
-
-      const { publish } = await import('../../../src/lib/events/arcEvents.js');
-      await publish('accounting:pos.day.close', { branchId: ctx.orgId, date: dayCloseDate });
-      await new Promise((r) => setTimeout(r, 3000));
-
-      const entry = await db().collection('journalentries').findOne({
-        idempotencyKey: `pos-daily-${ctx.orgId}-${dayCloseDate}`,
-      });
-
-      expect(entry).not.toBeNull();
-      dayCloseEntryId = entry!._id.toString();
-
-      // Expected: cash debit (300000) + bkash debit (150000) + revenue credit + VAT credit = 4 items
-      expect(entry!.journalItems.length).toBe(4);
-      expect(entry!.journalType).toBe('POS_SALES');
-      expect(entry!.label).toContain('POS Daily Sales');
-    });
-
-    it('aggregated entry should have balanced debit/credit totaling 450000', async () => {
-      expect(dayCloseEntryId).not.toBeNull();
-
-      const entry = await db().collection('journalentries').findOne({
-        _id: new mongoose.Types.ObjectId(dayCloseEntryId!),
-      });
-
-      let totalDebit = 0;
-      let totalCredit = 0;
-      for (const item of entry!.journalItems) {
-        totalDebit += Number(item.debit) || 0;
-        totalCredit += Number(item.credit) || 0;
-      }
-
-      expect(totalDebit).toBe(totalCredit);
-      // 100000 + 200000 + 150000 = 450000
-      expect(totalDebit).toBe(450000);
-    });
-
-    it('cash debit should aggregate to 300000 on account 1111', async () => {
-      expect(dayCloseEntryId).not.toBeNull();
-
-      const entry = await db().collection('journalentries').findOne({
-        _id: new mongoose.Types.ObjectId(dayCloseEntryId!),
-      });
-
-      const cashAccountId = await getAccountId('1111');
-      expect(cashAccountId).not.toBeNull();
-
-      const cashItem = entry!.journalItems.find(
-        (i: any) => i.account.toString() === cashAccountId && (Number(i.debit) || 0) > 0,
-      );
-      expect(cashItem).toBeDefined();
-      expect(Number(cashItem!.debit)).toBe(300000); // 100000 + 200000
-    });
-
-    it('bkash debit should be 150000 on account 1122', async () => {
-      expect(dayCloseEntryId).not.toBeNull();
-
-      const entry = await db().collection('journalentries').findOne({
-        _id: new mongoose.Types.ObjectId(dayCloseEntryId!),
-      });
-
-      const mobileBankId = await getAccountId('1122');
-      expect(mobileBankId).not.toBeNull();
-
-      const bkashItem = entry!.journalItems.find(
-        (i: any) => i.account.toString() === mobileBankId && (Number(i.debit) || 0) > 0,
-      );
-      expect(bkashItem).toBeDefined();
-      expect(Number(bkashItem!.debit)).toBe(150000);
-    });
-
-    it('revenue credit should be net sales (total - VAT) on account 4111', async () => {
-      expect(dayCloseEntryId).not.toBeNull();
-
-      const entry = await db().collection('journalentries').findOne({
-        _id: new mongoose.Types.ObjectId(dayCloseEntryId!),
-      });
-
-      const revenueAccountId = await getAccountId('4111');
-      expect(revenueAccountId).not.toBeNull();
-
-      const revenueItem = entry!.journalItems.find(
-        (i: any) => i.account.toString() === revenueAccountId && (Number(i.credit) || 0) > 0,
-      );
-      expect(revenueItem).toBeDefined();
-      // Net = 450000 - 67500 (total VAT) = 382500
-      expect(Number(revenueItem!.credit)).toBe(382500);
-    });
-
-    it('VAT credit should be total tax (67500) on account 2131', async () => {
-      expect(dayCloseEntryId).not.toBeNull();
-
-      const entry = await db().collection('journalentries').findOne({
-        _id: new mongoose.Types.ObjectId(dayCloseEntryId!),
-      });
-
-      const vatAccountId = await getAccountId('2132');
-      expect(vatAccountId).not.toBeNull();
-
-      const vatItem = entry!.journalItems.find(
-        (i: any) => i.account.toString() === vatAccountId && (Number(i.credit) || 0) > 0,
-      );
-      expect(vatItem).toBeDefined();
-      // VAT = 15000 + 30000 + 22500 = 67500
-      expect(Number(vatItem!.credit)).toBe(67500);
-    });
-
-    it('should not include sourceRef (aggregated, tracked via idempotencyKey)', async () => {
-      expect(dayCloseEntryId).not.toBeNull();
-
-      const entry = await db().collection('journalentries').findOne({
-        _id: new mongoose.Types.ObjectId(dayCloseEntryId!),
-      });
-
-      // Daily aggregation has no single source document.
-      // Schema may create the subdoc with null values, or it may be undefined.
-      if (entry!.sourceRef) {
-        expect(entry!.sourceRef.sourceModel).toBeNull();
-        expect(entry!.sourceRef.sourceId).toBeNull();
-      }
     });
   });
 
@@ -1631,9 +1322,8 @@ describe('Full Revenue → Ledger Integration', () => {
 
       if (res.statusCode < 300) {
         const body = safeParseBody(res.body);
-        expect(body?.success).toBe(true);
-        expect(body?.data?._id).toBeDefined();
-        manualEntryId = body.data._id;
+        expect(body?._id).toBeDefined();
+        manualEntryId = body._id;
       }
     });
 
@@ -1676,7 +1366,6 @@ describe('Full Revenue → Ledger Integration', () => {
       if (res.statusCode < 300) {
         // If it somehow returned success, the entry should still not exist (double check)
         const body = safeParseBody(res.body);
-        expect(body?.success).not.toBe(true);
       }
     });
 
@@ -1694,7 +1383,6 @@ describe('Full Revenue → Ledger Integration', () => {
 
       if (res.statusCode === 200) {
         const body = safeParseBody(res.body);
-        expect(body?.success).toBe(true);
 
         // Verify state changed in DB
         const entry = await db().collection('journalentries').findOne({
@@ -1715,7 +1403,7 @@ describe('Full Revenue → Ledger Integration', () => {
 
       if (res.statusCode === 200) {
         const body = safeParseBody(res.body);
-        const items = body?.docs ?? body?.data;
+        const items = body?.data ?? [];
         expect(items).toBeInstanceOf(Array);
         // We've created multiple entries in this test run
         expect(items.length).toBeGreaterThan(0);
@@ -1896,7 +1584,7 @@ describe('accounting:purchase.paid — Purchase Events', () => {
     expect(totalDebit).toBe(500000);
   });
 
-  it('should debit Merchandise (1165) and credit Bank (1112) when paid immediately', async () => {
+  it('should debit Merchandise (1164) and credit Bank (1113) when paid immediately', async () => {
     const { purchaseId } = await insertPurchase({ grandTotal: 300000 });
 
     const { publish } = await import('../../../src/lib/events/arcEvents.js');
@@ -1916,8 +1604,8 @@ describe('accounting:purchase.paid — Purchase Events', () => {
       const creditItem = entry.journalItems.find((i: any) => i.credit > 0);
       const debitAccount = await db().collection('accounts').findOne({ _id: debitItem!.account });
       const creditAccount = await db().collection('accounts').findOne({ _id: creditItem!.account });
-      expect(debitAccount!.accountTypeCode).toBe('1165'); // Merchandise
-      expect(creditAccount!.accountTypeCode).toBe('1112'); // Bank
+      expect(debitAccount!.accountTypeCode).toBe('1164'); // Merchandise
+      expect(creditAccount!.accountTypeCode).toBe('1113'); // Bank
     }
   });
 
@@ -1986,14 +1674,30 @@ describe('accounting:purchase.paid — Purchase Events', () => {
 describe('accounting:order.fulfilled — COGS Events', () => {
   const db = () => mongoose.connection.db!;
 
+  // Order shape mirrors what the COGS handler reads:
+  // `order.lines[].snapshot.costPrice * quantity` per
+  // [order-fulfilled.handler.ts:65-66](src/resources/accounting/events/handlers/order-fulfilled.handler.ts#L65-L66).
+  // `items[].costPriceAtSale` is a stale schema from earlier order shape.
   async function insertOrderWithCost(overrides: Record<string, unknown> = {}) {
     const orderId = new mongoose.Types.ObjectId();
     const defaults = {
       _id: orderId,
       customerName: 'Test Customer',
-      items: [
-        { product: new mongoose.Types.ObjectId(), productName: 'Widget A', quantity: 2, price: 50000, costPriceAtSale: 30000 },
-        { product: new mongoose.Types.ObjectId(), productName: 'Widget B', quantity: 1, price: 80000, costPriceAtSale: 50000 },
+      lines: [
+        {
+          product: new mongoose.Types.ObjectId(),
+          productName: 'Widget A',
+          quantity: 2,
+          price: 50000,
+          snapshot: { costPrice: 30000 },
+        },
+        {
+          product: new mongoose.Types.ObjectId(),
+          productName: 'Widget B',
+          quantity: 1,
+          price: 80000,
+          snapshot: { costPrice: 50000 },
+        },
       ],
       totalAmount: 180000,
       status: 'delivered',
@@ -2031,9 +1735,17 @@ describe('accounting:order.fulfilled — COGS Events', () => {
     expect(totalDebit).toBe(110000); // total cost
   });
 
-  it('should debit COGS (5111) and credit Inventory (1165)', async () => {
+  it('should debit COGS (5111) and credit Inventory (1164)', async () => {
     const { orderId } = await insertOrderWithCost({
-      items: [{ product: new mongoose.Types.ObjectId(), productName: 'Single', quantity: 1, price: 100000, costPriceAtSale: 60000 }],
+      lines: [
+        {
+          product: new mongoose.Types.ObjectId(),
+          productName: 'Single',
+          quantity: 1,
+          price: 100000,
+          snapshot: { costPrice: 60000 },
+        },
+      ],
     });
 
     const { publish } = await import('../../../src/lib/events/arcEvents.js');
@@ -2050,14 +1762,26 @@ describe('accounting:order.fulfilled — COGS Events', () => {
       const debitAccount = await db().collection('accounts').findOne({ _id: debitItem!.account });
       const creditAccount = await db().collection('accounts').findOne({ _id: creditItem!.account });
       expect(debitAccount!.accountTypeCode).toBe('5111'); // COGS
-      expect(creditAccount!.accountTypeCode).toBe('1165'); // Merchandise Inventory
+      expect(creditAccount!.accountTypeCode).toBe('1164'); // Merchandise Inventory
     }
   });
 
-  it('should skip when order has no cost price data', async () => {
+  it('still posts a zero-value COGS entry when cost is missing (Odoo-style audit trail)', async () => {
+    // Per `order-fulfilled.handler.ts`: when no `snapshot.costPrice` is
+    // resolvable, the handler still emits a COGS journal entry with zero
+    // amounts and stamps `metadata.costMissing: true`. The inventory move
+    // is the source of truth; the JE exists so the audit trail is complete
+    // and the admin "missing cost" view can list these for backfill.
     const { orderId } = await insertOrderWithCost({
-      items: [{ product: new mongoose.Types.ObjectId(), productName: 'NoCost', quantity: 1, price: 50000 }],
-      // no costPriceAtSale
+      lines: [
+        {
+          product: new mongoose.Types.ObjectId(),
+          productName: 'NoCost',
+          quantity: 1,
+          price: 50000,
+          // no snapshot.costPrice → triggers costMissing path
+        },
+      ],
     });
 
     const { publish } = await import('../../../src/lib/events/arcEvents.js');
@@ -2067,13 +1791,23 @@ describe('accounting:order.fulfilled — COGS Events', () => {
     const entry = await db().collection('journalentries').findOne({
       idempotencyKey: `cogs-${orderId.toString()}`,
     });
-    // Should skip — zero cost = no COGS entry
-    expect(entry).toBeNull();
+    expect(entry).not.toBeNull();
+    expect(entry!.totalDebit).toBe(0);
+    expect(entry!.totalCredit).toBe(0);
+    expect((entry!.metadata as { costMissing?: boolean })?.costMissing).toBe(true);
   });
 
   it('should set sourceRef to Order model', async () => {
     const { orderId } = await insertOrderWithCost({
-      items: [{ product: new mongoose.Types.ObjectId(), productName: 'Tracked', quantity: 1, price: 80000, costPriceAtSale: 40000 }],
+      lines: [
+        {
+          product: new mongoose.Types.ObjectId(),
+          productName: 'Tracked',
+          quantity: 1,
+          price: 80000,
+          snapshot: { costPrice: 40000 },
+        },
+      ],
     });
 
     const { publish } = await import('../../../src/lib/events/arcEvents.js');
@@ -2261,7 +1995,7 @@ describe('accounting:inventory.adjusted — Stock Adjustment Events', () => {
     expect(totalDebit).toBe(25000);
   });
 
-  it('should debit Shrinkage (6703) and credit Inventory (1165) for loss', async () => {
+  it('should debit Shrinkage (6711) and credit Inventory (1164) for loss', async () => {
     const adjustmentId = new mongoose.Types.ObjectId().toString();
 
     const { publish } = await import('../../../src/lib/events/arcEvents.js');
@@ -2283,8 +2017,8 @@ describe('accounting:inventory.adjusted — Stock Adjustment Events', () => {
       const creditItem = entry.journalItems.find((i: any) => i.credit > 0);
       const debitAccount = await db().collection('accounts').findOne({ _id: debitItem!.account });
       const creditAccount = await db().collection('accounts').findOne({ _id: creditItem!.account });
-      expect(debitAccount!.accountTypeCode).toBe('6703'); // Shrinkage
-      expect(creditAccount!.accountTypeCode).toBe('1165'); // Inventory
+      expect(debitAccount!.accountTypeCode).toBe('6711'); // Shrinkage
+      expect(creditAccount!.accountTypeCode).toBe('1164'); // Inventory
     }
   });
 
@@ -2310,8 +2044,8 @@ describe('accounting:inventory.adjusted — Stock Adjustment Events', () => {
       const creditItem = entry.journalItems.find((i: any) => i.credit > 0);
       const debitAccount = await db().collection('accounts').findOne({ _id: debitItem!.account });
       const creditAccount = await db().collection('accounts').findOne({ _id: creditItem!.account });
-      expect(debitAccount!.accountTypeCode).toBe('1165'); // Inventory (gain)
-      expect(creditAccount!.accountTypeCode).toBe('6703'); // Shrinkage correction
+      expect(debitAccount!.accountTypeCode).toBe('1164'); // Inventory (gain)
+      expect(creditAccount!.accountTypeCode).toBe('4317'); // Inventory gain (Other Income)
     }
   });
 
@@ -2368,7 +2102,7 @@ describe('Journal Entry Lifecycle — Draft Editable, Posted Immutable', () => {
 
     if (createRes.statusCode >= 300) return;
     const createBody = safeParseBody(createRes.body);
-    draftEntryId = createBody?.data?._id;
+    draftEntryId = createBody?._id;
     expect(draftEntryId).toBeDefined();
 
     // Update the draft — should succeed
@@ -2463,7 +2197,6 @@ describe('Journal Entry Lifecycle — Draft Editable, Posted Immutable', () => {
 
     if (res.statusCode === 200) {
       const body = safeParseBody(res.body);
-      expect(body?.success).toBe(true);
     }
   });
 });
@@ -2512,22 +2245,26 @@ describe('Posting Contracts — Refund (Pure Functions)', () => {
     expect(posting.items.length).toBe(3);
 
     // Debit: revenue (100000) + VAT payable (15000) = 115000
-    // Credit: bank (115000)
+    // Credit: gateway clearing (115000) — card refund returns through
+    // the gateway, which then debits the merchant's clearing balance.
     const revenueDebit = posting.items.find((i) => i.accountCode === '4111');
     expect(revenueDebit?.debit).toBe(100000);
 
     const vatDebit = posting.items.find((i) => i.accountCode === '2132');
     expect(vatDebit?.debit).toBe(15000);
 
-    const bankCredit = posting.items.find((i) => i.accountCode === '1112');
-    expect(bankCredit?.credit).toBe(115000);
+    const gatewayCredit = posting.items.find((i) => i.accountCode === '1125');
+    expect(gatewayCredit?.credit).toBe(115000);
   });
 
   it('should map refund payment methods to correct accounts', () => {
+    // Refunds reverse the originating instrument: card refund credits
+    // gateway clearing (the processor returns it from there); cash refund
+    // comes out of the till. See sales.contract.ts for routing rationale.
     const methods: Record<string, string> = {
       cash: '1111',
-      card: '1112',
-      bkash: '1122',
+      card: '1125', // Gateway Clearing
+      bkash: '1126', // Mobile Money Merchant Clearing
     };
 
     for (const [method, expectedCode] of Object.entries(methods)) {

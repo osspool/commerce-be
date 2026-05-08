@@ -123,8 +123,8 @@ describe('Notification E2E', () => {
       });
       const body = safeParseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.success).toBe(true);
       expect(body.data).toEqual([]);
+      expect(body.pagination).toBeTruthy();
     });
 
     it('should return notifications for current user', async () => {
@@ -178,9 +178,8 @@ describe('Notification E2E', () => {
       });
       const body = safeParseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.success).toBe(true);
-      expect(typeof body.data.count).toBe('number');
-      expect(body.data.count).toBeGreaterThanOrEqual(0);
+      expect(typeof body.count).toBe('number');
+      expect(body.count).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -195,9 +194,8 @@ describe('Notification E2E', () => {
       });
       const body = safeParseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.success).toBe(true);
-      expect(body.data.read).toBe(true);
-      expect(body.data.readAt).toBeTruthy();
+      expect(body.read).toBe(true);
+      expect(body.readAt).toBeTruthy();
     });
 
     it('should return 404 for non-existent notification', async () => {
@@ -223,8 +221,7 @@ describe('Notification E2E', () => {
       });
       const body = safeParseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.success).toBe(true);
-      expect(typeof body.data.modifiedCount).toBe('number');
+      expect(typeof body.modifiedCount).toBe('number');
 
       // Verify all are read
       const countRes = await server.inject({
@@ -233,7 +230,7 @@ describe('Notification E2E', () => {
         headers: auth.as('admin').headers,
       });
       const countBody = safeParseBody(countRes.body);
-      expect(countBody.data.count).toBe(0);
+      expect(countBody.count).toBe(0);
     });
   });
 

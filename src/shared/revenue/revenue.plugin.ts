@@ -52,7 +52,7 @@ async function publishAccountingEvent(
   try {
     const [{ outbox }, { createEvent }] = await Promise.all([
       import('#shared/outbox/index.js'),
-      import('@classytic/arc/events'),
+      import('@classytic/primitives/events'),
     ]);
     await outbox.store(createEvent(eventType, payload));
   } catch (err) {

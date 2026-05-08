@@ -14,7 +14,7 @@
  * entry then moves the goods from customs-staging into inventory.
  *
  * Journal lines (all debits except the bank credit):
- *   Dr 1161/1163/1165  Inventory at landed cost (AV + CD + SD)
+ *   Dr 1161/1163/1164  Inventory at landed cost (AV + CD + SD)
  *   Dr 1150.VAT15.INPUT Input VAT (claimable)
  *   Dr 1151             Advance Income Tax (AT + AIT combined)
  *   Cr 1112             Bank
@@ -23,16 +23,17 @@
 import { calculateImportTaxStack } from '@classytic/bd-tax';
 import { inputVatAccount, VAT_ACCOUNTS } from '../../tax/tax.accounts.js';
 import type { AccountingRegime } from '../../tax/tax-resolver.js';
+import { BD } from '../bd-account-codes.js';
 import type { PostingInput, PostingItem } from '../posting.service.js';
 
 const INVENTORY_ACCOUNTS: Record<string, string> = {
-  raw_materials: '1161',
-  finished_goods: '1163',
-  merchandise: '1165',
-  packing: '1167',
-  default: '1165',
+  raw_materials: BD.rawMaterials,
+  finished_goods: BD.finishedGoods,
+  merchandise: BD.merchandise,
+  packing: BD.packingMaterials,
+  default: BD.merchandise,
 };
-const BANK_ACCOUNT = '1112';
+const BANK_ACCOUNT = BD.cash;
 
 export interface ImportClearanceData {
   /** Bill of Entry number or purchase reference */

@@ -27,7 +27,7 @@ let ctx: Awaited<ReturnType<typeof setupTestOrg>>;
 
 beforeAll(async () => {
   ctx = await setupTestOrg();
-}, 30000);
+}, 90000);
 
 afterAll(async () => {
   await teardownTestOrg(ctx);

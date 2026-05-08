@@ -61,6 +61,7 @@ async function createCustomer() {
 function buildPaidOrderPayload(args: {
   orderId: string;
   customerId: string | null;
+  /** BDT-major amount (e.g. 2000 = ৳2000). Converted to paisa here. */
   grandTotal: number;
   chargeStatus?: string;
 }) {
@@ -69,8 +70,17 @@ function buildPaidOrderPayload(args: {
       _id: args.orderId,
       orderNumber: `ORD-${args.orderId.slice(-6)}`,
       organizationId: 'branch-1',
-      customer: args.customerId ? { _id: args.customerId } : undefined,
-      totals: { grandTotal: { amount: args.grandTotal, currency: 'BDT' } },
+      // Bridge reads flat `customerId` (see order-loyalty-hook.ts:
+      // `const customerId = order.customerId`). Earlier shape was
+      // `customer: { _id }`; that's been retired in favor of the flat
+      // field that matches the order kernel's persistence shape.
+      customerId: args.customerId ?? undefined,
+      // Order kernel persists grandTotal in PAISA (integer minor units).
+      // Bridge divides by 100 to get BDT for earning-rule evaluation
+      // (`amountPerPoint: 100` = "1 point per ৳100"). Multiply caller's
+      // BDT-major figure by 100 here so the production code sees the
+      // shape it expects.
+      totals: { grandTotal: { amount: args.grandTotal * 100, currency: 'BDT' } },
       paymentState: { chargeStatus: args.chargeStatus ?? 'full' },
     },
     context: { actorRef: ACTOR },
@@ -108,22 +118,24 @@ beforeAll(async () => {
 
   bridge = await import('#resources/sales/loyalty/loyalty.bridge.js');
 
-  // Wire the hook against a stub OrderEngine that captures the after:update
-  // listener. The hook's module-level `wired` flag keeps subsequent calls
-  // no-ops, so this single wiring covers every test in the file.
+  // Wire the hook against a stub OrderEngine that captures the
+  // after:findOneAndUpdate listener (the paid-later path — confirmPayment
+  // → updatePaymentState routes through findOneAndUpdate and Mongokit
+  // emits this event, NOT after:update). The module-level `wired` flag
+  // keeps subsequent calls no-ops, so one wiring covers every test.
   let captured: AfterUpdateListener | null = null;
   const stubEngine = {
     repositories: {
       order: {
         on: (event: string, cb: AfterUpdateListener) => {
-          if (event === 'after:update') captured = cb;
+          if (event === 'after:findOneAndUpdate') captured = cb;
         },
       },
     },
   } as unknown as OrderEngine;
   wireOrderLoyaltyHook(stubEngine);
 
-  if (!captured) throw new Error('wireOrderLoyaltyHook did not register an after:update listener');
+  if (!captured) throw new Error('wireOrderLoyaltyHook did not register an after:findOneAndUpdate listener');
   triggerHook = captured;
 }, 60_000);
 
@@ -162,6 +174,24 @@ beforeEach(async () => {
       cardPrefix: 'TST',
       cardDigits: 8,
     },
+  });
+
+  // Seed the order-type earning rule the new bridge reads via
+  // `engine.repositories.earningRule.getAll`. The loyalty surface
+  // switched from a config-driven calculator (read amountPerPoint /
+  // pointsPerAmount straight off PlatformConfig.membership) to engine
+  // earning-rules — `previewPointsForOrder` filters to active rules
+  // matching the member's `programId`. The repository auto-injects
+  // `programId` from the resolved config when not supplied (per
+  // EarningRuleRepository docstring), so we don't need to know the id
+  // ahead of time. Tier multipliers still come from PlatformConfig
+  // (the bridge stamps the tier on the member at enrollment time).
+  await loyaltyEngine.repositories.earningRule.create({
+    name: 'Standard order earn (Bronze 1×, Silver 1.5×, Gold 2×)',
+    type: 'order',
+    priority: 100,
+    conditions: {},
+    reward: { amountPerPoint: 100, roundingMode: 'floor' },
   });
 });
 
@@ -204,10 +234,15 @@ describe('Order → Earn on paid', () => {
     expect(member!.balance.lifetime).toBe(15);
   });
 
-  it('is a no-op when the customer is not enrolled', async () => {
+  it('auto-enrolls and credits when the customer was not previously a loyalty member', async () => {
+    // Bridge contract changed (order-loyalty-hook.ts:96-109): the paid-
+    // order hook now auto-enrolls when no member is found, so every
+    // first-paid-order customer earns from order #1. The earlier "no-op"
+    // contract is gone — there's no opt-out switch in production code.
+    // Test the new contract: a customer with no prior member record
+    // earns points after their first paid order.
     const customer = await createCustomer();
     const customerId = customer._id.toString();
-    // Note: NOT calling enrollCustomer — this is a non-loyalty customer.
 
     await triggerHook(
       buildPaidOrderPayload({
@@ -218,7 +253,9 @@ describe('Order → Earn on paid', () => {
     );
 
     const member = await bridge.getMemberForCustomer(customerId, { actorId: ACTOR });
-    expect(member).toBeNull();
+    expect(member).toBeTruthy();
+    // 5000/100 * 1 (Bronze) = 50
+    expect(member!.balance.current).toBe(50);
   });
 
   it('is a no-op for guest orders (no customer attached)', async () => {

@@ -39,6 +39,7 @@ import { orderPaidHandler } from './handlers/order-paid.handler.js';
 import { purchasePaidHandler } from './handlers/purchase-paid.handler.js';
 import { purchaseReceivedHandler } from './handlers/purchase-received.handler.js';
 import { returnRestockedHandler } from './handlers/return-restocked.handler.js';
+import { rmaRestockingFeeCollectedHandler } from './handlers/rma-restocking-fee.handler.js';
 import { transactionRefundedHandler } from './handlers/transaction-refunded.handler.js';
 
 export const postingHandlers: ReadonlyArray<PostingHandler<unknown>> = [
@@ -47,6 +48,7 @@ export const postingHandlers: ReadonlyArray<PostingHandler<unknown>> = [
   orderFulfilledHandler,
   returnRestockedHandler,
   inventoryAdjustedHandler,
+  rmaRestockingFeeCollectedHandler,
   purchasePaidHandler,
   purchaseReceivedHandler,
   codSettledHandler,

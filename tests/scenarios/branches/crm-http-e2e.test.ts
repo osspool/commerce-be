@@ -55,7 +55,7 @@ let opportunityId: string;
 beforeAll(async () => {
   envA = await bootScenarioApp({
     scenario: 'crm-http',
-    env: { CRM_MODE: 'simple' },
+    env: { CRM_MODE: 'simple', ENABLE_CRM: 'true' },
   });
   server = envA.server;
   auth = envA.auth;
@@ -118,9 +118,7 @@ describe('CRM HTTP e2e — lead → converted → won via Arc actions', () => {
     });
     if (res.statusCode >= 300) console.log('pipeline fail:', res.statusCode, res.body);
     expect(res.statusCode).toBeLessThan(300);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    const data = body?.data as { _id: string; stages: Array<{ id: string }> };
+    const data = parse(res.body) as { _id: string; stages: Array<{ id: string }> };
     pipelineId = data._id;
     qualifiedStageId = data.stages[0]!.id;
     wonStageId = data.stages[1]!.id;
@@ -146,8 +144,7 @@ describe('CRM HTTP e2e — lead → converted → won via Arc actions', () => {
     });
     if (res.statusCode >= 300) console.log('lead create fail:', res.statusCode, res.body);
     expect(res.statusCode).toBeLessThan(300);
-    const body = parse(res.body);
-    const data = body?.data as { _id: string; status: string };
+    const data = parse(res.body) as { _id: string; status: string };
     leadId = data._id;
     expect(data.status).toBe('new');
   });
@@ -169,7 +166,7 @@ describe('CRM HTTP e2e — lead → converted → won via Arc actions', () => {
       headers: h(),
     });
     const body = parse(getRes.body);
-    expect((body?.data as { status: string }).status).toBe('qualified');
+    expect((body as { status: string }).status).toBe('qualified');
   });
 
   it('converts the lead — spawns Contact + Account + Opportunity', async () => {
@@ -185,8 +182,7 @@ describe('CRM HTTP e2e — lead → converted → won via Arc actions', () => {
     });
     if (res.statusCode >= 300) console.log('convert fail:', res.statusCode, res.body);
     expect(res.statusCode).toBeLessThan(300);
-    const body = parse(res.body);
-    const data = body?.data as {
+    const data = parse(res.body) as {
       contactId: string;
       accountId: string;
       opportunityId: string;
@@ -235,7 +231,7 @@ describe('CRM HTTP e2e — lead → converted → won via Arc actions', () => {
       url: `${API}/crm/opportunities/${opportunityId}`,
       headers: h(),
     });
-    const data = parse(getRes.body)?.data as { stageId: string; status: string };
+    const data = parse(getRes.body) as { stageId: string; status: string };
     expect(data.stageId).toBe(wonStageId);
     expect(data.status).toBe('open');
   });
@@ -249,7 +245,7 @@ describe('CRM HTTP e2e — lead → converted → won via Arc actions', () => {
     });
     if (res.statusCode >= 300) console.log('win fail:', res.statusCode, res.body);
     expect(res.statusCode).toBeLessThan(300);
-    const data = parse(res.body)?.data as { status: string; probability: number };
+    const data = parse(res.body) as { status: string; probability: number };
     expect(data.status).toBe('won');
     expect(data.probability).toBe(1);
 

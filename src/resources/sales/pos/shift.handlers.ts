@@ -36,6 +36,7 @@ import logger from '#lib/utils/logger.js';
 import { posEngine } from './pos.engine.js';
 import posShiftRepository from './shift.repository.js';
 import { CASH_MOVEMENT_REASON_CODES, SHIFT_PAYMENT_METHODS } from './shift.constants.js';
+import { ConflictError } from '@classytic/arc/utils';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -214,7 +215,7 @@ function bdBusinessDate(timezone: string): Date {
 export async function getCurrentShift(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const branchId = await resolveShiftBranch(req);
   const shift = await posShiftRepository.getActiveShift(branchId);
-  reply.send({ success: true, data: shift });
+  reply.send(shift);
 }
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
@@ -271,7 +272,7 @@ export async function openShift(req: FastifyRequest, reply: FastifyReply): Promi
       },
       ctxFrom(req, branchId, actor),
     );
-    reply.status(201).send({ success: true, data: shift });
+    reply.status(201).send(shift);
   } catch (err) {
     // Active-shift collision can land here three ways: the package's typed
     // error, raw Mongo `code: 11000`, or mongokit's translated duplicate-
@@ -284,13 +285,7 @@ export async function openShift(req: FastifyRequest, reply: FastifyReply): Promi
       /^Duplicate value for/.test(message);
     if (isCollision) {
       const existing = await posShiftRepository.getActiveShift(branchId);
-      reply.status(409).send({
-        success: false,
-        code: 'ACTIVE_SHIFT_ALREADY_OPEN',
-        message:
-          err instanceof Error ? err.message : 'An active shift already exists for this branch',
-        data: existing,
-      });
+      throw createDomainError('ACTIVE_SHIFT_ALREADY_OPEN', err instanceof Error ? err.message : 'An active shift already exists for this branch', 409);
       return;
     }
     rethrowAsArcError(err);

@@ -13,6 +13,7 @@ import { createPromoEngine, type PromoEngine } from '@classytic/promo';
 import fp from 'fastify-plugin';
 import mongoose from 'mongoose';
 import { eventTransport } from '#lib/events/EventBus.js';
+import { shouldAutoIndex } from '#shared/db/auto-index.js';
 
 let _engine: PromoEngine | null = null;
 
@@ -40,7 +41,7 @@ export function ensurePromoEngine(): PromoEngine {
   _engine = createPromoEngine({
     mongoose: mongoose.connection,
     tenant: false,
-    autoIndex: process.env.NODE_ENV !== 'production',
+    autoIndex: shouldAutoIndex(),
     events: { transport: eventTransport as unknown as EventTransport },
   });
   return _engine;

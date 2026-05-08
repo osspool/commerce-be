@@ -12,93 +12,54 @@
  * sourceRef.sourceId + partnerId. None are matched until the group's net
  * open balance hits zero, at which point maybeSettleGroup atomically
  * matches the whole group.
+ *
+ * Shared `getIds`, `loadPartnerContext`, and amount assertion live in
+ * `../posting/partner-posting.helper.ts` so A/P stays in lockstep with A/R.
  */
 
 import { requireRoles } from '@classytic/arc/permissions';
-import { getOrgId, getUserId } from '@classytic/arc/scope';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import mongoose from 'mongoose';
-import { Account, JournalEntry } from '../accounting.engine.js';
+import { JournalEntry } from '../accounting.engine.js';
+import {
+  assertPositiveIntegerPaisa,
+  getIds,
+  loadPartnerContext,
+  type PartnerContext,
+} from '../posting/partner-posting.helper.js';
 import { validateNoteInput, vendorCreditNoteToPosting } from '../posting/contracts/credit-debit-note.contract.js';
 import { vendorBillToPosting, vendorPaymentToPosting } from '../posting/contracts/vendor-bill.contract.js';
-import { type BillGroupKey, computeOpenBalance, maybeSettleGroup } from '../posting/open-balance.service.js';
-import { createPosting, SYSTEM_ACTOR_ID } from '../posting/posting.service.js';
+import { computeOpenBalance, maybeSettleGroup } from '../posting/open-balance.service.js';
+import { createPosting } from '../posting/posting.service.js';
 
-function getIds(req: RequestWithExtras): { orgId: string | undefined; actorId: string } {
-  const orgId = getOrgId(req.scope) ?? undefined;
-  const actorId = (getUserId(req.scope) ?? req.user?._id ?? req.user?.id ?? SYSTEM_ACTOR_ID) as string;
-  return { orgId, actorId };
-}
+const AP_ACCOUNT_CODE = '2111';
 
-async function apAccountId(): Promise<mongoose.Types.ObjectId> {
-  const acc = await Account.findOne({ accountTypeCode: '2111' }).select('_id').lean();
-  if (!acc) {
-    throw Object.assign(new Error('A/P control account 2111 not seeded'), {
-      statusCode: 503,
-      code: 'CHART_NOT_SEEDED',
-    });
-  }
-  return acc._id as mongoose.Types.ObjectId;
-}
-
-interface BillContext {
-  purchaseId: string;
-  supplierId: string;
-  branchId?: string;
-  apId: mongoose.Types.ObjectId;
-  groupKey: BillGroupKey;
-}
-
-async function loadBillContext(billJeId: string): Promise<BillContext> {
-  const bill = await JournalEntry.findById(billJeId).lean();
-  if (!bill) {
-    throw Object.assign(new Error('Bill not found'), {
-      statusCode: 404,
-      code: 'BILL_NOT_FOUND',
-    });
-  }
-  const apId = await apAccountId();
-  const items = bill.journalItems as Array<{
-    account: mongoose.Types.ObjectId;
-    partnerId?: string;
-  }>;
-  const apLine = items.find((i) => String(i.account) === String(apId));
-  if (!apLine || !apLine.partnerId) {
-    throw Object.assign(new Error('Not a vendor bill — missing partner-tagged A/P line'), {
-      statusCode: 400,
-      code: 'NOT_A_VENDOR_BILL',
-    });
-  }
-  const sourceRef = (bill as { sourceRef?: { sourceId?: unknown } }).sourceRef;
-  const purchaseId = sourceRef?.sourceId ? String(sourceRef.sourceId) : String(bill._id);
-  const branchId = (bill as { organizationId?: unknown }).organizationId?.toString();
-  return {
-    purchaseId,
-    supplierId: apLine.partnerId,
-    branchId,
-    apId,
-    groupKey: {
-      controlAccountId: apId,
-      partnerId: apLine.partnerId,
-      sourceId: purchaseId,
-      side: 'payable',
-    },
-  };
-}
-
-function assertPositiveIntegerPaisa(amount: unknown): asserts amount is number {
-  if (typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
-    throw Object.assign(new Error('amount must be a positive integer (paisa)'), {
-      statusCode: 400,
-      code: 'INVALID_AMOUNT',
-    });
-  }
+function loadBillContext(billJeId: string): Promise<PartnerContext> {
+  return loadPartnerContext({
+    jeId: billJeId,
+    side: 'payable',
+    controlCode: AP_ACCOUNT_CODE,
+    docLabel: 'Bill',
+    notFoundCode: 'BILL_NOT_FOUND',
+    notPartnerDocCode: 'NOT_A_VENDOR_BILL',
+    notPartnerDocMessage: 'Not a vendor bill — missing partner-tagged A/P line',
+  });
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
-/** id = Purchase._id. Posts the accrual A/P bill JE for a received purchase. */
-async function postBillAction(purchaseId: string, _data: Record<string, unknown>, req: RequestWithExtras) {
+/**
+ * id = Purchase._id. Posts the accrual A/P bill JE for a received purchase.
+ *
+ * Optional `data` overrides for finance flexibility:
+ *   - `withholdVds: boolean` — force-enable/disable VDS for this one bill,
+ *     overriding the supplier's `withholdVds` flag (e.g. supplier is
+ *     normally a VDS target but this particular bill is exempt).
+ *   - `vdsRate: number` — override the rate (0–1) for this bill.
+ *   - `vatRate: number` — override the VAT rate used for input-credit
+ *     account selection (defaults to dominant rate from purchase items).
+ */
+async function postBillAction(purchaseId: string, data: Record<string, unknown>, req: RequestWithExtras) {
   const { orgId, actorId } = getIds(req);
   const purchase = await mongoose.connection
     .db!.collection('purchase_orders')
@@ -122,15 +83,60 @@ async function postBillAction(purchaseId: string, _data: Record<string, unknown>
     });
   }
 
-  const posting = vendorBillToPosting({
-    purchaseId: String(purchase._id),
-    supplierId: String(purchase.supplier),
-    totalAmount: Number(purchase.grandTotal || 0),
-    receivedAt: new Date(purchase.receivedAt as Date),
-    dueDate: purchase.dueDate ? new Date(purchase.dueDate as Date) : undefined,
-    creditDays: purchase.creditDays as number | undefined,
-    billNumber: purchase.invoiceNumber as string | undefined,
-  });
+  // Purchase totals on the document are stored in major BDT (decimal). The
+  // posting contract expects paisa (integer minor units). Convert here and
+  // round to integer paisa to match the same contract used by the
+  // procurement-received bridge.
+  const grandTotalPaisa = Math.round(Number(purchase.grandTotal || 0) * 100);
+  const taxTotalPaisa = Math.round(Number(purchase.taxTotal || 0) * 100);
+
+  // Dominant VAT rate across line items (most BD bills are single-rate; the
+  // dominant one wins for input-VAT account selection).
+  const items = (purchase.items as Array<{ taxRate?: number }> | undefined) ?? [];
+  const dominantVatRate =
+    (data.vatRate as number | undefined) ??
+    items.find((it) => Number(it.taxRate ?? 0) > 0)?.taxRate ??
+    undefined;
+
+  // VDS lookup — supplier flag is the default; per-bill override wins.
+  // Lookup is non-fatal: if the supplier doc is unreadable we post without VDS.
+  let withholdVds = false;
+  let vdsRate: number | undefined;
+  try {
+    const supplier = await mongoose.connection
+      .db!.collection('suppliers')
+      .findOne(
+        { _id: new mongoose.Types.ObjectId(String(purchase.supplier)) },
+        { projection: { withholdVds: 1, vdsRate: 1 } },
+      );
+    withholdVds = !!supplier?.withholdVds;
+    vdsRate = supplier?.vdsRate as number | undefined;
+  } catch {
+    // ignore — post without VDS split
+  }
+  if (typeof data.withholdVds === 'boolean') withholdVds = data.withholdVds;
+  if (typeof data.vdsRate === 'number') vdsRate = data.vdsRate;
+
+  // User-initiated `post` action → autoPost: true. The contract's intrinsic
+  // `false` is for automated event flows (purchase-received) where finance
+  // reviews before posting; this endpoint represents the reviewer's explicit
+  // click to post.
+  const posting = vendorBillToPosting(
+    {
+      purchaseId: String(purchase._id),
+      supplierId: String(purchase.supplier),
+      totalAmount: grandTotalPaisa,
+      tax: taxTotalPaisa,
+      ...(dominantVatRate !== undefined ? { vatRate: dominantVatRate } : {}),
+      receivedAt: new Date(purchase.receivedAt as Date),
+      dueDate: purchase.dueDate ? new Date(purchase.dueDate as Date) : undefined,
+      creditDays: purchase.creditDays as number | undefined,
+      billNumber: purchase.invoiceNumber as string | undefined,
+      withholdVds,
+      ...(vdsRate !== undefined ? { vdsRate } : {}),
+    },
+    { autoPost: true },
+  );
   const branchId = String(purchase.branch || '') || orgId;
   return createPosting(branchId, { ...posting, actorId });
 }
@@ -152,8 +158,8 @@ async function payBillAction(billJeId: string, data: Record<string, unknown>, re
   }
 
   const posting = vendorPaymentToPosting({
-    purchaseId: ctx.purchaseId,
-    supplierId: ctx.supplierId,
+    purchaseId: ctx.sourceId,
+    supplierId: ctx.partnerId,
     amount,
     date: data.date ? new Date(data.date as string) : new Date(),
     fromAccountCode: data.fromAccountCode as string | undefined,
@@ -178,7 +184,7 @@ async function creditNoteAction(billJeId: string, data: Record<string, unknown>,
 
   // Idempotency short-circuit — return the cached JE without re-checking
   // the open balance (which would over-count the not-yet-applied note).
-  const idempotencyKey = `vendor-credit-note-${ctx.purchaseId}-${data.reference}-${data.amount}`;
+  const idempotencyKey = `vendor-credit-note-${ctx.sourceId}-${data.reference}-${data.amount}`;
   const existing = await JournalEntry.findOne({ idempotencyKey }).select('_id state').lean();
   if (existing) {
     return {
@@ -197,15 +203,20 @@ async function creditNoteAction(billJeId: string, data: Record<string, unknown>,
     });
   }
 
-  const posting = vendorCreditNoteToPosting({
-    sourceId: ctx.purchaseId,
-    sourceModel: 'PurchaseOrder',
-    supplierId: ctx.supplierId,
-    amount: data.amount as number,
-    reason: data.reason as string,
-    reference: data.reference as string,
-    date: data.date ? new Date(data.date as string) : undefined,
-  });
+  // User-initiated credit-note action → autoPost: true. Contract default is
+  // draft (for automated/bulk corrections); the explicit click posts.
+  const posting = vendorCreditNoteToPosting(
+    {
+      sourceId: ctx.sourceId,
+      sourceModel: 'PurchaseOrder',
+      supplierId: ctx.partnerId,
+      amount: data.amount as number,
+      reason: data.reason as string,
+      reference: data.reference as string,
+      date: data.date ? new Date(data.date as string) : undefined,
+    },
+    { autoPost: true },
+  );
   const result = await createPosting(ctx.branchId || orgId, { ...posting, actorId });
   const matched = await maybeSettleGroup(ctx.groupKey);
   return { ...result, matched };
@@ -223,14 +234,38 @@ const apFinanceRoles = requireRoles('admin', 'finance_admin');
 // full JSON Schema shape here so arc's normalizer uses our explicit `required`
 // array instead of auto-requiring every field.
 export const vendorBillActions = {
-  post: postBillAction,
+  post: {
+    handler: postBillAction,
+    schema: {
+      type: 'object',
+      properties: {
+        withholdVds: {
+          type: 'boolean',
+          description: 'Override supplier VDS flag for this bill. Use true to force-withhold VDS, false to skip VDS even when supplier is a withholding target.',
+        },
+        vdsRate: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description: 'Override VDS rate (0–1) for this bill. Defaults to supplier rate or NBR standard 0.5.',
+        },
+        vatRate: {
+          type: 'number',
+          minimum: 0,
+          maximum: 100,
+          description: 'Override the dominant VAT rate (%) used for input-credit account selection.',
+        },
+      },
+      required: [],
+    },
+  },
   pay: {
     handler: payBillAction,
     schema: {
       type: 'object',
       properties: {
         amount: { type: 'integer', minimum: 1, description: 'Amount in paisa' },
-        fromAccountCode: { type: 'string', description: 'Cash/bank account code (default 1112)' },
+        fromAccountCode: { type: 'string', description: 'Cash/bank account code (defaults to BD.cash, the Cash at Bank current account)' },
         reference: { type: 'string', description: 'Cheque number, transaction id' },
         date: { type: 'string', format: 'date', description: 'Payment date (default today)' },
       },

@@ -41,7 +41,14 @@ interface OrderCreateHookPayload {
       gateway?: string;
       paymentData?: { payments?: PaymentLike[] };
     };
-    metadata?: { shiftId?: string; [k: string]: unknown };
+    metadata?: {
+      shiftId?: string;
+      /** POS-controller persists per-method split here (paisa). The order
+       *  schema strips top-level `payment.paymentData`, so this is the
+       *  only durable source for the shift-aggregation hook. */
+      payments?: PaymentLike[];
+      [k: string]: unknown;
+    };
   };
 }
 
@@ -88,8 +95,22 @@ export async function applyShiftAggregation(
   const totalTaxPaisa = order.totals?.tax?.amount ?? 0;
   if (grandTotalPaisa <= 0) return { applied: false, reason: 'zero-total' };
 
-  // Per-payment-method split — paisa.
-  const payments = order.payment?.paymentData?.payments ?? [];
+  // Per-payment-method split — paisa. Source priority:
+  //   1. metadata.payments  — POS controller writes here (durable; the
+  //                           order schema doesn't have a top-level
+  //                           `payment` field so `payment.paymentData.*`
+  //                           gets stripped by mongoose strict-mode).
+  //   2. payment.paymentData.payments — only present pre-strip in the
+  //                                     hook's in-memory view, kept as a
+  //                                     fallback for callers that haven't
+  //                                     migrated yet.
+  //   3. payment.gateway — single-method fallback for legacy callers.
+  //   4. Defensive: bucket the whole order to cash. Not great, but better
+  //      than dropping the sale from shift aggregates entirely.
+  const payments =
+    (order.metadata?.payments && order.metadata.payments.length > 0
+      ? order.metadata.payments
+      : order.payment?.paymentData?.payments) ?? [];
   const perMethod = new Map<ShiftPaymentMethod, number>();
   if (payments.length > 0) {
     for (const pm of payments) {

@@ -16,15 +16,46 @@ function rethrowKernelError(err: unknown, codeToStatus: Record<string, number>, 
   throw err;
 }
 
+// Arc's `:id` URL param is the entity's `_id` (Mongo ObjectId), but the kernel's
+// blanket-order methods (pause/resume/extend/cancel/generateOne) accept
+// `blanketNumber` (e.g. "BLO-2026-0001"). Resolve _id → blanketNumber via
+// the mongokit Repository so soft-delete / tenant / hooks / cache plugins
+// fire — never via the raw Mongoose model. Per [packages/order/CLAUDE.md]
+// non-negotiable rules: "Route through mongokit methods so hooks/cache/
+// tenant plugins fire."
+const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
+async function resolveBlanketNumber(
+  id: string,
+  ctx: { organizationId: string },
+): Promise<string> {
+  if (!OBJECT_ID_RE.test(id)) return id; // already a blanketNumber
+  const doc = (await blanketOrderRepository.getById(id, {
+    organizationId: ctx.organizationId,
+    select: 'blanketNumber',
+    lean: true,
+    throwOnNotFound: false,
+  })) as { blanketNumber?: string } | null;
+  if (!doc?.blanketNumber) {
+    throw Object.assign(new Error(`BlanketOrder ${id} not found`), {
+      statusCode: 404,
+      code: 'BLANKET_ORDER_NOT_FOUND',
+    });
+  }
+  return doc.blanketNumber;
+}
+
 export const blanketOrderActions = {
   release_drawdown: {
     handler: async (id: string, _data: Record<string, unknown>, req: RequestWithExtras) => {
       try {
-        return await blanketOrderRepository.generateOne(id, { trigger: 'manual' }, getContextFromReq(req));
+        const ctx = getContextFromReq(req);
+        const blanketNumber = await resolveBlanketNumber(id, ctx);
+        return await blanketOrderRepository.generateOne(blanketNumber, { trigger: 'manual' }, ctx);
       } catch (err) {
         rethrowKernelError(
           err,
           {
+            BLANKET_ORDER_NOT_FOUND: 404,
             BLANKET_ORDER_INVALID_TRANSITION: 422,
             BLANKET_ORDER_ALREADY_TERMINAL: 422,
           },
@@ -38,9 +69,11 @@ export const blanketOrderActions = {
   close: {
     handler: async (id: string, data: Record<string, unknown>, req: RequestWithExtras) => {
       try {
-        return await blanketOrderRepository.cancel(id, (data.reason as string) ?? 'closed', getContextFromReq(req));
+        const ctx = getContextFromReq(req);
+        const blanketNumber = await resolveBlanketNumber(id, ctx);
+        return await blanketOrderRepository.cancel(blanketNumber, (data.reason as string) ?? 'closed', ctx);
       } catch (err) {
-        rethrowKernelError(err, { BLANKET_ORDER_ALREADY_TERMINAL: 422 }, 'Already terminal');
+        rethrowKernelError(err, { BLANKET_ORDER_NOT_FOUND: 404, BLANKET_ORDER_ALREADY_TERMINAL: 422 }, 'Already terminal');
       }
     },
     schema: closeBlanketOrderSchema,
@@ -50,7 +83,9 @@ export const blanketOrderActions = {
   extend: {
     handler: async (id: string, data: Record<string, unknown>, req: RequestWithExtras) => {
       try {
-        return await blanketOrderRepository.extend(id, new Date(data.endAt as string), getContextFromReq(req));
+        const ctx = getContextFromReq(req);
+        const blanketNumber = await resolveBlanketNumber(id, ctx);
+        return await blanketOrderRepository.extend(blanketNumber, new Date(data.endAt as string), ctx);
       } catch (err) {
         rethrowKernelError(
           err,
@@ -70,14 +105,26 @@ export const blanketOrderActions = {
 
   pause: {
     handler: async (id: string, _data: Record<string, unknown>, req: RequestWithExtras) => {
-      return blanketOrderRepository.pause(id, getContextFromReq(req));
+      try {
+        const ctx = getContextFromReq(req);
+        const blanketNumber = await resolveBlanketNumber(id, ctx);
+        return await blanketOrderRepository.pause(blanketNumber, ctx);
+      } catch (err) {
+        rethrowKernelError(err, { BLANKET_ORDER_NOT_FOUND: 404, BLANKET_ORDER_INVALID_TRANSITION: 422 }, 'Cannot pause');
+      }
     },
     permissions: permissions.orderActions.updateStatus,
   },
 
   resume: {
     handler: async (id: string, _data: Record<string, unknown>, req: RequestWithExtras) => {
-      return blanketOrderRepository.resume(id, getContextFromReq(req));
+      try {
+        const ctx = getContextFromReq(req);
+        const blanketNumber = await resolveBlanketNumber(id, ctx);
+        return await blanketOrderRepository.resume(blanketNumber, ctx);
+      } catch (err) {
+        rethrowKernelError(err, { BLANKET_ORDER_NOT_FOUND: 404, BLANKET_ORDER_INVALID_TRANSITION: 422 }, 'Cannot resume');
+      }
     },
     permissions: permissions.orderActions.updateStatus,
   },

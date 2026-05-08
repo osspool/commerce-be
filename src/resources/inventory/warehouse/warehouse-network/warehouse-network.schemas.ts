@@ -12,10 +12,7 @@ export const warehouseNetworkSchemas = {
   get: {
     response: {
       200: z.object({
-        success: z.literal(true),
-        data: z.object({
           entries: z.array(warehouseNetworkEntry),
-        }),
       }),
     },
   },

@@ -282,7 +282,7 @@ describe('Mushak NBR Compliance', () => {
           notes: 'Mushak compliance test stock',
         },
       });
-      const purchaseId = parse(purchaseRes.body)?.data?._id;
+      const purchaseId = parse(purchaseRes.body)?._id;
       if (purchaseId) {
         await server.inject({
           method: 'POST',
@@ -323,9 +323,7 @@ describe('Mushak NBR Compliance', () => {
       }));
 
       expect(res.statusCode).toBe(201);
-      const body = parse(res.body);
-      expect(body.success).toBe(true);
-      const d = body.data;
+      const d = parse(res.body);
 
       expect(d.mushakSerial).toBeTruthy();
       expect(d.date).toBeTruthy();
@@ -356,7 +354,7 @@ describe('Mushak NBR Compliance', () => {
     it('2. serial format matches NBR spec (branchCode/YYYY/NNNNNN)', async () => {
       const res = await generateInvoice(defaultPayload());
       expect(res.statusCode).toBe(201);
-      const serial = parse(res.body).data.mushakSerial as string;
+      const serial = parse(res.body).mushakSerial as string;
 
       expect(serial).toMatch(/^[^/]+\/\d{4}\/\d{6}$/);
       const [branchPart, yearPart, numPart] = serial.split('/');
@@ -378,9 +376,9 @@ describe('Mushak NBR Compliance', () => {
       const r2 = await generateInvoice(defaultPayload());
       const r3 = await generateInvoice(defaultPayload());
 
-      const s1 = parse(r1.body).data;
-      const s2 = parse(r2.body).data;
-      const s3 = parse(r3.body).data;
+      const s1 = parse(r1.body);
+      const s2 = parse(r2.body);
+      const s3 = parse(r3.body);
 
       const serials = [s1.mushakSerial, s2.mushakSerial, s3.mushakSerial];
       expect(new Set(serials).size).toBe(3);
@@ -392,7 +390,7 @@ describe('Mushak NBR Compliance', () => {
 
     it('4. BIN is 13 digits (no dashes, no spaces)', async () => {
       const res = await generateInvoice(defaultPayload());
-      const bin = parse(res.body).data.seller.bin as string;
+      const bin = parse(res.body).seller.bin as string;
       expect(bin).toMatch(/^\d{13}$/);
       expect(bin.length).toBe(13);
       expect(bin.includes('-')).toBe(false);
@@ -405,8 +403,8 @@ describe('Mushak NBR Compliance', () => {
       }));
       expect(res.statusCode).toBe(201);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
-      expect(body.data.buyer.name).toBe('Walk-in Customer');
+
+      expect(body.buyer.name).toBe('Walk-in Customer');
     });
 
     it('6. VAT amount per line matches rate × base (±1 paisa tolerance)', async () => {
@@ -417,7 +415,7 @@ describe('Mushak NBR Compliance', () => {
         ],
       }));
       expect(res.statusCode).toBe(201);
-      const lines = parse(res.body).data.lines as Array<{
+      const lines = parse(res.body).lines as Array<{
         totalValue: number; vatRate: number; vatAmount: number;
       }>;
 
@@ -435,7 +433,7 @@ describe('Mushak NBR Compliance', () => {
         ],
       }));
       expect(res.statusCode).toBe(201);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
 
       expect(d.totalValue + (d.totalSd ?? 0) + d.totalVat).toBe(d.grandTotal);
     });
@@ -469,23 +467,23 @@ describe('Mushak NBR Compliance', () => {
         ],
       }));
       expect(genRes.statusCode).toBe(201);
-      const invoice = parse(genRes.body).data;
+      const invoice = parse(genRes.body);
       const invoiceVat = invoice.totalVat as number;
       expect(invoiceVat).toBeGreaterThan(0);
 
       const period = currentPeriod();
 
       const beforeRes = await getMonthlyReturn(period);
-      const before = parse(beforeRes.body).data;
+      const before = parse(beforeRes.body);
       const beforeOutputVat15 = (before.return.lines.find((l: any) => l.lineNumber === 2)?.value ?? 0) as number;
 
       // Cancel the invoice
       const cancelRes = await cancelInvoice(invoice._id, 'Excluded from return test');
       expect(cancelRes.statusCode).toBe(200);
-      expect(parse(cancelRes.body).data.status).toBe('cancelled');
+      expect(parse(cancelRes.body).status).toBe('cancelled');
 
       const afterRes = await getMonthlyReturn(period);
-      const after = parse(afterRes.body).data;
+      const after = parse(afterRes.body);
       const afterOutputVat15 = (after.return.lines.find((l: any) => l.lineNumber === 2)?.value ?? 0) as number;
 
       // Cancelling should DECREASE the output VAT total by exactly this invoice's VAT.
@@ -514,7 +512,7 @@ describe('Mushak NBR Compliance', () => {
       const period = currentPeriod();
       const res = await getMonthlyReturn(period);
       expect(res.statusCode).toBe(200);
-      const data = parse(res.body).data;
+      const data = parse(res.body);
 
       expect(Array.isArray(data.aggregates)).toBe(true);
       expect(data.aggregates.length).toBeGreaterThan(0);
@@ -531,7 +529,7 @@ describe('Mushak NBR Compliance', () => {
       const period = '2026-04';
       const res = await getMonthlyReturn(period);
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
       expect(d.return.period).toBe(period);
       expect(d.return.period).toMatch(/^\d{4}-\d{2}$/);
     });
@@ -539,7 +537,7 @@ describe('Mushak NBR Compliance', () => {
     it('13. return includes filing deadline (15th of following month)', async () => {
       const res = await getMonthlyReturn('2026-04');
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
 
       expect(d.return.dueDate).toBeTruthy();
       const due = new Date(d.return.dueDate);
@@ -552,7 +550,7 @@ describe('Mushak NBR Compliance', () => {
       // Well-before any invoice creation.
       const res = await getMonthlyReturn('2000-01');
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
 
       expect(d.aggregates).toEqual([]);
       expect(d.return.netPayable).toBe(0);
@@ -567,14 +565,14 @@ describe('Mushak NBR Compliance', () => {
     it('15. return includes filer BIN from PlatformConfig', async () => {
       const res = await getMonthlyReturn(currentPeriod());
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
       expect(d.return.bin).toBe(SELLER_BIN);
     });
 
     it('16. total output VAT matches sum of issued invoice VATs', async () => {
       const period = currentPeriod();
       const res = await getMonthlyReturn(period);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
 
       // Compare NBR line 6 (total output VAT) against sum over aggregates.
       const line6 = d.return.lines.find((l: any) => l.lineNumber === 6).value as number;
@@ -607,7 +605,7 @@ describe('Mushak NBR Compliance', () => {
 
       const period = currentPeriod();
       const returnRes = await getMonthlyReturn(period);
-      const d = parse(returnRes.body).data;
+      const d = parse(returnRes.body);
       const zeroRatedLine = d.return.lines.find((l: any) => l.lineNumber === 7);
       expect(zeroRatedLine).toBeDefined();
       expect(typeof zeroRatedLine.value).toBe('number');
@@ -620,7 +618,7 @@ describe('Mushak NBR Compliance', () => {
 
     it('18. exempt sales tracked separately (line 8)', async () => {
       const res = await getMonthlyReturn(currentPeriod());
-      const d = parse(res.body).data;
+      const d = parse(res.body);
       const exemptLine = d.return.lines.find((l: any) => l.lineNumber === 8);
       expect(exemptLine).toBeDefined();
       expect(typeof exemptLine.value).toBe('number');
@@ -635,7 +633,7 @@ describe('Mushak NBR Compliance', () => {
     it('19. valid 13-digit BIN passes', async () => {
       const res = await validateBin(SELLER_BIN);
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
       expect(d.isValid).toBe(true);
     });
 
@@ -647,28 +645,28 @@ describe('Mushak NBR Compliance', () => {
 
       const res = await validateBin(bad);
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
       expect(d.isValid).toBe(false);
     });
 
     it('21. wrong length (12 digits) is rejected', async () => {
       const res = await validateBin('001200045670'); // 12 digits
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
       expect(d.isValid).toBe(false);
     });
 
     it('22. non-digit BIN is rejected', async () => {
       const res = await validateBin('00120004567AB');
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
       expect(d.isValid).toBe(false);
     });
 
     it('23. valid BIN response includes formatted version (with dashes)', async () => {
       const res = await validateBin(SELLER_BIN);
       expect(res.statusCode).toBe(200);
-      const d = parse(res.body).data;
+      const d = parse(res.body);
       expect(d.isValid).toBe(true);
       // formatBIN → 4-4-4-1
       expect(d.formatted).toMatch(/^\d{4}-\d{4}-\d{4}-\d$/);

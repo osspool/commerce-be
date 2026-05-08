@@ -7,87 +7,40 @@
  *   - `post`        id = Order._id    → A/R invoice JE (credit-limit gate)
  *   - `receive`     id = invoice JE   → cash receipt + match
  *   - `debit-note`  id = invoice JE   → allowance / return + match
+ *
+ * Shared `getIds`, `loadPartnerContext`, `controlAccountId` and amount
+ * assertion live in `../posting/partner-posting.helper.ts` so A/R and A/P
+ * stay in lockstep.
  */
 
 import { requireRoles } from '@classytic/arc/permissions';
-import { getOrgId, getUserId } from '@classytic/arc/scope';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import mongoose from 'mongoose';
-import { Account, accounting, JournalEntry } from '../accounting.engine.js';
+import { accounting, JournalEntry } from '../accounting.engine.js';
+import {
+  assertPositiveIntegerPaisa,
+  controlAccountId,
+  getIds,
+  loadPartnerContext,
+  type PartnerContext,
+} from '../posting/partner-posting.helper.js';
 import { customerDebitNoteToPosting, validateNoteInput } from '../posting/contracts/credit-debit-note.contract.js';
 import { customerInvoiceToPosting, customerReceiptToPosting } from '../posting/contracts/customer-invoice.contract.js';
-import { type BillGroupKey, computeOpenBalance, maybeSettleGroup } from '../posting/open-balance.service.js';
-import { createPosting, SYSTEM_ACTOR_ID } from '../posting/posting.service.js';
+import { computeOpenBalance, maybeSettleGroup } from '../posting/open-balance.service.js';
+import { createPosting } from '../posting/posting.service.js';
 
-function getIds(req: RequestWithExtras): { orgId: string | undefined; actorId: string } {
-  const orgId = getOrgId(req.scope) ?? undefined;
-  const actorId = (getUserId(req.scope) ?? req.user?._id ?? req.user?.id ?? SYSTEM_ACTOR_ID) as string;
-  return { orgId, actorId };
-}
+const AR_ACCOUNT_CODE = '1141';
 
-async function arAccountId(): Promise<mongoose.Types.ObjectId> {
-  const acc = await Account.findOne({ accountTypeCode: '1141' }).select('_id').lean();
-  if (!acc) {
-    throw Object.assign(new Error('A/R control account 1141 not seeded'), {
-      statusCode: 503,
-      code: 'CHART_NOT_SEEDED',
-    });
-  }
-  return acc._id as mongoose.Types.ObjectId;
-}
-
-interface InvoiceContext {
-  orderId: string;
-  customerId: string;
-  branchId?: string;
-  arId: mongoose.Types.ObjectId;
-  groupKey: BillGroupKey;
-}
-
-async function loadInvoiceContext(invJeId: string): Promise<InvoiceContext> {
-  const inv = await JournalEntry.findById(invJeId).lean();
-  if (!inv) {
-    throw Object.assign(new Error('Invoice not found'), {
-      statusCode: 404,
-      code: 'INVOICE_NOT_FOUND',
-    });
-  }
-  const arId = await arAccountId();
-  const items = inv.journalItems as Array<{
-    account: mongoose.Types.ObjectId;
-    partnerId?: string;
-  }>;
-  const arLine = items.find((i) => String(i.account) === String(arId));
-  if (!arLine || !arLine.partnerId) {
-    throw Object.assign(new Error('Not a customer invoice — missing partner-tagged A/R line'), {
-      statusCode: 400,
-      code: 'NOT_A_CUSTOMER_INVOICE',
-    });
-  }
-  const sourceRef = (inv as { sourceRef?: { sourceId?: unknown } }).sourceRef;
-  const orderId = sourceRef?.sourceId ? String(sourceRef.sourceId) : String(inv._id);
-  const branchId = (inv as { organizationId?: unknown }).organizationId?.toString();
-  return {
-    orderId,
-    customerId: arLine.partnerId,
-    branchId,
-    arId,
-    groupKey: {
-      controlAccountId: arId,
-      partnerId: arLine.partnerId,
-      sourceId: orderId,
-      side: 'receivable',
-    },
-  };
-}
-
-function assertPositiveIntegerPaisa(amount: unknown): asserts amount is number {
-  if (typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
-    throw Object.assign(new Error('amount must be a positive integer (paisa)'), {
-      statusCode: 400,
-      code: 'INVALID_AMOUNT',
-    });
-  }
+function loadInvoiceContext(invJeId: string): Promise<PartnerContext> {
+  return loadPartnerContext({
+    jeId: invJeId,
+    side: 'receivable',
+    controlCode: AR_ACCOUNT_CODE,
+    docLabel: 'Invoice',
+    notFoundCode: 'INVOICE_NOT_FOUND',
+    notPartnerDocCode: 'NOT_A_CUSTOMER_INVOICE',
+    notPartnerDocMessage: 'Not a customer invoice — missing partner-tagged A/R line',
+  });
 }
 
 /**
@@ -154,7 +107,7 @@ async function postInvoiceAction(orderId: string, data: Record<string, unknown>,
   }
 
   // Credit-limit gate BEFORE posting (fail fast — never leave a partial JE).
-  const arId = await arAccountId();
+  const arId = await controlAccountId(AR_ACCOUNT_CODE);
   const gate = await enforceCreditLimit(customerId, amount, arId);
   if (!gate.ok) {
     throw Object.assign(new Error(gate.message), {
@@ -163,15 +116,58 @@ async function postInvoiceAction(orderId: string, data: Record<string, unknown>,
     });
   }
 
-  const posting = customerInvoiceToPosting({
-    orderId: String(order._id),
-    customerId,
-    totalAmount: amount,
-    issuedAt: new Date((order.createdAt as Date) || new Date()),
-    dueDate: data.dueDate ? new Date(data.dueDate as string) : undefined,
-    creditDays: data.creditDays as number | undefined,
-    invoiceNumber: (data.invoiceNumber as string | undefined) || (order.orderNumber as string | undefined),
-  });
+  // VAT amount on the invoice — paisa, integer. Required to compute VDS split.
+  // `data.vatAmount` wins; otherwise pull from order.taxAmount (if stored in
+  // paisa) or order.taxTotal × 100 (if in major BDT).
+  const vatFromOrder =
+    typeof order.taxAmount === 'number'
+      ? order.taxAmount
+      : typeof order.taxTotal === 'number'
+      ? Math.round(order.taxTotal * 100)
+      : 0;
+  const vatAmount = (data.vatAmount as number | undefined) ?? vatFromOrder;
+
+  // VDS lookup — customer's `vdsPayerCategory` (GOVT / BANK / NGO / TELECOM /
+  // CORP) flags them as a designated VDS withholder under NBR rules. Any
+  // non-null value enables the withholding split. `data.withholdVds` wins
+  // for per-invoice override (e.g. exempt this single sale).
+  let withholdVds = false;
+  let vdsRate: number | undefined;
+  try {
+    const customer = await mongoose.connection
+      .db!.collection('customers')
+      .findOne(
+        { _id: new mongoose.Types.ObjectId(customerId) },
+        { projection: { vdsPayerCategory: 1, vdsRate: 1 } },
+      );
+    if (customer?.vdsPayerCategory) {
+      withholdVds = true;
+      vdsRate = customer.vdsRate as number | undefined;
+    }
+  } catch {
+    // ignore — post without VDS split
+  }
+  if (typeof data.withholdVds === 'boolean') withholdVds = data.withholdVds;
+  if (typeof data.vdsRate === 'number') vdsRate = data.vdsRate;
+
+  // User-initiated `post` action → autoPost: true. Contract default is draft
+  // (for automated/bulk issuance); explicit click posts.
+  const posting = customerInvoiceToPosting(
+    {
+      orderId: String(order._id),
+      customerId,
+      totalAmount: amount,
+      issuedAt: new Date((order.createdAt as Date) || new Date()),
+      dueDate: data.dueDate ? new Date(data.dueDate as string) : undefined,
+      creditDays: data.creditDays as number | undefined,
+      invoiceNumber:
+        (data.invoiceNumber as string | undefined) || (order.orderNumber as string | undefined),
+      ...(vatAmount > 0 ? { vatAmount } : {}),
+      withholdVds,
+      ...(vdsRate !== undefined ? { vdsRate } : {}),
+    },
+    { autoPost: true },
+  );
   const branchId = (order.branch && String(order.branch)) || orgId;
   return createPosting(branchId, { ...posting, actorId });
 }
@@ -193,8 +189,8 @@ async function receiveAction(invJeId: string, data: Record<string, unknown>, req
   }
 
   const posting = customerReceiptToPosting({
-    orderId: ctx.orderId,
-    customerId: ctx.customerId,
+    orderId: ctx.sourceId,
+    customerId: ctx.partnerId,
     amount,
     date: data.date ? new Date(data.date as string) : new Date(),
     toAccountCode: data.toAccountCode as string | undefined,
@@ -216,7 +212,7 @@ async function debitNoteAction(invJeId: string, data: Record<string, unknown>, r
     reference: data.reference as string,
   });
 
-  const idempotencyKey = `customer-debit-note-${ctx.orderId}-${data.reference}-${data.amount}`;
+  const idempotencyKey = `customer-debit-note-${ctx.sourceId}-${data.reference}-${data.amount}`;
   const existing = await JournalEntry.findOne({ idempotencyKey }).select('_id state').lean();
   if (existing) {
     return {
@@ -235,15 +231,20 @@ async function debitNoteAction(invJeId: string, data: Record<string, unknown>, r
     });
   }
 
-  const posting = customerDebitNoteToPosting({
-    sourceId: ctx.orderId,
-    sourceModel: 'Order',
-    customerId: ctx.customerId,
-    amount: data.amount as number,
-    reason: data.reason as string,
-    reference: data.reference as string,
-    date: data.date ? new Date(data.date as string) : undefined,
-  });
+  // User-initiated debit-note action → autoPost: true. Contract default is
+  // draft (for automated/bulk corrections); explicit click posts.
+  const posting = customerDebitNoteToPosting(
+    {
+      sourceId: ctx.sourceId,
+      sourceModel: 'Order',
+      customerId: ctx.partnerId,
+      amount: data.amount as number,
+      reason: data.reason as string,
+      reference: data.reference as string,
+      date: data.date ? new Date(data.date as string) : undefined,
+    },
+    { autoPost: true },
+  );
   const result = await createPosting(ctx.branchId || orgId, { ...posting, actorId });
   const matched = await maybeSettleGroup(ctx.groupKey);
   return { ...result, matched };
@@ -271,6 +272,21 @@ export const customerInvoiceActions = {
         creditDays: { type: 'integer', minimum: 0, description: 'Net N days' },
         dueDate: { type: 'string', format: 'date' },
         invoiceNumber: { type: 'string' },
+        vatAmount: {
+          type: 'integer',
+          minimum: 0,
+          description: 'VAT portion in paisa. Required for VDS computation; defaults to order.taxAmount/taxTotal.',
+        },
+        withholdVds: {
+          type: 'boolean',
+          description: 'Override customer.vdsPayerCategory for this invoice. true = withhold, false = exempt this single sale.',
+        },
+        vdsRate: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description: 'Override VDS rate (0–1). Defaults to NBR standard 0.5.',
+        },
       },
       required: [],
     },
@@ -281,7 +297,7 @@ export const customerInvoiceActions = {
       type: 'object',
       properties: {
         amount: { type: 'integer', minimum: 1, description: 'Amount in paisa' },
-        toAccountCode: { type: 'string', description: 'Cash/bank account code (default 1112)' },
+        toAccountCode: { type: 'string', description: 'Cash/bank account code (defaults to BD.cash, the Cash at Bank current account)' },
         reference: { type: 'string' },
         date: { type: 'string', format: 'date' },
       },

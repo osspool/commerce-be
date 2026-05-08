@@ -168,7 +168,7 @@ describe('Scrap — draft → approve → execute', () => {
     expect([200, 201, 403]).toContain(res.statusCode);
     const body = ok(res);
     if (body) {
-      const data = body.data as { _id: string; status: string; scrapNumber: string };
+      const data = body as { _id: string; status: string; scrapNumber: string };
       expect(data.status).toBe('draft');
       expect(data.scrapNumber).toMatch(/^SCR-/);
       scrapId = data._id;
@@ -199,17 +199,39 @@ describe('Scrap — draft → approve → execute', () => {
     expect([200, 403]).toContain(res.statusCode);
   });
 
-  it('POST /inventory/scrap/:id/action approve', async () => {
+  it('POST /inventory/scrap/:id/action submit_for_approval + decide', async () => {
     if (!scrapId) return;
-    const res = await server.inject({
+    const approverId = ctx.users.admin.userId as string;
+
+    const submitRes = await server.inject({
       method: 'POST',
       url: `${API}/inventory/scrap/${scrapId}/action`,
       headers: h(),
-      payload: { action: 'approve' },
+      payload: {
+        action: 'submit_for_approval',
+        chain: {
+          order: 'sequential',
+          steps: [{ id: 'admin', approvers: [{ id: approverId }] }],
+        },
+      },
     });
-    expect([200, 403]).toContain(res.statusCode);
-    const body = ok(res);
-    if (body) expect((body.data as { status: string }).status).toBe('approved');
+    expect([200, 403]).toContain(submitRes.statusCode);
+    if (submitRes.statusCode !== 200) return;
+
+    const decideRes = await server.inject({
+      method: 'POST',
+      url: `${API}/inventory/scrap/${scrapId}/action`,
+      headers: h(),
+      payload: {
+        action: 'decide',
+        stepId: 'admin',
+        approverId,
+        decision: 'approved',
+      },
+    });
+    expect([200, 403]).toContain(decideRes.statusCode);
+    const body = ok(decideRes);
+    if (body) expect((body as { status: string }).status).toBe('approved');
   });
 
   it('POST /inventory/scrap — invalid reason → 400', async () => {
@@ -235,7 +257,7 @@ describe('Scrap — draft → approve → execute', () => {
       headers: h(),
       payload: { action: 'evaporate' },
     });
-    expect([400, 403]).toContain(res.statusCode);
+    expect([400, 403, 422]).toContain(res.statusCode);
   });
 });
 
@@ -259,7 +281,7 @@ describe('Returns (RMA) — draft → confirm', () => {
     expect([200, 201, 403]).toContain(res.statusCode);
     const body = ok(res);
     if (body) {
-      const data = body.data as { _id: string; status: string; returnNumber: string };
+      const data = body as { _id: string; status: string; returnNumber: string };
       expect(data.status).toBe('draft');
       expect(data.returnNumber).toMatch(/^RET-/);
       returnId = data._id;
@@ -281,7 +303,7 @@ describe('Returns (RMA) — draft → confirm', () => {
     });
     expect([200, 403]).toContain(res.statusCode);
     const body = ok(res);
-    if (body) expect((body.data as { status: string }).status).toBe('confirmed');
+    if (body) expect((body as { status: string }).status).toBe('confirmed');
   });
 
   it('POST /inventory/returns — empty items → 400', async () => {
@@ -321,7 +343,7 @@ describe('UoM Groups — CRUD + convert', () => {
     expect([200, 201, 403]).toContain(res.statusCode);
     const body = ok(res);
     if (body) {
-      const data = body.data as { _id: string; code: string };
+      const data = body as { _id: string; code: string };
       expect(data.code).toBe(code);
       groupId = data._id;
     }
@@ -347,7 +369,7 @@ describe('UoM Groups — CRUD + convert', () => {
     expect([200, 403]).toContain(res.statusCode);
     const body = ok(res);
     if (body) {
-      const data = body.data as { baseQuantity: number; factorUsed: number };
+      const data = body as { baseQuantity: number; factorUsed: number };
       expect(data.baseQuantity).toBe(24);
       expect(data.factorUsed).toBe(12);
     }
@@ -389,7 +411,7 @@ describe('Standard Cost — publish + variance', () => {
     });
     expect([200, 201, 403]).toContain(res.statusCode);
     const body = ok(res);
-    if (body) expect((body.data as { standardCost: number }).standardCost).toBe(100);
+    if (body) expect((body as { standardCost: number }).standardCost).toBe(100);
   });
 
   it('GET /inventory/standard-costs/active?skuRef=...', async () => {
@@ -438,7 +460,7 @@ describe('Consignment — settle + pending summary', () => {
     expect([200, 403]).toContain(res.statusCode);
     const body = ok(res);
     if (body) {
-      const data = body.data as { rows: unknown[]; totalOutstanding: number };
+      const data = body as { rows: unknown[]; totalOutstanding: number };
       expect(Array.isArray(data.rows)).toBe(true);
     }
   });
@@ -452,7 +474,7 @@ describe('Consignment — settle + pending summary', () => {
     expect([200, 403]).toContain(res.statusCode);
     const body = ok(res);
     if (body) {
-      const data = body.data as { emitted: boolean; skippedReason?: string };
+      const data = body as { emitted: boolean; skippedReason?: string };
       expect(data.emitted).toBe(false);
       expect(data.skippedReason).toBe('move_not_found');
     }
@@ -471,7 +493,7 @@ describe('Warehouse Network — config + resolve', () => {
     expect([200, 403]).toContain(res.statusCode);
     const body = ok(res);
     if (body) {
-      const data = body.data as { entries: unknown[] };
+      const data = body as { entries: unknown[] };
       expect(Array.isArray(data.entries)).toBe(true);
     }
   });
@@ -490,7 +512,7 @@ describe('Warehouse Network — config + resolve', () => {
     expect([200, 403]).toContain(res.statusCode);
     const body = ok(res);
     if (body) {
-      const data = body.data as { decision: string };
+      const data = body as { decision: string };
       expect(['transfer', 'purchase_fallback']).toContain(data.decision);
     }
   });

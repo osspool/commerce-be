@@ -119,6 +119,15 @@ beforeAll(async () => {
   const ts = Date.now();
 
     const __testApp = await createApplication({ resources });
+
+  // Force-create flow_* collections + indexes BEFORE any transactional
+  // write fires. Without this, the FIRST PO receive races collection
+  // creation inside a Mongo transaction and aborts with `Unable to write
+  // to collection ... due to catalog changes; please retry the operation`
+  // — see flow-engine.ts:99-105.
+  const { ensureFlowEngineReady } = await import('../../../src/resources/inventory/flow/flow-engine.js');
+  await ensureFlowEngineReady();
+
 ctx = await setupBetterAuthTestApp({
     app: __testApp,
     org: { name: `IVAT-HQ-${ts}`, slug: `ivat-hq-${ts}` },
@@ -156,8 +165,14 @@ afterAll(async () => {
 
 describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
   const SKU_STD = 'IVAT-STD-001';
-  const PRICE_STD = 100000; // 1000 BDT in paisa
-  const COST_STD = 60000;   // 600 BDT in paisa
+  // PO inputs are BDT-major units (`computePurchaseTotals` does
+  // `toPaisa(costPrice) = costPrice * 100`). Earlier comments here
+  // labelled these as "in paisa" — that was wrong; passing 60000 sells
+  // a ৳60,000/unit cost, not ৳600. Renamed below to make the unit
+  // explicit so the JE-debit assertion lines up with what's actually
+  // recorded (₹90,000 BDT VAT = 9,000,000 paisa).
+  const PRICE_STD = 100000; // 1000 BDT major (PO input)
+  const COST_STD = 60000;   // 600 BDT major (PO input — was mislabelled "paisa")
   const QTY_BUY = 10;
 
   const SKU_ZERO = 'IVAT-ZERO-001';
@@ -203,8 +218,7 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     if (res.statusCode !== 201) console.log('Purchase create:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    purchaseStdId = body.data._id;
+    purchaseStdId = body._id;
     expect(purchaseStdId).toBeTruthy();
   });
 
@@ -218,8 +232,7 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     if (res.statusCode !== 200) console.log('Purchase receive:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('received');
+    expect(body.status).toBe('received');
   });
 
   it('PURCHASES journal entry exists with input VAT debited to 1150.*', async () => {
@@ -259,10 +272,21 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     const totalInputVat = inputVatItems.reduce((sum: number, item: any) => sum + (item.debit || 0), 0);
     expect(totalInputVat).toBeGreaterThan(0);
 
-    // Expected: 10 units * 60000 paisa * 15% = 90000 paisa (900 BDT)
-    const expectedVat = QTY_BUY * COST_STD * 0.15; // 90000
+    // PO util `computeLineTotals` (purchase-order.utils.ts:44) treats
+    // `costPrice` as BDT-major and converts to paisa via `* 100`. The
+    // receive handler then converts the final taxTotal back to paisa for
+    // the accounting event (`taxTotalPaisa = taxTotal * 100`), and the
+    // contract debits that whole amount to `1150.VAT15.INPUT`.
+    // So for `QTY_BUY=10` units at `COST_STD=60000` BDT/unit, 15% rate:
+    //   subtotal = 600,000 BDT  ->  60,000,000 paisa
+    //   taxTotal =  90,000 BDT  ->   9,000,000 paisa  ← the JE debit
+    // Earlier comment on this line read "10 * 60000 paisa * 15% = 90000
+    // paisa" — that mentally-treated the input as paisa when the backend
+    // treats it as BDT-major, off by a factor of 100. The expression
+    // below now matches what the production code actually records.
+    const expectedVatPaisa = Math.round(QTY_BUY * COST_STD * 100 * 0.15);
     // Allow small rounding variance (+/- 100 paisa)
-    expect(Math.abs(totalInputVat - expectedVat)).toBeLessThanOrEqual(100);
+    expect(Math.abs(totalInputVat - expectedVatPaisa)).toBeLessThanOrEqual(100);
   });
 
   // --- Scenario 2: POS sale -> Output VAT -> Mushak 6.3 ---
@@ -295,8 +319,7 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     if (res.statusCode !== 201) console.log('POS order:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    orderId = body.data._id;
+    orderId = body._id;
     expect(orderId).toBeTruthy();
   });
 
@@ -325,8 +348,7 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     }
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.totalVat).toBeGreaterThan(0);
+    expect(body.totalVat).toBeGreaterThan(0);
   });
 
   // --- Scenario 3: Mushak 9.1 monthly return shows input credit offset ---
@@ -335,6 +357,25 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     await outbox.relay();
     // Let async event handlers settle (publish dispatches, doesn't await)
     await new Promise((r) => setTimeout(r, 300));
+
+    // Vendor-bill JEs land as DRAFT (matches ERPNext / Odoo review
+    // semantics — see vendor-bill.contract.ts `autoPost: false`). The
+    // tax aggregator only sums `state: 'posted'` entries because draft
+    // amounts can still change. Post the bill JE before filing the
+    // monthly return — that's what a real cashier does in the UI.
+    const jeCol = mongoose.connection.db!.collection('journalentries');
+    const draftPurchaseJes = await jeCol
+      .find({ journalType: 'PURCHASES', state: 'draft' })
+      .toArray();
+    for (const je of draftPurchaseJes) {
+      const r = await server.inject({
+        method: 'POST',
+        url: `${API}/accounting/journal-entries/${je._id}/action`,
+        headers: auth.as('admin').headers,
+        payload: { action: 'post' },
+      });
+      expect([200, 403]).toContain(r.statusCode);
+    }
 
     const now = new Date();
     const period = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -348,21 +389,20 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     expect(res.statusCode).toBe(200);
 
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data).toBeDefined();
+    expect(body).toBeDefined();
 
-    const ret = body.data.return;
+    const ret = body.return;
     expect(ret).toBeDefined();
 
     // THE KEY ASSERTION: inputVatCredit was previously always 0 before the fix.
     // Mushak 9.1 return is structured as NBR's 19-line format; line 9 is the
-    // input VAT credit. Also exposed as body.data.inputVat from the handler.
+    // input VAT credit. Also exposed as body.inputVat from the handler.
     const inputCreditLine = ret?.lines?.find((l: { lineNumber: number }) => l.lineNumber === 9);
     const inputCredit = inputCreditLine?.value ?? 0;
     expect(inputCredit).toBeGreaterThan(0);
 
     // Output VAT aggregates should be present
-    const aggregates = body.data.aggregates ?? [];
+    const aggregates = body.aggregates ?? [];
     expect(Array.isArray(aggregates)).toBe(true);
     const outputTotal = aggregates.reduce((sum: number, a: any) => sum + (a.vatAmount || 0), 0);
 
@@ -395,8 +435,7 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     if (res.statusCode !== 201) console.log('Zero purchase create:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    purchaseZeroId = body.data._id;
+    purchaseZeroId = body._id;
     expect(purchaseZeroId).toBeTruthy();
   });
 
@@ -409,7 +448,7 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     });
     if (res.statusCode !== 200) console.log('Zero purchase receive:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body).data.status).toBe('received');
+    expect(parse(res.body).status).toBe('received');
   });
 
   it('zero-rated purchase journal entry does NOT have a 1150.* line', async () => {
@@ -458,8 +497,7 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     if (res.statusCode !== 201) console.log('Reduced purchase create:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    purchaseReducedId = body.data._id;
+    purchaseReducedId = body._id;
     expect(purchaseReducedId).toBeTruthy();
   });
 
@@ -472,7 +510,7 @@ describe('Purchase Input VAT -> Mushak 9.1 Scenario', () => {
     });
     if (res.statusCode !== 200) console.log('Reduced purchase receive:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body).data.status).toBe('received');
+    expect(parse(res.body).status).toBe('received');
   });
 
   it('reduced-rate (7.5%) purchase journal entry does NOT have 1150.* line (not claimable per bd-tax)', async () => {

@@ -1,10 +1,11 @@
-import { createEvent } from '@classytic/arc/events';
+import { createEvent } from '@classytic/primitives/events';
 import type mongoose from 'mongoose';
 import posLookupService from '#resources/inventory/flow/pos-lookup.service.js';
 import { createStatusError } from '#resources/inventory/shared/status-errors.js';
 import { notifyEvent } from '#resources/notifications/notification.publish.js';
 import { outboxStore } from '#shared/outbox/index.js';
-import PurchaseOrder, { PurchaseOrderStatus } from '../models/purchase-order.model.js';
+import { getPurchaseEngine } from '#resources/inventory/_engines/purchase.engine.js';
+import { PurchaseOrderStatus } from '../purchase-order.constants.js';
 import { buildStatusEntry, normalizeNumber } from '../purchase-order.utils.js';
 import { receiveItemsIntoStock } from './receive-items-into-stock.js';
 import { getSupplierById } from './shared.js';
@@ -19,6 +20,7 @@ export async function receivePurchase(
 
   return withPurchaseTransaction(
     async (session) => {
+      const PurchaseOrder = getPurchaseEngine().models.PurchaseOrder;
       const purchase = session
         ? await PurchaseOrder.findById(purchaseId).session(session)
         : await PurchaseOrder.findById(purchaseId);

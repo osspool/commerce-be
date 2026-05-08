@@ -16,7 +16,7 @@
  *    produced inflated `total` + near-empty pages).
  * 3. DB-paginated product query via mongokit `getAll` → canonical
  *    `OffsetPaginationResult` envelope
- *    (`{ docs, page, limit, total, pages, hasNext, hasPrev }`).
+ *    (`{ data, page, limit, total, pages, hasNext, hasPrev }`).
  * 4. Enrich the paginated page with branch stock via catalog's
  *    InventoryBridge (single batch query over Flow quants, `$in`-scoped
  *    to the page's skuRefs).
@@ -53,7 +53,7 @@
  */
 
 import type { BranchStock } from '@classytic/catalog';
-import type { OffsetPaginationResult } from '@classytic/mongokit';
+import type { OffsetPaginationResult } from '@classytic/repo-core/pagination';
 import mongoose from 'mongoose';
 import { ensureCatalogEngine, getCatalogInventoryBridge } from '#resources/catalog/catalog.engine.js';
 import { queryParser } from '#shared/query-parser.js';
@@ -132,7 +132,7 @@ function buildPosSearchOr(search: string): Array<Record<string, unknown>> {
  * (supports bracket operators: `basePrice[gte]=100`, `status[in]=a,b`).
  *
  * Returns the canonical `OffsetPaginationResult` envelope (spread at the
- * top level) with `docs` replaced by stock-enriched products.
+ * top level) with `data` replaced by stock-enriched products.
  */
 /**
  * Expand a parent category slug to `{ categorySlug: <slug> | { $in: [...] } }`.
@@ -264,7 +264,7 @@ export async function getPosProducts(
     if (stockSkuRefs.length === 0) {
       return {
         method: 'offset',
-        docs: [],
+        data: [],
         page,
         limit,
         total: 0,
@@ -305,12 +305,12 @@ export async function getPosProducts(
 
   if (bridge?.enrichWithStock) {
     enrichedDocs = (await bridge.enrichWithStock(
-      result.docs as unknown as Array<{ _id: string; variants?: Array<{ sku: string }> }>,
+      result.data as unknown as Array<{ _id: string; variants?: Array<{ sku: string }> }>,
       { branchId },
       ctx,
     )) as ProductWithStock[];
   } else {
-    enrichedDocs = result.docs.map((p) => ({
+    enrichedDocs = result.data.map((p) => ({
       ...p,
       branchStock: { quantity: 0, inStock: false, lowStock: false },
     })) as ProductWithStock[];
@@ -326,7 +326,7 @@ export async function getPosProducts(
     enrichedDocs = enrichedDocs.filter((p) => p.branchStock.lowStock);
   }
 
-  return { ...result, docs: enrichedDocs };
+  return { ...result, data: enrichedDocs };
 }
 
 export default { getPosProducts };

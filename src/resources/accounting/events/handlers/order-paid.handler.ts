@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import config from '#config/index.js';
 import { getTransactionModel } from '#shared/revenue/engine.js';
 import { type CodPlacementData, codPlacementToPosting } from '../../posting/contracts/cod-placement.contract.js';
 import { type SalesTransactionData, salesTransactionToPosting } from '../../posting/contracts/sales.contract.js';
@@ -65,17 +64,20 @@ export const orderPaidHandler = definePostingHandler({
     const orderId = txn.sourceId?.toString();
     const txnDate = txn.date ?? txn.createdAt ?? new Date();
 
-    // Pull promo discount + gateway off the order. Without a sourceId
-    // we can't look it up — treat as prepaid with no promo, which is
-    // the historical default for non-order-linked transactions.
-    const { promoDiscount, orderGateway } = orderId
+    // Pull promo discount + gateway + customerId + referenceNumber off
+    // the order. Without a sourceId we can't look it up — treat as
+    // prepaid with no promo and no customer, the historical default for
+    // non-order-linked txns.
+    const { promoDiscount, orderGateway, customerId, orderReferenceNumber } = orderId
       ? await loadOrderMeta(orderId)
-      : { promoDiscount: 0, orderGateway: '' };
+      : { promoDiscount: 0, orderGateway: '', customerId: null, orderReferenceNumber: undefined };
 
     if (orderGateway === 'cod' && orderId) {
       const data: CodPlacementData = {
         transactionId: txn._id.toString(),
         orderId,
+        orderReferenceNumber,
+        customerId,
         amount: txn.amount,
         tax: txn.tax ?? 0,
         date: txnDate,
@@ -84,11 +86,30 @@ export const orderPaidHandler = definePostingHandler({
       };
       return {
         branchId,
-        posting: codPlacementToPosting(data, { autoPost: config.accounting.autoPost }),
+        posting: codPlacementToPosting(data),
         logFields: { transactionId: payload.transactionId, orderId },
         successMessage: 'COD placement journal entry created (A/R posted)',
       };
     }
+
+    // Pull the provider's transaction reference if present. Different gateways
+    // store it under different keys; we look at the most common ones in order.
+    // Stamping this onto the JE metadata is what lets the settlement matcher
+    // do a deterministic 1:1 match instead of falling back to amount+date
+    // (which collides on busy days).
+    const meta = (txn.metadata ?? {}) as Record<string, unknown>;
+    const gatewayTransactionId =
+      (meta.gatewayTransactionId as string | undefined) ||
+      (meta.providerTxnRef as string | undefined) ||
+      (meta.externalTxnRef as string | undefined) ||
+      (meta.chargeId as string | undefined) ||
+      (meta.trxId as string | undefined) ||
+      (meta.paymentReference as string | undefined) ||
+      undefined;
+    const gatewayProvider =
+      (meta.gatewayProvider as string | undefined) ||
+      (meta.provider as string | undefined) ||
+      undefined;
 
     const data: SalesTransactionData = {
       transactionId: txn._id.toString(),
@@ -97,32 +118,47 @@ export const orderPaidHandler = definePostingHandler({
       method: txn.method ?? 'unknown',
       date: txnDate,
       orderId,
+      orderReferenceNumber,
       source: txn.source ?? 'web',
       branchCode: txn.branchCode,
       promoDiscount,
+      ...(gatewayTransactionId ? { gatewayTransactionId } : {}),
+      ...(gatewayProvider ? { gatewayProvider } : {}),
     };
 
     return {
       branchId,
-      posting: salesTransactionToPosting(data, { autoPost: config.accounting.autoPost }),
+      posting: salesTransactionToPosting(data),
       logFields: { transactionId: payload.transactionId, source: txn.source },
       successMessage: 'Sales journal entry created',
     };
   },
 });
 
-async function loadOrderMeta(orderId: string): Promise<{ promoDiscount: number; orderGateway: string }> {
+async function loadOrderMeta(orderId: string): Promise<{
+  promoDiscount: number;
+  orderGateway: string;
+  customerId: string | null;
+  orderReferenceNumber: string | undefined;
+}> {
+  const empty = { promoDiscount: 0, orderGateway: '', customerId: null, orderReferenceNumber: undefined };
   const _id = mongoose.Types.ObjectId.isValid(orderId) ? new mongoose.Types.ObjectId(orderId) : null;
-  if (!_id) return { promoDiscount: 0, orderGateway: '' };
+  if (!_id) return empty;
 
   const db = mongoose.connection.db;
-  if (!db) return { promoDiscount: 0, orderGateway: '' };
+  if (!db) return empty;
 
-  const order = await db.collection('orders').findOne({ _id }, { projection: { metadata: 1 } });
+  const order = await db
+    .collection('orders')
+    .findOne({ _id }, { projection: { metadata: 1, customerId: 1, referenceNumber: 1 } });
 
   const meta = (order?.metadata as Record<string, unknown> | undefined) ?? {};
+  const customerId = (order as { customerId?: unknown } | null)?.customerId;
+  const refRaw = (order as { referenceNumber?: unknown } | null)?.referenceNumber;
   return {
     promoDiscount: Number(meta.promoTotalDiscount ?? 0),
     orderGateway: String(meta.paymentGateway ?? '').toLowerCase(),
+    customerId: customerId ? String(customerId) : null,
+    orderReferenceNumber: refRaw ? String(refRaw) : undefined,
   };
 }

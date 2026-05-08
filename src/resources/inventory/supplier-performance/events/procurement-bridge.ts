@@ -21,7 +21,7 @@
  *
  * The kernel never imports flow. This file is the deliberate seam.
  */
-import type { DomainEvent } from '@classytic/arc/events';
+import type { DomainEvent } from '@classytic/primitives/events';
 import { subscribe } from '#lib/events/arcEvents.js';
 import logger from '#lib/utils/logger.js';
 import { getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';

@@ -50,6 +50,8 @@ export interface TransitionContext {
   organizationId?: string;
   /** Set by the dispatcher when the doc has already been loaded. */
   orderId?: string;
+  /** Only set on `order:change.*` events (RMA workflow). */
+  changeNumber?: string;
 }
 
 /**

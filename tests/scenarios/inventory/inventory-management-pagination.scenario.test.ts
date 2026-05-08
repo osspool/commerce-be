@@ -64,7 +64,7 @@ interface PosProductsBody {
     lowStockCount: number;
     outOfStockCount: number;
   };
-  docs: PosProductDoc[];
+  data: PosProductDoc[];
   page: number;
   limit: number;
   total: number;
@@ -199,7 +199,7 @@ beforeAll(async () => {
     payload: { items: purchaseItems, paymentTerms: 'cash', notes: 'Pagination scenario seed' },
   });
   expect(createRes.statusCode).toBe(201);
-  const purchaseId = parse<{ data: { _id: string } }>(createRes.body)?.data._id;
+  const purchaseId = parse<{ data: { _id: string } }>(createRes.body)?._id;
   expect(purchaseId).toBeTruthy();
 
   const receiveRes = await env.server.inject({
@@ -226,10 +226,9 @@ describe('GET /pos/products — canonical OffsetPaginationResult envelope', () =
     expect(res.statusCode).toBe(200);
     const body = parse<PosProductsBody>(res.body)!;
 
-    expect(body.success).toBe(true);
     expect(body.method).toBe('offset');
-    expect(Array.isArray(body.docs)).toBe(true);
-    expect(body.docs).toHaveLength(15);
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.data).toHaveLength(15);
 
     // Canonical pagination fields — the SDK + Fluid DataTable read these
     // by these exact names. Never rename without coordinated SDK/FE bump.
@@ -255,7 +254,7 @@ describe('GET /pos/products — canonical OffsetPaginationResult envelope', () =
     expect(res.statusCode).toBe(200);
     const body = parse<PosProductsBody>(res.body)!;
     expect(body.limit).toBe(20);
-    expect(body.docs).toHaveLength(20);
+    expect(body.data).toHaveLength(20);
     // 35 total / 20 per page = 2 pages
     expect(body.pages).toBe(2);
   });
@@ -272,7 +271,7 @@ describe('GET /pos/products — page navigation', () => {
     const body = parse<PosProductsBody>(res.body)!;
 
     expect(body.page).toBe(2);
-    expect(body.docs).toHaveLength(15);
+    expect(body.data).toHaveLength(15);
     expect(body.hasPrev).toBe(true);
     expect(body.hasNext).toBe(true);
   });
@@ -287,9 +286,9 @@ describe('GET /pos/products — page navigation', () => {
     const body = parse<PosProductsBody>(res.body)!;
 
     expect(body.page).toBe(3);
-    expect(body.docs.length).toBeGreaterThan(0);
-    expect(body.docs.length).toBeLessThanOrEqual(15);
-    expect(body.docs.length).toBe(35 - 2 * 15); // 5 remaining
+    expect(body.data.length).toBeGreaterThan(0);
+    expect(body.data.length).toBeLessThanOrEqual(15);
+    expect(body.data.length).toBe(35 - 2 * 15); // 5 remaining
     expect(body.hasPrev).toBe(true);
     expect(body.hasNext).toBe(false);
   });
@@ -303,7 +302,7 @@ describe('GET /pos/products — page navigation', () => {
     expect(res.statusCode).toBe(200);
     const body = parse<PosProductsBody>(res.body)!;
 
-    expect(body.docs).toHaveLength(0);
+    expect(body.data).toHaveLength(0);
     expect(body.total).toBe(35);
     expect(body.pages).toBe(3);
     expect(body.hasNext).toBe(false);
@@ -319,8 +318,8 @@ describe('GET /pos/products — sort order', () => {
     });
     const body = parse<PosProductsBody>(res.body)!;
 
-    expect(body.docs.length).toBeGreaterThanOrEqual(35);
-    const names = body.docs.map((d) => d.name);
+    expect(body.data.length).toBeGreaterThanOrEqual(35);
+    const names = body.data.map((d) => d.name);
     const sorted = [...names].sort((a, b) => a.localeCompare(b));
     expect(names).toEqual(sorted);
   });
@@ -337,8 +336,8 @@ describe('GET /pos/products — filtering', () => {
     const body = parse<PosProductsBody>(res.body)!;
 
     expect(body.total).toBe(2);
-    expect(body.docs).toHaveLength(2);
-    for (const d of body.docs) expect(d.name.toLowerCase()).toContain('hoodie');
+    expect(body.data).toHaveLength(2);
+    for (const d of body.data) expect(d.name.toLowerCase()).toContain('hoodie');
   });
 
   it('search matches variant SKU', async () => {
@@ -351,7 +350,7 @@ describe('GET /pos/products — filtering', () => {
     const body = parse<PosProductsBody>(res.body)!;
 
     expect(body.total).toBeGreaterThanOrEqual(1);
-    const match = body.docs.find((d) => d.variants?.some((v) => v.sku === 'HOODIE-0-M'));
+    const match = body.data.find((d) => d.variants?.some((v) => v.sku === 'HOODIE-0-M'));
     expect(match).toBeTruthy();
   });
 
@@ -365,8 +364,8 @@ describe('GET /pos/products — filtering', () => {
     const body = parse<PosProductsBody>(res.body)!;
 
     expect(body.total).toBe(3);
-    expect(body.docs).toHaveLength(3);
-    for (const d of body.docs) expect(d.categorySlug).toBe('panjabi');
+    expect(body.data).toHaveLength(3);
+    for (const d of body.data) expect(d.categorySlug).toBe('panjabi');
   });
 
   it('parentCategory=<slug> expands to descendants via category tree', async () => {
@@ -383,7 +382,7 @@ describe('GET /pos/products — filtering', () => {
     const body = parse<PosProductsBody>(res.body)!;
 
     expect(body.total).toBe(3);
-    for (const d of body.docs) expect(d.categorySlug).toBe('panjabi');
+    for (const d of body.data) expect(d.categorySlug).toBe('panjabi');
   });
 
   it('parentCategory for a leaf slug with no children falls back to the slug itself', async () => {
@@ -410,8 +409,8 @@ describe('GET /pos/products — stock enrichment', () => {
     });
     const body = parse<PosProductsBody>(res.body)!;
 
-    const stocked = body.docs.filter((d) => STOCKED_PRODUCT_IDS.includes(d._id));
-    const unstocked = body.docs.filter((d) => !STOCKED_PRODUCT_IDS.includes(d._id));
+    const stocked = body.data.filter((d) => STOCKED_PRODUCT_IDS.includes(d._id));
+    const unstocked = body.data.filter((d) => !STOCKED_PRODUCT_IDS.includes(d._id));
 
     expect(stocked.length).toBe(STOCKED_PRODUCT_IDS.length);
     for (const d of stocked) {
@@ -434,14 +433,14 @@ describe('GET /pos/products — stock enrichment', () => {
     const body = parse<PosProductsBody>(res.body)!;
 
     // Every doc returned is in-stock...
-    for (const d of body.docs) {
+    for (const d of body.data) {
       expect(d.branchStock?.inStock).toBe(true);
       expect(d.branchStock?.quantity).toBeGreaterThan(0);
     }
     // ...docs.length matches the stocked subset, and `total` now reflects
     // the post-filter count because pos.utils.ts pre-resolves the
     // inStockOnly SKU set and pushes it into the DB query.
-    expect(body.docs.length).toBe(STOCKED_PRODUCT_IDS.length);
+    expect(body.data.length).toBe(STOCKED_PRODUCT_IDS.length);
     expect(body.total).toBe(STOCKED_PRODUCT_IDS.length);
   });
 
@@ -479,7 +478,7 @@ describe('GET /pos/products — stock enrichment', () => {
 
     expect(p1.summary).toEqual(p2.summary);
     // ...and sanity that the pages themselves differ.
-    expect(p1.docs[0]._id).not.toBe(p2.docs[0]._id);
+    expect(p1.data[0]._id).not.toBe(p2.data[0]._id);
   });
 
   it('stock enrichment is scoped by skuRef $in — off-page variants do not bleed', async () => {
@@ -494,7 +493,7 @@ describe('GET /pos/products — stock enrichment', () => {
     });
     const body = parse<PosProductsBody>(res.body)!;
 
-    for (const d of body.docs) {
+    for (const d of body.data) {
       expect(d.branchStock?.quantity ?? 0).toBe(0);
       expect(d.branchStock?.inStock).toBe(false);
     }
@@ -551,7 +550,7 @@ describe('GET /pos/products — QueryParser bracket-operator filters', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse<PosProductsBody>(res.body)!;
-    expect(body.docs.length).toBeGreaterThan(0);
+    expect(body.data.length).toBeGreaterThan(0);
     // No crash + correct doc count — sort spec is accepted by the parser
     // and forwarded to mongokit `getAll` as a canonical SortSpec.
     expect(body.total).toBe(35);

@@ -11,6 +11,7 @@ import permissions from '#config/permissions.js';
 import { ensureBranchBootstrapped } from '../../inventory-management.plugin.js';
 import { flow, flowCtxGuard } from '../shared/helpers.js';
 import { nodeSchemas } from './node.schemas.js';
+import { NotFoundError, ValidationError } from '@classytic/arc/utils';
 
 const nodeResource = defineResource({
   name: 'warehouse-node',
@@ -31,7 +32,7 @@ const nodeResource = defineResource({
         const ctx = flowCtxGuard.from(req);
         await ensureBranchBootstrapped(ctx.organizationId);
         const nodes = await flow().repositories.node.findAll({}, { organizationId: ctx.organizationId, lean: true });
-        return reply.send({ success: true, data: nodes });
+        return reply.send(nodes);
       },
     },
     {
@@ -47,8 +48,8 @@ const nodeResource = defineResource({
           organizationId: ctx.organizationId,
           throwOnNotFound: false,
         });
-        if (!node) return reply.code(404).send({ success: false, error: 'Warehouse not found' });
-        return reply.send({ success: true, data: node });
+        throw new NotFoundError('Warehouse not found');
+        return reply.send(node);
       },
     },
     {
@@ -70,10 +71,7 @@ const nodeResource = defineResource({
             { organizationId: ctx.organizationId, lean: true },
           );
           if (existing.length >= 1) {
-            return reply.code(400).send({
-              success: false,
-              error: `Only 1 warehouse allowed on '${mode}' plan. Upgrade to enterprise for multiple warehouses.`,
-            });
+            throw new ValidationError(`Only 1 warehouse allowed on '${mode}' plan. Upgrade to enterprise for multiple warehouses.`);
           }
         }
 
@@ -86,7 +84,7 @@ const nodeResource = defineResource({
           { organizationId: ctx.organizationId },
         );
 
-        return reply.code(201).send({ success: true, data: node });
+        return reply.code(201).send(node);
       },
     },
     {
@@ -105,13 +103,13 @@ const nodeResource = defineResource({
           organizationId: ctx.organizationId,
           throwOnNotFound: false,
         });
-        if (!existing) return reply.code(404).send({ success: false, error: 'Warehouse not found' });
+        throw new NotFoundError('Warehouse not found');
 
         const updated = await flow().repositories.node.update(id, body, {
           organizationId: ctx.organizationId,
           lean: true,
         });
-        return reply.send({ success: true, data: updated });
+        return reply.send(updated);
       },
     },
   ],

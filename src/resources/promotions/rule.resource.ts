@@ -13,7 +13,8 @@
  * rules + rewards) stay in promo.resources.ts and query the rule/reward
  * repositories directly.
  */
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { QueryParser } from '@classytic/mongokit';
 import permissions from '#config/permissions.js';
 import { ensurePromoEngine } from './promo.plugin.js';

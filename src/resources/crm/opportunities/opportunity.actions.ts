@@ -18,7 +18,7 @@ export async function advanceOpportunity(
   req: FastifyRequest,
 ): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
   const stageId = typeof data.stageId === 'string' ? data.stageId : '';
   if (!stageId) throw new Error("'stageId' is required");
   const by = actingUserId(req);
@@ -34,7 +34,7 @@ export async function advanceOpportunity(
 
 export async function winOpportunity(id: string, data: Record<string, unknown>, req: FastifyRequest): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
   const closedAt = typeof data.closedAt === 'string' ? new Date(data.closedAt) : undefined;
   const by = actingUserId(req);
   const note = typeof data.note === 'string' ? data.note : undefined;
@@ -51,7 +51,7 @@ export async function loseOpportunity(
   req: FastifyRequest,
 ): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
   const lostReasonId = typeof data.lostReasonId === 'string' ? data.lostReasonId : undefined;
   if (!lostReasonId) throw new Error("'lostReasonId' is required");
   const closedAt = typeof data.closedAt === 'string' ? new Date(data.closedAt) : undefined;
@@ -71,7 +71,7 @@ export async function abandonOpportunity(
   req: FastifyRequest,
 ): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
   const note = typeof data.note === 'string' ? data.note : undefined;
   return services.opportunities.abandon(id, actingUserId(req), note);
 }

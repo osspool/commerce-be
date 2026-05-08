@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import config from '#config/index.js';
 import { type PurchaseData, purchaseToPosting } from '../../posting/contracts/purchase.contract.js';
 import { definePostingHandler } from '../define-posting-handler.js';
 import { PurchasePaidEvent, purchasePaidSchema } from '../event-definitions.js';
@@ -42,7 +41,7 @@ export const purchasePaidHandler = definePostingHandler({
 
     return {
       branchId,
-      posting: purchaseToPosting(data, { autoPost: config.accounting.autoPost }),
+      posting: purchaseToPosting(data),
       logFields: { purchaseId: payload.purchaseId },
       successMessage: 'Purchase journal entry created',
     };

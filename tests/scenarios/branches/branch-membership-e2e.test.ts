@@ -450,7 +450,6 @@ describe('Superadmin Elevation', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res);
-    expect(body?.success).toBe(true);
   });
 
   it('superadmin can access transactions (financeStaff gated)', async () => {

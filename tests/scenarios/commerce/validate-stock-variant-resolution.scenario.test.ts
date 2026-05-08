@@ -43,12 +43,9 @@ interface ValidateLine {
 }
 
 interface ValidateStockResponse {
-  success: boolean;
-  error?: string;
-  data?: {
-    ok: boolean;
-    lines: ValidateLine[];
-  };
+  ok: boolean;
+  lines: ValidateLine[];
+  message?: string;
 }
 
 async function seedVariantProduct(opts: {
@@ -155,7 +152,7 @@ beforeAll(async () => {
     },
   });
   expect(createRes.statusCode).toBe(201);
-  const purchaseId = parse<{ data: { _id: string } }>(createRes.body)?.data._id;
+  const purchaseId = parse<{ data: { _id: string } }>(createRes.body)?._id;
   expect(purchaseId).toBeTruthy();
 
   const receiveRes = await env.server.inject({
@@ -181,7 +178,7 @@ beforeAll(async () => {
     },
   });
   expect(simpleRes.statusCode).toBe(201);
-  const simplePurchaseId = parse<{ data: { _id: string } }>(simpleRes.body)?.data._id;
+  const simplePurchaseId = parse<{ data: { _id: string } }>(simpleRes.body)?._id;
   const simpleReceiveRes = await env.server.inject({
     method: 'POST',
     url: `${API}/inventory/purchase-orders/${simplePurchaseId}/action`,
@@ -207,11 +204,11 @@ describe('POST /orders/validate-stock — variant SKU resolution', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse<ValidateStockResponse>(res.body)!;
-    expect(body.success).toBe(true);
-    expect(body.data!.ok).toBe(true);
-    expect(body.data!.lines).toHaveLength(1);
 
-    const line = body.data!.lines[0];
+    expect(body!.ok).toBe(true);
+    expect(body!.lines).toHaveLength(1);
+
+    const line = body!.lines[0];
     // THE bug: skuRef came back as "THEAZURESU" (the product's `custom.sku`).
     // The fix asserts the variant-level SKU flows all the way through.
     expect(line.skuRef).toBe(STOCKED_SKU);
@@ -231,10 +228,10 @@ describe('POST /orders/validate-stock — variant SKU resolution', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse<ValidateStockResponse>(res.body)!;
-    expect(body.data!.ok).toBe(false);
-    expect(body.data!.lines[0].skuRef).toBe(STOCKED_SKU);
-    expect(body.data!.lines[0].available).toBe(10);
-    expect(body.data!.lines[0].ok).toBe(false);
+    expect(body!.ok).toBe(false);
+    expect(body!.lines[0].skuRef).toBe(STOCKED_SKU);
+    expect(body!.lines[0].available).toBe(10);
+    expect(body!.lines[0].ok).toBe(false);
   });
 
   it('unstocked variant → available=0 but skuRef still resolves to variantSku', async () => {
@@ -248,9 +245,9 @@ describe('POST /orders/validate-stock — variant SKU resolution', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse<ValidateStockResponse>(res.body)!;
-    expect(body.data!.ok).toBe(false);
-    expect(body.data!.lines[0].skuRef).toBe(UNSTOCKED_SKU);
-    expect(body.data!.lines[0].available).toBe(0);
+    expect(body!.ok).toBe(false);
+    expect(body!.lines[0].skuRef).toBe(UNSTOCKED_SKU);
+    expect(body!.lines[0].available).toBe(0);
   });
 
   it('invalid variantSku on a variant product → resolution fails (400)', async () => {
@@ -267,8 +264,8 @@ describe('POST /orders/validate-stock — variant SKU resolution', () => {
     });
     expect(res.statusCode).toBe(400);
     const body = parse<ValidateStockResponse>(res.body)!;
-    expect(body.success).toBe(false);
-    expect(body.error).toMatch(/resolve/i);
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(body.message).toMatch(/resolve/i);
   });
 
   it('simple product (no variantSku) → skuRef = product._id, NOT custom.sku', async () => {
@@ -283,7 +280,7 @@ describe('POST /orders/validate-stock — variant SKU resolution', () => {
     expect(res.statusCode).toBe(200);
     const body = parse<ValidateStockResponse>(res.body)!;
 
-    const line = body.data!.lines[0];
+    const line = body!.lines[0];
     // Flow-canonical skuRef for simple products = product._id.
     // Before the fix this was `"PLAINTEE"` (custom.sku), which doesn't
     // match the purchase-receive write key → available always 0.
@@ -307,15 +304,15 @@ describe('POST /orders/validate-stock — variant SKU resolution', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse<ValidateStockResponse>(res.body)!;
-    expect(body.data!.lines).toHaveLength(3);
-    expect(body.data!.lines[0].skuRef).toBe(STOCKED_SKU);
-    expect(body.data!.lines[0].ok).toBe(true);
-    expect(body.data!.lines[1].skuRef).toBe(UNSTOCKED_SKU);
-    expect(body.data!.lines[1].ok).toBe(false);
-    expect(body.data!.lines[2].skuRef).toBe(simpleProductId);
-    expect(body.data!.lines[2].ok).toBe(true);
+    expect(body!.lines).toHaveLength(3);
+    expect(body!.lines[0].skuRef).toBe(STOCKED_SKU);
+    expect(body!.lines[0].ok).toBe(true);
+    expect(body!.lines[1].skuRef).toBe(UNSTOCKED_SKU);
+    expect(body!.lines[1].ok).toBe(false);
+    expect(body!.lines[2].skuRef).toBe(simpleProductId);
+    expect(body!.lines[2].ok).toBe(true);
     // Aggregate `ok` is false because one line failed.
-    expect(body.data!.ok).toBe(false);
+    expect(body!.ok).toBe(false);
   });
 });
 
@@ -386,9 +383,9 @@ describe('POST /orders/validate-stock — e-commerce branch pin', () => {
     await resetCache();
 
     const body = (await callValidateStock())!;
-    expect(body.data!.lines[0].skuRef).toBe(STOCKED_SKU);
-    expect(body.data!.lines[0].available).toBe(10);
-    expect(body.data!.lines[0].ok).toBe(true);
+    expect(body!.lines[0].skuRef).toBe(STOCKED_SKU);
+    expect(body!.lines[0].available).toBe(10);
+    expect(body!.lines[0].ok).toBe(true);
   });
 
   it('no flag set → resolver returns null → caller falls back to header (stripped → no stock)', async () => {
@@ -400,7 +397,7 @@ describe('POST /orders/validate-stock — e-commerce branch pin', () => {
     await resetCache();
 
     const body = (await callValidateStock())!;
-    expect(body.data!.lines[0].available).toBe(0);
+    expect(body!.lines[0].available).toBe(0);
   });
 
   it('toggling the flag off — pin drops, subsequent requests fall back to header', async () => {
@@ -411,13 +408,13 @@ describe('POST /orders/validate-stock — e-commerce branch pin', () => {
       { $set: { fulfillsEcommerce: true } },
     );
     await resetCache();
-    expect((await callValidateStock())!.data!.lines[0].available).toBe(10);
+    expect((await callValidateStock())!!.lines[0].available).toBe(10);
 
     await orgCol().updateOne(
       { _id: orgObjectId() },
       { $set: { fulfillsEcommerce: false } },
     );
     await resetCache();
-    expect((await callValidateStock())!.data!.lines[0].available).toBe(0);
+    expect((await callValidateStock())!!.lines[0].available).toBe(0);
   });
 });

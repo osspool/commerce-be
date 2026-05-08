@@ -21,6 +21,7 @@ import { createAccountingEngine, registerJournalType } from '@classytic/ledger';
 import { bangladeshPack } from '@classytic/ledger-bd';
 import mongoose from 'mongoose';
 import config from '#config/index.js';
+import { budgetEnforcementPlugin } from './posting/budget-enforcement-plugin.js';
 import { dayCloseLockPlugin } from './posting/period-lock-guard.js';
 import { mergeResolvers, type TaxResolver } from './tax/tax-resolver.js';
 
@@ -111,6 +112,16 @@ safeRegisterJournalType('ECOM_SALES_COD_REVERSAL', {
   description: 'Contra of COD placement when order is cancelled before settlement',
 });
 
+// Settlement reconciliation — drains a clearing account (1125 Gateway / 1126
+// Mobile Money / 1127 COD) when the provider remits float to our bank.
+// One entry per provider statement, aggregating N legs into a single payout.
+// See be-prod/src/resources/accounting/posting/contracts/settlement.contract.ts.
+safeRegisterJournalType('GATEWAY_SETTLEMENT', {
+  code: 'GATEWAY_SETTLEMENT',
+  name: 'Gateway Settlement Journal',
+  description: 'Payout reconciliation — Bank + Fee | Clearing (1125/1126/1127)',
+});
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 export const accounting = createAccountingEngine({
@@ -149,7 +160,7 @@ export const accounting = createAccountingEngine({
   // `watermarkResolver`. The plugin uses a lazy Proxy for JournalEntryModel
   // so it works inside the engine initializer (TDZ-safe).
   plugins: {
-    journalEntry: [dayCloseLockPlugin()],
+    journalEntry: [dayCloseLockPlugin(), budgetEnforcementPlugin()],
   },
   // NO multiTenant — single company, multi-branch.
   // Account + FiscalPeriod are company-wide (no org field).
@@ -175,6 +186,40 @@ export const accounting = createAccountingEngine({
           sourceModel: { type: String, default: null },
           sourceId: { type: String, default: null },
         },
+        /**
+         * Manual-JE approval workflow (separate from core `state`).
+         *
+         * `state` is the kernel posting state (draft → posted → archived) and
+         * stays kernel-owned. `approvalState` is the host-side approval gate
+         * for MANUALLY-CREATED entries — finance staff prepares (`draft`),
+         * submits for review (`pending_review`), controller approves
+         * (`approved`) or rejects (`rejected`), then `state` flips to
+         * `posted` via the post action. Entries auto-posted from commerce
+         * flows (POS, RMA, COGS) skip the workflow entirely — they bypass
+         * approval because they're system-generated, not human-entered.
+         *
+         * Default `null` keeps existing entries (and auto-posted ones) out
+         * of the workflow. Only entries that opt in via `submit-for-review`
+         * pass through it.
+         */
+        approvalState: {
+          type: String,
+          enum: ['draft', 'pending_review', 'approved', 'rejected'],
+          default: null,
+          index: true,
+        },
+        /** Audit trail for approval transitions. */
+        submittedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+        submittedAt: { type: Date, default: null },
+        approvedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+        approvedAt: { type: Date, default: null },
+        rejectedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+        rejectedAt: { type: Date, default: null },
+        rejectionReason: { type: String, default: null },
+        // Approval policy snapshot (be-prod-specific). The chain itself
+        // (`approvals`) is baked into ledger's JournalEntry per P7.
+        approvalPolicyId: { type: String, default: null },
+        approvalPolicyVersion: { type: Number, default: null },
         /** Free-form provenance the host attaches per posting. Today the COGS
          * pipeline tags `{ costMissing, affectedLines }` here so the admin
          * "missing cost" view can `find({ 'metadata.costMissing': true })`
@@ -186,18 +231,29 @@ export const accounting = createAccountingEngine({
         },
       },
       extraIndexes: [
-        { fields: { 'sourceRef.sourceId': 1 }, options: { sparse: true } },
+        // Primary `/by-source` lookup path — entry-level sourceRef, scoped by
+        // org. Covers the common audit query "all JEs for RMA X" / "all JEs
+        // for invoice Y". A standalone single-field index on
+        // `sourceRef.sourceId` was removed as redundant — this compound
+        // covers it for any query that includes `organizationId`.
         {
           fields: { organizationId: 1, 'sourceRef.sourceModel': 1, date: -1 },
           options: { sparse: true },
         },
-        // Drives the "cost data missing" admin view — finance grepts
-        // these to identify which products need backfill. Sparse so it
-        // only indexes entries that actually carry the flag.
+        // Drives the "cost data missing" admin view — finance greps these to
+        // identify which products need backfill. Sparse so it only indexes
+        // entries that actually carry the flag.
         {
           fields: { 'metadata.costMissing': 1, date: -1 },
           options: { sparse: true },
         },
+        // Line-level provenance indexes (`LINE_SOURCE_INDEXES`) are NOT
+        // wired here. The schema fields ship in core ledger and are ready
+        // to use, but be-prod doesn't yet have a caller that writes them at
+        // production traffic. Adding indexes preemptively burns inserts on
+        // every JE for queries that don't run. When a real flow lands that
+        // queries by `journalItems.sourceRef.*` or `linkedRefs[]`, spread
+        // `LINE_SOURCE_INDEXES` from `@classytic/ledger` here.
       ],
       // Subsidiary-ledger dimensions on journal items. ledger 0.7 exposes
       // `extraItemFields` so we can tag every line with a partner without
@@ -211,40 +267,59 @@ export const accounting = createAccountingEngine({
         partnerType: { type: String, default: null },
       },
     },
-    budget:
-      config.accounting.mode !== 'simple'
-        ? {
-            extraFields: {
-              /** Branch that owns this budget (required — budgets are per-branch) */
-              organizationId: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'organization',
-                required: true,
-                index: true,
-              },
-              status: {
-                type: String,
-                enum: BUDGET_STATUS_VALUES,
-                default: 'draft',
-                index: true,
-              },
-              category: { type: String, default: null, trim: true },
-              notes: { type: String, default: null },
-              revision: { type: Number, default: 1, min: 1 },
-              submittedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
-              submittedAt: { type: Date, default: null },
-              approvedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
-              approvedAt: { type: Date, default: null },
-              rejectedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
-              rejectedAt: { type: Date, default: null },
-              rejectionReason: { type: String, default: null },
-            },
-            extraIndexes: [
-              { fields: { organizationId: 1, status: 1 }, options: {} },
-              { fields: { organizationId: 1, category: 1, periodStart: 1 }, options: {} },
-            ],
-          }
-        : undefined,
+    budget: {
+      extraFields: {
+        /** Branch that owns this budget (required — budgets are per-branch) */
+        organizationId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'organization',
+          required: true,
+          index: true,
+        },
+        status: { type: String, enum: BUDGET_STATUS_VALUES, default: 'draft', index: true },
+        category: { type: String, default: null, trim: true },
+        notes: { type: String, default: null },
+        revision: { type: Number, default: 1, min: 1 },
+        submittedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+        submittedAt: { type: Date, default: null },
+        approvedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+        approvedAt: { type: Date, default: null },
+        rejectedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+        rejectedAt: { type: Date, default: null },
+        rejectionReason: { type: String, default: null },
+        // Approval policy snapshot (be-prod-specific) — captures which
+        // ApprovalPolicy generated the chain at submit time so admins
+        // can detect "the policy was edited after I submitted" later.
+        // The chain itself (`approvals`) is baked into ledger 0.10.6+
+        // per PACKAGE_RULES §P7, so it doesn't need to be added here.
+        approvalPolicyId: { type: String, default: null },
+        approvalPolicyVersion: { type: Number, default: null },
+        // Threshold enforcement (ERPNext-equivalent):
+        //   stop   — block JE post if (period actual + new entry) > amount * thresholdPercent/100
+        //   warn   — log + emit `budget.threshold.exceeded` event, still post
+        //   ignore — no enforcement; budget is informational only
+        // Default `ignore` keeps current behavior — budgets that don't opt in
+        // get no insert overhead. Switch to `stop` per-budget to make it real.
+        actionIfExceeded: {
+          type: String,
+          enum: ['stop', 'warn', 'ignore'],
+          default: 'ignore',
+        },
+        /** Threshold % at which actionIfExceeded fires. 100 = post-causes-overage; 80 = early-warning at 80% utilization. */
+        thresholdPercent: { type: Number, default: 100, min: 1, max: 200 },
+      },
+      extraIndexes: [
+        { fields: { organizationId: 1, status: 1 }, options: {} },
+        { fields: { organizationId: 1, category: 1, periodStart: 1 }, options: {} },
+        // Drives the budget-enforcement plugin's lookup: "find approved budget
+        // for this org+account+period". Sparse so non-active budgets cost
+        // nothing.
+        {
+          fields: { organizationId: 1, account: 1, periodStart: 1, periodEnd: 1, status: 1 },
+          options: { sparse: true },
+        },
+      ],
+    },
   },
 });
 
@@ -258,28 +333,32 @@ export const Account = accounting.models.Account as mongoose.Model<any>;
 // biome-ignore lint/suspicious/noExplicitAny: consumer-side model is loosely typed
 export const JournalEntry = accounting.models.JournalEntry as mongoose.Model<any>;
 // biome-ignore lint/suspicious/noExplicitAny: consumer-side model is loosely typed
+export const Journal = accounting.models.Journal as mongoose.Model<any>;
+// biome-ignore lint/suspicious/noExplicitAny: consumer-side model is loosely typed
 export const FiscalPeriod = accounting.models.FiscalPeriod as mongoose.Model<any>;
 // biome-ignore lint/suspicious/noExplicitAny: consumer-side model is loosely typed
-export const Budget =
-  config.accounting.mode !== 'simple'
-    ? (accounting.models.Budget as mongoose.Model<any>)
-    : (null as unknown as mongoose.Model<any>);
+export const Budget = accounting.models.Budget as mongoose.Model<any>;
 
 // ─── Direct repository exports ─────────────────────────────────────────────
 
 export const accountRepository = accounting.repositories.accounts;
 export const journalEntryRepository = accounting.repositories.journalEntries;
 export const fiscalPeriodRepository = accounting.repositories.fiscalPeriods;
-export const budgetRepository = config.accounting.mode !== 'simple' ? accounting.repositories.budgets : null;
+export const budgetRepository = accounting.repositories.budgets;
 
 // ─── Auto-increment budget revision on update ──────────────────────────────
-// (mode-gated; was previously inside initAccountingEngine)
 
-if (config.accounting.mode !== 'simple') {
-  const BudgetSchema = (accounting.models.Budget as mongoose.Model<unknown>).schema;
-  BudgetSchema.pre('findOneAndUpdate', function (this: mongoose.Query<unknown, unknown>) {
-    this.setUpdate({ ...this.getUpdate(), $inc: { revision: 1 } });
-  });
-}
+const BudgetSchema = (accounting.models.Budget as mongoose.Model<unknown>).schema;
+BudgetSchema.pre('findOneAndUpdate', function (this: mongoose.Query<unknown, unknown>) {
+  this.setUpdate({ ...this.getUpdate(), $inc: { revision: 1 } });
+});
+
+// `approvals` field is baked into the ledger Budget + JournalEntry schemas
+// directly (PACKAGE_RULES §P7) — no host-side schema.add() needed. Only the
+// be-prod-specific policy snapshot fields (`approvalPolicyId`,
+// `approvalPolicyVersion`) live here because they reference be-prod's
+// `ApprovalPolicy` collection (a host concept, not a ledger one). They flow
+// in via `schemaOptions.budget.extraFields` / `schemaOptions.journalEntry.
+// extraFields` further up — see the engine config below.
 
 export default accounting;

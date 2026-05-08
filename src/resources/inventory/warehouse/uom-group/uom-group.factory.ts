@@ -84,7 +84,7 @@ export function createUomGroupResource() {
               body.groupRef,
               ctx,
             );
-            return reply.send({ success: true, data: { quantity: result, uom: body.toUom } });
+            return reply.send({ quantity: result, uom: body.toUom });
           }
 
           const result = await flow().services.uom.convertToBase(
@@ -92,7 +92,7 @@ export function createUomGroupResource() {
             body.groupRef,
             ctx,
           );
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         },
       },
     ],

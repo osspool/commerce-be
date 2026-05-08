@@ -12,11 +12,9 @@ import { z } from 'zod';
 
 const idParam = z.object({ id: z.string().describe('Resource ID') });
 
-const successEnvelope = (dataSchema: z.ZodTypeAny) =>
-  z.object({
-    success: z.literal(true),
-    data: dataSchema,
-  });
+// Arc 2.13 emits flat payloads (no envelope wrap). The "envelope" helper
+// now just passes the data schema through — the wire IS the data.
+const successEnvelope = (dataSchema: z.ZodTypeAny) => dataSchema;
 
 const _errorEnvelope = z.object({
   success: z.literal(false),
@@ -188,19 +186,24 @@ export const adjustmentSchemaZod = {
       .describe('Transaction details (only if lostAmount provided)'),
   }),
   response: {
-    200: z.object({
-      success: z.literal(true),
-      data: z.any(),
-      message: z.string().optional(),
-      transaction: z
-        .object({
-          _id: z.any(),
-          amount: z.number(),
-          category: z.string(),
-        })
-        .nullable()
-        .optional(),
-    }),
+    // Arc 2.13 emits raw payloads (no envelope wrap). The single-item
+    // adjustment handler spreads the result at the top level, so the
+    // wire is the result fields directly + `message` + `transaction`,
+    // not a `{ data: ... }` wrapper. Use `passthrough()` to admit the
+    // dynamic result-shape fields without enumerating each.
+    200: z
+      .object({
+        message: z.string().optional(),
+        transaction: z
+          .object({
+            _id: z.any(),
+            amount: z.number(),
+            category: z.string(),
+          })
+          .nullable()
+          .optional(),
+      })
+      .passthrough(),
   },
 };
 

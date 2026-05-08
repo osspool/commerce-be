@@ -124,7 +124,7 @@ async function createAndReceive(
   if (createRes.statusCode >= 400) {
     return { statusCode: createRes.statusCode, body: parse(createRes.body) };
   }
-  const purchase = parse(createRes.body)?.data as { _id: string };
+  const purchase = parse(createRes.body) as { _id: string };
 
   const receiveRes = await env.server.inject({
     method: 'POST',

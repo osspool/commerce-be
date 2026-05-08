@@ -89,7 +89,7 @@ async function createRfq() {
     },
   });
   if (res.statusCode >= 400) throw new Error(`RFQ create failed: ${res.statusCode} ${res.body}`);
-  return parse(res.body)!.data as { rfqNumber: string; status: string };
+  return parse(res.body)! as { rfqNumber: string; status: string };
 }
 
 function action(rfqNumber: string, payload: Record<string, unknown>) {
@@ -110,7 +110,7 @@ describe('RFQ workflow (T3.2)', () => {
     // Send to vendors
     const sent = await action(rfq.rfqNumber, { action: 'send' });
     expect(sent.statusCode).toBe(200);
-    expect(parse(sent.body)!.data).toMatchObject({ status: 'sent' });
+    expect(parse(sent.body)!).toMatchObject({ status: 'sent' });
 
     // VEN-1: cheapest, longest lead-time
     const r1 = await action(rfq.rfqNumber, {
@@ -124,7 +124,7 @@ describe('RFQ workflow (T3.2)', () => {
       leadTimeDays: 21,
     });
     expect(r1.statusCode).toBe(200);
-    expect(parse(r1.body)!.data).toMatchObject({ status: 'comparing' });
+    expect(parse(r1.body)!).toMatchObject({ status: 'comparing' });
 
     // VEN-2: middle
     const r2 = await action(rfq.rfqNumber, {
@@ -155,7 +155,7 @@ describe('RFQ workflow (T3.2)', () => {
     // Compare — 3 rankings, 0 missing
     const cmp = await action(rfq.rfqNumber, { action: 'compare' });
     expect(cmp.statusCode).toBe(200);
-    const cmpData = parse(cmp.body)!.data as {
+    const cmpData = parse(cmp.body)! as {
       rankings: Array<{ vendorId: string; score: number }>;
       missingResponses: number;
     };
@@ -173,7 +173,7 @@ describe('RFQ workflow (T3.2)', () => {
       rationale: 'best price/lead-time blend',
     });
     expect(awarded.statusCode).toBe(200);
-    const awardedDoc = parse(awarded.body)!.data as { status: string; award?: { vendorId: string } };
+    const awardedDoc = parse(awarded.body)! as { status: string; award?: { vendorId: string } };
     expect(awardedDoc.status).toBe('awarded');
     expect(awardedDoc.award?.vendorId).toBe('VEN-2');
 
@@ -187,7 +187,7 @@ describe('RFQ workflow (T3.2)', () => {
         url: `${API}/rfqs/${rfq.rfqNumber}`,
         headers: h(),
       });
-      const finalDoc = parse(final.body)!.data as { generatedPoRef?: { poNumber?: string } };
+      const finalDoc = parse(final.body)! as { generatedPoRef?: { poNumber?: string } };
       if (finalDoc.generatedPoRef?.poNumber) {
         bridgeFired = true;
         expect(finalDoc.generatedPoRef.poNumber).toMatch(/^PO-/);
@@ -249,7 +249,7 @@ describe('RFQ workflow (T3.2)', () => {
     const rfq = await createRfq();
     const cancelled = await action(rfq.rfqNumber, { action: 'cancel', reason: 'budget cut' });
     expect(cancelled.statusCode).toBe(200);
-    expect(parse(cancelled.body)!.data).toMatchObject({ status: 'cancelled' });
+    expect(parse(cancelled.body)!).toMatchObject({ status: 'cancelled' });
 
     const blocked = await action(rfq.rfqNumber, { action: 'send' });
     expect(blocked.statusCode).toBe(422);
@@ -273,7 +273,7 @@ describe('RFQ workflow (T3.2)', () => {
       leadTimeDays: 21,
     });
     expect(r1.statusCode).toBe(200);
-    const after1 = parse(r1.body)!.data as { responses: Array<unknown> };
+    const after1 = parse(r1.body)! as { responses: Array<unknown> };
     expect(after1.responses).toHaveLength(1);
 
     // Vendor revises — sharper + faster
@@ -288,7 +288,7 @@ describe('RFQ workflow (T3.2)', () => {
       leadTimeDays: 7,
     });
     expect(r2.statusCode).toBe(200);
-    const after2 = parse(r2.body)!.data as {
+    const after2 = parse(r2.body)! as {
       responses: Array<{ vendorId: string; leadTimeDays: number; totalPrice: { amount: number } }>;
     };
     expect(after2.responses).toHaveLength(1);
@@ -325,7 +325,7 @@ describe('RFQ workflow (T3.2)', () => {
 
     const res = await action(rfq.rfqNumber, { action: 'compare' });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)!.data as {
+    const data = parse(res.body)! as {
       rankings: Array<{ vendorId: string; score: number; expired: boolean }>;
       missingResponses: number;
     };
@@ -376,8 +376,8 @@ describe('RFQ workflow (T3.2)', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body) as { docs?: Array<{ rfqNumber: string }> };
-    const numbers = (body.docs ?? []).map((d) => d.rfqNumber);
+    const body = parse(res.body) as { data?: Array<{ rfqNumber: string }> };
+    const numbers = (body.data ?? []).map((d) => d.rfqNumber);
     expect(numbers).toContain(rfq.rfqNumber);
   }, 120_000);
 

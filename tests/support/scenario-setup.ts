@@ -158,9 +158,44 @@ export async function bootScenarioApp(opts: {
     },
   );
 
-  const { getFlowEngine } = await import('#resources/inventory/flow/flow-engine.js');
+  const { getFlowEngine, ensureFlowEngineReady } = await import('#resources/inventory/flow/flow-engine.js');
+  // Force-create flow_* collections + their indexes BEFORE any test
+  // exercises a transactional write. MongoMemoryReplSet otherwise lazy-
+  // creates collections on first insert, which under transactions surfaces
+  // as `Unable to write to collection ... due to catalog changes; please
+  // retry the operation` and aborts the txn on the first PO receive /
+  // transfer / sale write. `ensureFlowEngineReady` calls
+  // `Model.createCollection()` on every flow model — idempotent, swallows
+  // "already exists" — so subsequent transactional writes find a stable
+  // catalog. Doc on the helper itself:
+  // `flow-engine.ts:99-105` — "Call this in every integration test's
+  // beforeAll so transactional service calls don't trip on a
+  // catalog-change error."
+  await ensureFlowEngineReady();
   const { setupBranch } = await import('./erp-seed.js');
   await setupBranch(getFlowEngine(), orgId);
+
+  // Warm up the flow_stock_events collection with a non-transactional write.
+  // `ensureFlowReady` calls `createCollection` for every flow model, but
+  // MongoMemoryReplSet promotes collections from local-only to replicated
+  // on the first WRITE, not on bare creation. The first transactional write
+  // to `flow_stock_events` (which fires from procurement.receive +
+  // postMove paths) trips a catalog-change retry inside Mongo's
+  // session.withTransaction; the txn aborts before any retry. Doing one
+  // write+delete OUTSIDE a txn here forces full catalog propagation so
+  // subsequent transactional writes find a stable replica state.
+  const flowEngine = getFlowEngine();
+  const stockEventModel = (flowEngine.models as Record<string, { collection?: { insertOne: (d: unknown) => Promise<{ insertedId: unknown }>; deleteOne: (q: unknown) => Promise<unknown> } }>).StockEvent;
+  if (stockEventModel?.collection) {
+    try {
+      const probe = await stockEventModel.collection.insertOne({ __warmup: true, ts: Date.now() });
+      await stockEventModel.collection.deleteOne({ _id: probe.insertedId });
+    } catch {
+      // Best-effort — if the warmup itself fails we still let the suite
+      // run; the per-call retry helpers in production code will paper
+      // over the transient.
+    }
+  }
 
   return {
     replSet,

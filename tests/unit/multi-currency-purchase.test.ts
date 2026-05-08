@@ -63,7 +63,7 @@ describe('Multi-Currency Purchase Posting', () => {
     }
 
     // Inventory item has foreignDebit (proportional to net)
-    const inventoryItem = posting.items.find(i => i.debit > 0 && i.accountCode === '1165');
+    const inventoryItem = posting.items.find(i => i.debit > 0 && i.accountCode === '1164');
     expect(inventoryItem).toBeDefined();
     expect(inventoryItem!.foreignDebit).toBeGreaterThan(0);
     expect(inventoryItem!.foreignDebit).toBeLessThan(1_000_00);

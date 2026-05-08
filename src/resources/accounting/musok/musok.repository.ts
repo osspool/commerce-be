@@ -27,41 +27,41 @@ class MusokInvoiceRepository extends Repository<InstanceType<typeof MusokInvoice
     return { serial: formatMusokSerial(branchCode, year, num), number: num };
   }
 
-  /** Aggregate monthly VAT totals for Mushak 9.1 return */
+  /**
+   * Aggregate monthly VAT totals for Mushak 9.1 return.
+   *
+   * Routes through `aggregatePipeline` (mongokit 3.13+) so the
+   * multi-tenant plugin's `before:aggregatePipeline` hook injects the
+   * tenant `$match`. The pipeline's local `$match` carries date + status
+   * filters only; orgId is layered in by the plugin from the options bag.
+   */
   async aggregateMonthlyVat(year: number, month: number, organizationId?: string) {
     const start = new Date(Date.UTC(year, month - 1, 1));
     const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
-    const match: Record<string, unknown> = {
-      date: { $gte: start, $lte: end },
-      status: 'issued',
-    };
-    if (organizationId) {
-      match.organizationId = new mongoose.Types.ObjectId(organizationId);
-    }
-
-    return this.Model.aggregate([
-      { $match: match },
-      { $unwind: '$lines' },
-      {
-        $group: {
-          _id: '$lines.vatRate',
-          taxableBase: { $sum: '$lines.totalValue' },
-          vatAmount: { $sum: '$lines.vatAmount' },
-          sdAmount: { $sum: '$lines.sdAmount' },
-          count: { $sum: 1 },
+    return this.aggregatePipeline<{
+      _id: number;
+      taxableBase: number;
+      vatAmount: number;
+      sdAmount: number;
+      count: number;
+    }>(
+      [
+        { $match: { date: { $gte: start, $lte: end }, status: 'issued' } },
+        { $unwind: '$lines' },
+        {
+          $group: {
+            _id: '$lines.vatRate',
+            taxableBase: { $sum: '$lines.totalValue' },
+            vatAmount: { $sum: '$lines.vatAmount' },
+            sdAmount: { $sum: '$lines.sdAmount' },
+            count: { $sum: 1 },
+          },
         },
-      },
-      { $sort: { _id: -1 } },
-    ]) as Promise<
-      Array<{
-        _id: number;
-        taxableBase: number;
-        vatAmount: number;
-        sdAmount: number;
-        count: number;
-      }>
-    >;
+        { $sort: { _id: -1 } },
+      ],
+      organizationId ? { organizationId } : {},
+    );
   }
 }
 

@@ -1,3 +1,4 @@
+import { ValidationError } from '@classytic/arc/utils';
 import type { FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 import { Account, JournalEntry } from '../accounting.engine.js';
@@ -13,20 +14,37 @@ function parseDateRange(q: Query): { from: Date; to: Date } {
   return { from, to };
 }
 
-function resolveOrgId(req: Req): string | undefined {
-  return req.scope?.organizationId || req.query?.branchId;
+/**
+ * Strict org-id resolution — every BD tax report aggregates JE data scoped to
+ * a single branch. Letting `undefined` through drops the `organizationId`
+ * filter from the aggregation and silently rolls up across the entire company,
+ * which is the same class of leak we already fixed in reports.handlers.ts.
+ *
+ * Resolution order: branch scope from arc auth → `?branchId` query → legal
+ * `x-organization-id` header. Throws 400 when none resolves.
+ */
+function requireOrgId(req: Req): string {
+  const fromScope = req.scope?.organizationId;
+  if (fromScope) return fromScope;
+  const fromQuery = req.query?.branchId;
+  if (fromQuery) return fromQuery;
+  const fromHeader = req.headers['x-organization-id'];
+  if (typeof fromHeader === 'string' && fromHeader) return fromHeader;
+  throw new ValidationError(
+    'organizationId is required — pass via x-organization-id header or ?branchId. Tax reports must always be branch-scoped to prevent cross-branch leakage.',
+  );
 }
 
 async function accountIdsByPrefix(prefixes: string[]): Promise<mongoose.Types.ObjectId[]> {
   const rx = prefixes.map((p) => new RegExp(`^${p.replace(/\./g, '\\.')}`));
-  const rows = await Account.find({ code: { $in: rx } })
-    .select('_id code')
+  const rows = await Account.find({ accountTypeCode: { $in: rx } })
+    .select('_id accountTypeCode')
     .lean();
   return rows.map((r) => r._id as mongoose.Types.ObjectId);
 }
 
 async function aggregateByAccounts(
-  orgId: string | undefined,
+  orgId: string,
   from: Date,
   to: Date,
   accountIds: mongoose.Types.ObjectId[],
@@ -35,8 +53,8 @@ async function aggregateByAccounts(
   const match: Record<string, unknown> = {
     state: 'posted',
     date: { $gte: from, $lte: to },
+    organizationId: new mongoose.Types.ObjectId(orgId),
   };
-  if (orgId) match.organizationId = new mongoose.Types.ObjectId(orgId);
 
   return JournalEntry.aggregate([
     { $match: match },
@@ -63,7 +81,7 @@ async function aggregateByAccounts(
       $project: {
         _id: 0,
         accountId: '$_id',
-        accountCode: '$account.code',
+        accountCode: '$account.accountTypeCode',
         accountName: '$account.name',
         debit: 1,
         credit: 1,
@@ -77,7 +95,7 @@ async function aggregateByAccounts(
 
 export async function getAtReconciliation(req: Req) {
   const { from, to } = parseDateRange(req.query);
-  const orgId = resolveOrgId(req);
+  const orgId = requireOrgId(req);
   const accountIds = await accountIdsByPrefix(['1150', '1151', '1200']);
   const rows = await aggregateByAccounts(orgId, from, to, accountIds);
   const totals = rows.reduce((acc, r) => ({ debit: acc.debit + r.debit, credit: acc.credit + r.credit }), {
@@ -85,38 +103,35 @@ export async function getAtReconciliation(req: Req) {
     credit: 0,
   });
   return {
-    success: true,
-    data: {
-      period: { from, to },
-      rows,
-      totals: { ...totals, netClaimable: totals.debit - totals.credit },
-    },
+    period: { from, to },
+    rows,
+    totals: { ...totals, netClaimable: totals.debit - totals.credit },
   };
 }
 
 export async function getVdsReceivable(req: Req) {
   const { from, to } = parseDateRange(req.query);
-  const orgId = resolveOrgId(req);
+  const orgId = requireOrgId(req);
   const accountIds = await accountIdsByPrefix(['1153']);
   const rows = await aggregateByAccounts(orgId, from, to, accountIds);
   const total = rows.reduce((a, r) => a + (r.debit - r.credit), 0);
-  return { success: true, data: { period: { from, to }, rows, outstanding: total } };
+  return { period: { from, to }, rows, outstanding: total };
 }
 
 export async function getVdsPayable(req: Req) {
   const { from, to } = parseDateRange(req.query);
-  const orgId = resolveOrgId(req);
+  const orgId = requireOrgId(req);
   const accountIds = await accountIdsByPrefix(['2136']);
   const rows = await aggregateByAccounts(orgId, from, to, accountIds);
   const total = rows.reduce((a, r) => a + (r.credit - r.debit), 0);
-  return { success: true, data: { period: { from, to }, rows, payable: total } };
+  return { period: { from, to }, rows, payable: total };
 }
 
 export async function getExportRefund(req: Req) {
   const { from, to } = parseDateRange(req.query);
-  const orgId = resolveOrgId(req);
+  const orgId = requireOrgId(req);
   const accountIds = await accountIdsByPrefix(['1150.VAT0.INPUT']);
   const rows = await aggregateByAccounts(orgId, from, to, accountIds);
   const claimable = rows.reduce((a, r) => a + (r.debit - r.credit), 0);
-  return { success: true, data: { period: { from, to }, rows, claimable } };
+  return { period: { from, to }, rows, claimable };
 }

@@ -60,11 +60,13 @@ async function seedProcurement(items: Array<{ skuRef: string; quantity: number; 
     method: 'POST',
     url: `${API}/inventory/procurement`,
     headers: h(),
-    payload: { vendorRef: 'vendor-rpt', destinationNodeId: env.orgId, items },
+    // Omit destinationNodeId — `env.orgId` is the branch organizationId,
+    // not a Flow node._id. Factory auto-resolves the branch's default
+    // warehouse + stock location.
+    payload: { vendorRef: 'vendor-rpt', items },
   });
   const po = parse(createRes);
-  if (!po?.success) throw new Error(`Failed to create PO: ${createRes.body}`);
-  const poId = po.data._id;
+  const poId = po._id;
 
   await server.inject({
     method: 'POST',
@@ -80,7 +82,6 @@ async function seedProcurement(items: Array<{ skuRef: string; quantity: number; 
     payload: { lines: items.map((i) => ({ skuRef: i.skuRef, quantityReceived: i.quantity })) },
   });
   const rcv = parse(rcvRes);
-  if (!rcv?.success) throw new Error(`Failed to receive PO: ${rcvRes.body}`);
   return poId;
 }
 
@@ -116,10 +117,9 @@ describe('Empty State', () => {
     const res = await get('/valuation');
     const b = parse(res);
     expect(res.statusCode).toBe(200);
-    expect(b.success).toBe(true);
-    expect(b.data.mode).toBe('snapshot');
-    expect(b.data.grandTotalQuantity).toBe(0);
-    expect(b.data.grandTotalValue).toBe(0);
+    expect(b.mode).toBe('snapshot');
+    expect(b.grandTotalQuantity).toBe(0);
+    expect(b.grandTotalValue).toBe(0);
   });
 
   it('cogs rejects missing dates with 400', async () => {
@@ -136,8 +136,8 @@ describe('Empty State', () => {
     const res = await get('/cogs', { startDate: '2000-01-01', endDate: '2000-01-31' });
     const b = parse(res);
     expect(res.statusCode).toBe(200);
-    expect(b.data.grandTotalQuantity).toBe(0);
-    expect(b.data.grandTotalCost).toBe(0);
+    expect(b.grandTotalQuantity).toBe(0);
+    expect(b.grandTotalCost).toBe(0);
   });
 });
 
@@ -160,41 +160,41 @@ describe('Reports with stock data', () => {
       const res = await get('/valuation', { mode: 'snapshot' });
       const b = parse(res);
       expect(res.statusCode).toBe(200);
-      expect(b.data.mode).toBe('snapshot');
-      expect(b.data.totalSkus).toBe(2);
-      expect(b.data.grandTotalQuantity).toBe(300);
-      expect(b.data.grandTotalValue).toBe(10000);
-      expect(b.data.locations.length).toBeGreaterThanOrEqual(1);
+      expect(b.mode).toBe('snapshot');
+      expect(b.totalSkus).toBe(2);
+      expect(b.grandTotalQuantity).toBe(300);
+      expect(b.grandTotalValue).toBe(10000);
+      expect(b.locations.length).toBeGreaterThanOrEqual(1);
     });
 
     it('layers mode returns correct totals', async () => {
       const res = await get('/valuation', { mode: 'layers' });
       const b = parse(res);
       expect(res.statusCode).toBe(200);
-      expect(b.data.mode).toBe('layers');
-      expect(b.data.grandTotalQuantity).toBe(300);
-      expect(b.data.grandTotalValue).toBe(10000);
+      expect(b.mode).toBe('layers');
+      expect(b.grandTotalQuantity).toBe(300);
+      expect(b.grandTotalValue).toBe(10000);
     });
 
     it('filters by SKU', async () => {
       const res = await get('/valuation', { skuRef: 'RPT-SKU-A' });
       const b = parse(res);
-      expect(b.data.totalSkus).toBe(1);
-      expect(b.data.grandTotalQuantity).toBe(100);
-      expect(b.data.grandTotalValue).toBe(5000);
+      expect(b.totalSkus).toBe(1);
+      expect(b.grandTotalQuantity).toBe(100);
+      expect(b.grandTotalValue).toBe(5000);
     });
 
     it('nonexistent SKU returns zero', async () => {
       const res = await get('/valuation', { skuRef: 'NONEXISTENT' });
       const b = parse(res);
-      expect(b.data.grandTotalQuantity).toBe(0);
-      expect(b.data.grandTotalValue).toBe(0);
+      expect(b.grandTotalQuantity).toBe(0);
+      expect(b.grandTotalValue).toBe(0);
     });
 
     it('location breakdown has items with averageUnitCost', async () => {
       const res = await get('/valuation');
       const b = parse(res);
-      const loc = b.data.locations[0];
+      const loc = b.locations[0];
       expect(loc.locationId).toBeTruthy();
       expect(loc.items.length).toBeGreaterThanOrEqual(1);
       expect(loc.items[0].averageUnitCost).toBeGreaterThan(0);
@@ -210,10 +210,10 @@ describe('Reports with stock data', () => {
       const res = await get('/cogs', { startDate: '2020-01-01', endDate: today });
       const b = parse(res);
       expect(res.statusCode).toBe(200);
-      expect(b.data.grandTotalCost).toBe(0);
-      expect(b.data.grandTotalQuantity).toBe(0);
-      expect(b.data.period.startDate).toBeTruthy();
-      expect(b.data.period.endDate).toBeTruthy();
+      expect(b.grandTotalCost).toBe(0);
+      expect(b.grandTotalQuantity).toBe(0);
+      expect(b.period.startDate).toBeTruthy();
+      expect(b.period.endDate).toBeTruthy();
     });
 
     it('filters by nonexistent SKU returns empty items', async () => {
@@ -221,7 +221,7 @@ describe('Reports with stock data', () => {
         startDate: '2020-01-01', endDate: '2099-12-31', skuRef: 'NONEXISTENT',
       });
       const b = parse(res);
-      expect(b.data.items).toHaveLength(0);
+      expect(b.items).toHaveLength(0);
     });
   });
 
@@ -232,12 +232,12 @@ describe('Reports with stock data', () => {
       const res = await get('/aging');
       const b = parse(res);
       expect(res.statusCode).toBe(200);
-      expect(b.data.asOfDate).toBeTruthy();
-      expect(Array.isArray(b.data.buckets)).toBe(true);
-      expect(b.data.buckets.length).toBeGreaterThan(0);
+      expect(b.asOfDate).toBeTruthy();
+      expect(Array.isArray(b.buckets)).toBe(true);
+      expect(b.buckets.length).toBeGreaterThan(0);
 
       // Freshly received stock should be in the youngest bucket
-      const freshBucket = b.data.buckets.find((bk: { minDays: number }) => bk.minDays === 0);
+      const freshBucket = b.buckets.find((bk: { minDays: number }) => bk.minDays === 0);
       if (freshBucket) {
         expect(freshBucket.quantity).toBeGreaterThanOrEqual(300);
       }
@@ -246,7 +246,7 @@ describe('Reports with stock data', () => {
     it('no dead stock for fresh inventory', async () => {
       const res = await get('/aging');
       const b = parse(res);
-      expect(b.data.deadStock?.length ?? 0).toBe(0);
+      expect(b.deadStock?.length ?? 0).toBe(0);
     });
   });
 
@@ -257,10 +257,10 @@ describe('Reports with stock data', () => {
       const res = await get('/turnover', { periodDays: '30' });
       const b = parse(res);
       expect(res.statusCode).toBe(200);
-      expect(b.data.period).toBeDefined();
-      expect(b.data.period.start).toBeTruthy();
-      expect(b.data.period.end).toBeTruthy();
-      expect(typeof b.data.averageInventoryValue).toBe('number');
+      expect(b.period).toBeDefined();
+      expect(b.period.start).toBeTruthy();
+      expect(b.period.end).toBeTruthy();
+      expect(typeof b.averageInventoryValue).toBe('number');
     });
   });
 
@@ -271,9 +271,9 @@ describe('Reports with stock data', () => {
       const res = await get('/availability', { skuRefs: 'RPT-SKU-A,RPT-SKU-B' });
       const b = parse(res);
       expect(res.statusCode).toBe(200);
-      expect(b.data.matrix).toBeDefined();
-      if (b.data.matrix.length > 0) {
-        const skuA = b.data.matrix.find((r: { skuRef: string }) => r.skuRef === 'RPT-SKU-A');
+      expect(b.matrix).toBeDefined();
+      if (b.matrix.length > 0) {
+        const skuA = b.matrix.find((r: { skuRef: string }) => r.skuRef === 'RPT-SKU-A');
         if (skuA) {
           expect(skuA.totalOnHand).toBe(100);
         }
@@ -285,8 +285,8 @@ describe('Reports with stock data', () => {
       const b = parse(res);
       expect(res.statusCode).toBe(200);
       // Matrix should be empty or have zero quantities
-      if (b.data.matrix.length > 0) {
-        expect(b.data.matrix[0].totalOnHand).toBe(0);
+      if (b.matrix.length > 0) {
+        expect(b.matrix[0].totalOnHand).toBe(0);
       }
     });
   });
@@ -298,10 +298,10 @@ describe('Reports with stock data', () => {
       const res = await get('/health');
       const b = parse(res);
       expect(res.statusCode).toBe(200);
-      expect(b.data.totalSkus).toBeGreaterThanOrEqual(2);
-      expect(b.data.totalOnHand).toBeGreaterThanOrEqual(300);
-      expect(b.data.totalValue).toBeGreaterThanOrEqual(10000);
-      expect(b.data.deadStockPercentage).toBe(0); // freshly received
+      expect(b.totalSkus).toBeGreaterThanOrEqual(2);
+      expect(b.totalOnHand).toBeGreaterThanOrEqual(300);
+      expect(b.totalValue).toBeGreaterThanOrEqual(10000);
+      expect(b.deadStockPercentage).toBe(0); // freshly received
     });
   });
 });

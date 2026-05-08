@@ -34,11 +34,14 @@ describe('LedgerBridge port', () => {
   });
 
   it('BD chart-of-accounts map exports the six codes the classytic bridge needs', () => {
-    expect(BD_ACCOUNTS.receivable).toBe('1141');
-    expect(BD_ACCOUNTS.payable).toBe('2111');
-    expect(BD_ACCOUNTS.revenue).toBe('4111');
-    expect(BD_ACCOUNTS.expense).toBe('5111');
-    expect(BD_ACCOUNTS.taxPayable).toBe('2141');
-    expect(BD_ACCOUNTS.cash).toBe('1112');
+    // Codes are sourced from `@classytic/ledger-bd` `BD_ACCOUNT_CODES` —
+    // the package is the canonical authority for the BD chart, do NOT
+    // hardcode here. See ledger-classytic.bridge.ts for the routing.
+    expect(BD_ACCOUNTS.receivable).toBe('1141'); // AR
+    expect(BD_ACCOUNTS.payable).toBe('2111'); // AP
+    expect(BD_ACCOUNTS.revenue).toBe('4111'); // SALES_REVENUE
+    expect(BD_ACCOUNTS.expense).toBe('5111'); // COGS_MATERIALS
+    expect(BD_ACCOUNTS.taxPayable).toBe('2132'); // VAT_OUTPUT_PAYABLE
+    expect(BD_ACCOUNTS.cash).toBe('1113'); // CASH (Cash at Bank — Current Account)
   });
 });

@@ -67,7 +67,6 @@ describe('Archive listing', () => {
     const res = await adminApp.inject({ method: 'GET', url: '/api/v1/archives' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.success).toBe(true);
   });
 
   it('public list is rejected (admin-only)', async () => {
@@ -112,15 +111,14 @@ describe('POST /archives/run', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = res.json();
-    expect(body.success).toBe(true);
-    expect(body.data).toBeDefined();
-    expect(body.data.type).toBe('transaction');
-    expect(body.data.recordCount).toBeGreaterThanOrEqual(1);
-    expect(typeof body.data.filePath).toBe('string');
+    expect(body).toBeDefined();
+    expect(body.type).toBe('transaction');
+    expect(body.recordCount).toBeGreaterThanOrEqual(1);
+    expect(typeof body.filePath).toBe('string');
 
     // Cleanup the file the run wrote out
-    if (body.data.filePath) {
-      await fs.unlink(body.data.filePath).catch(() => null);
+    if (body.filePath) {
+      await fs.unlink(body.filePath).catch(() => null);
     }
   });
 

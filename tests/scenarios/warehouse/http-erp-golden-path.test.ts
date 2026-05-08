@@ -155,10 +155,10 @@ describe('HTTP ERP Golden Path', () => {
     if (res.statusCode !== 201) console.log('Purchase create response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    purchaseId = body.data._id;
+
+    purchaseId = body._id;
     expect(purchaseId).toBeTruthy();
-    expect(body.data.items).toHaveLength(2);
+    expect(body.items).toHaveLength(2);
   });
 
   // ─── Step 2: Receive purchase → stock + cost layers ────────────────────
@@ -174,8 +174,8 @@ describe('HTTP ERP Golden Path', () => {
     if (res.statusCode !== 200) console.log('Purchase receive response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('received');
+
+    expect(body.status).toBe('received');
   });
 
   // ─── Step 3: Valuation report — stock value matches purchase ───────────
@@ -189,9 +189,8 @@ describe('HTTP ERP Golden Path', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
-    const data = body.data;
+    const data = body;
     expect(data).toBeDefined();
 
     if (Array.isArray(data.items ?? data)) {
@@ -235,9 +234,9 @@ describe('HTTP ERP Golden Path', () => {
     if (res.statusCode !== 201) console.log('POS order response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    orderId = body.data._id;
-    orderNumber = body.data.orderNumber ?? body.data.publicId;
+
+    orderId = body._id;
+    orderNumber = body.orderNumber ?? body.publicId;
     expect(orderId).toBeTruthy();
   });
 
@@ -249,7 +248,7 @@ describe('HTTP ERP Golden Path', () => {
       url: `${API}/orders/${orderId}`,
       headers: headersFor(env.orgId),
     });
-    const order = parse(orderRes.body)?.data;
+    const order = parse(orderRes.body);
     const lines = order?.lines ?? [];
 
     const res = await server.inject({
@@ -266,8 +265,8 @@ describe('HTTP ERP Golden Path', () => {
 
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    fulfillmentId = body.data.fulfillmentNumber;
+
+    fulfillmentId = body.fulfillmentNumber;
     expect(fulfillmentId).toBeTruthy();
   });
 
@@ -285,7 +284,7 @@ describe('HTTP ERP Golden Path', () => {
       if (res.statusCode !== 200) console.log(`Fulfill ${action} response:`, res.statusCode, res.body);
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
+
     }
   });
 
@@ -304,7 +303,7 @@ describe('HTTP ERP Golden Path', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
+
   });
 
   // ─── Step 8: Valuation decreased after sale ────────────────────────────
@@ -318,9 +317,8 @@ describe('HTTP ERP Golden Path', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
-    const data = body.data;
+    const data = body;
     if (Array.isArray(data.items ?? data)) {
       const items = data.items ?? data;
       const sku1 = items.find((i: any) => i.sku === SKU1 || i.skuRef === SKU1);
@@ -350,8 +348,8 @@ describe('HTTP ERP Golden Path', () => {
     if (res.statusCode >= 400) console.log('Transfer create response:', res.statusCode, res.body);
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    transferId = body.data._id;
+
+    transferId = body._id;
     expect(transferId).toBeTruthy();
   });
 
@@ -375,7 +373,7 @@ describe('HTTP ERP Golden Path', () => {
     });
     if (dispatchRes.statusCode !== 200) console.log('Transfer dispatch response:', dispatchRes.statusCode, dispatchRes.body);
     expect(dispatchRes.statusCode).toBe(200);
-    expect(parse(dispatchRes.body)?.data?.status).toBe('dispatched');
+    expect(parse(dispatchRes.body)?.status).toBe('dispatched');
   });
 
   it('POST /inventory/transfers/:id/action {receive} — outlet receives', async () => {
@@ -394,7 +392,7 @@ describe('HTTP ERP Golden Path', () => {
     if (res.statusCode !== 200) console.log('Transfer receive response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
+
   });
 
   // ─── Step 10: Pricelist CRUD ───────────────────────────────────────────
@@ -426,8 +424,8 @@ describe('HTTP ERP Golden Path', () => {
     if (res.statusCode >= 400) console.log('Pricelist create response:', res.statusCode, res.body);
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    pricelistId = body.data._id;
+
+    pricelistId = body._id;
     expect(pricelistId).toBeTruthy();
   });
 
@@ -447,7 +445,7 @@ describe('HTTP ERP Golden Path', () => {
 
     if (createRes.statusCode >= 400) console.log('Customer create response:', createRes.statusCode, createRes.body);
     expect([200, 201]).toContain(createRes.statusCode);
-    const customer = parse(createRes.body)?.data;
+    const customer = parse(createRes.body);
     expect(customer).toBeTruthy();
 
     const patchRes = await server.inject({
@@ -461,15 +459,17 @@ describe('HTTP ERP Golden Path', () => {
     });
 
     expect(patchRes.statusCode).toBe(200);
-    const updated = parse(patchRes.body)?.data;
+    const updated = parse(patchRes.body);
     expect(updated.priceListId?.toString()).toBe(pricelistId);
     expect(updated.customerType).toBe('wholesale');
   });
 
   // ─── Step 12: Health check (app still running) ─────────────────────────
 
-  it('GET /health — app still healthy after full cycle', async () => {
-    const res = await server.inject({ method: 'GET', url: '/health' });
+  it('GET /_health/live — app still healthy after full cycle', async () => {
+    // Arc's healthPlugin owns the path now: /_health/live (liveness) +
+    // /_health/ready (readiness). Legacy /health is no longer wired.
+    const res = await server.inject({ method: 'GET', url: '/_health/live' });
     expect(res.statusCode).toBe(200);
   });
 });

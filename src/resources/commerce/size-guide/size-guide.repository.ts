@@ -1,4 +1,11 @@
-import { cachePlugin, Repository, requireField, uniqueField, validationChainPlugin } from '@classytic/mongokit';
+import {
+  cachePlugin,
+  type PluginType,
+  Repository,
+  requireField,
+  uniqueField,
+  validationChainPlugin,
+} from '@classytic/mongokit';
 import { getSharedCacheAdapter } from '#shared/adapters/memoryCache.adapter.js';
 import type { ISizeGuide } from './size-guide.model.js';
 import SizeGuide from './size-guide.model.js';
@@ -20,12 +27,22 @@ class SizeGuideRepository extends Repository<ISizeGuide> {
           requireField('name', ['create']),
           uniqueField('slug', 'Size guide slug already exists'),
         ]),
+        // mongokit 3.13's `cachePlugin` returns `Plugin<RepositoryBase>`
+        // (the repo-core base type). `Repository` constructor's
+        // `PluginType[]` is `Plugin<RepositoryInstance>` — a narrower
+        // structural type. Cast at the call site until mongokit widens
+        // the constructor's plugin signature in a follow-up release.
         cachePlugin({
           adapter: sizeGuideCacheAdapter,
-          ttl: 600,
-          byIdTtl: 1200,
-          queryTtl: 600,
-        }),
+          // TanStack-shaped (mongokit 3.13+): `staleTime` = fresh window
+          // (replaces old `ttl`); `gcTime` = retention past stale.
+          // `perOpDefaults` overrides per read-op.
+          defaults: { staleTime: 600, gcTime: 60 },
+          perOpDefaults: {
+            getById: { staleTime: 1200 },
+            // getAll / getByQuery use the 600s default
+          },
+        }) as PluginType,
       ],
       {
         defaultLimit: 50,

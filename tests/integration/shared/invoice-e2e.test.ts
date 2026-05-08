@@ -124,10 +124,9 @@ describe('Invoice CRUD', () => {
 
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('draft');
-    expect(body.data.moveType).toBe('out_invoice');
-    invoiceId = body.data._id;
+    expect(body.status).toBe('draft');
+    expect(body.moveType).toBe('out_invoice');
+    invoiceId = body._id;
   });
 
   it('GET / — lists invoices with QueryParser filters', async () => {
@@ -142,9 +141,8 @@ describe('Invoice CRUD', () => {
     // Arc's list envelope spreads MongoKit's OffsetPaginationResult directly —
     // `docs` is at the root, not under `data` (same shape as /payment-terms
     // below). Asserting on the root shape guards the contract the SDK reads.
-    expect(body.success).toBe(true);
-    expect(Array.isArray(body.docs)).toBe(true);
-    expect(body.docs.length).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.data.length).toBeGreaterThanOrEqual(1);
   });
 
   it('GET /:id — gets invoice by ID', async () => {
@@ -156,8 +154,7 @@ describe('Invoice CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.partnerId).toBe('test-customer-001');
+    expect(body.partnerId).toBe('test-customer-001');
   });
 
   it('PATCH /:id — updates draft invoice', async () => {
@@ -170,7 +167,6 @@ describe('Invoice CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
   });
 });
 
@@ -190,7 +186,7 @@ describe('Invoice Actions', () => {
         lines: [{ description: 'Test Item', quantity: 1, unitPrice: 10000 }],
       },
     });
-    invoiceId = parse(res.body).data._id;
+    invoiceId = parse(res.body)._id;
   });
 
   it('POST /:id/action { action: "post" } — posts invoice', async () => {
@@ -203,15 +199,14 @@ describe('Invoice Actions', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('posted');
-    expect(body.data.number).toBeTruthy();
+    expect(body.status).toBe('posted');
+    expect(body.number).toBeTruthy();
   });
 
   it('POST /:id/action { action: "record_payment" } — records payment', async () => {
     const inv = parse((await server.inject({
       method: 'GET', url: `${API}/accounting/invoices/${invoiceId}`, headers: h(),
-    })).body).data;
+    })).body);
 
     const res = await server.inject({
       method: 'POST',
@@ -227,7 +222,6 @@ describe('Invoice Actions', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
   });
 });
 
@@ -243,8 +237,7 @@ describe('Custom Invoice Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.buckets).toBeTruthy();
+    expect(body.buckets).toBeTruthy();
   });
 
   it('GET /overdue — returns overdue list', async () => {
@@ -256,7 +249,6 @@ describe('Custom Invoice Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
   });
 
   it('GET /payment-terms — returns flattened paginated response', async () => {
@@ -268,18 +260,12 @@ describe('Custom Invoice Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    // Arc's adapter flattens OffsetPaginationResult into the envelope —
-    // `{ success, docs, page, limit, total, pages, hasNext, hasPrev }`.
-    // (Note: arc strips the kit-level `method: 'offset'` discriminator
-    // when flattening — it's only meaningful inside the kit's own typing.)
-    expect(body.success).toBe(true);
-    expect(Array.isArray(body.docs)).toBe(true);
+    // Arc 2.13: paginated list emits flat
+    // `{ method: 'offset', data: [...], page, limit, total, pages, hasNext, hasPrev }`
+    expect(Array.isArray(body.data)).toBe(true);
     expect(typeof body.total).toBe('number');
     expect(typeof body.page).toBe('number');
     expect(typeof body.limit).toBe('number');
-    // Guard against the regression that caused the original runtime error:
-    // the envelope must not wrap the result under `data`.
-    expect(body.data).toBeUndefined();
   });
 
   it('POST /payment-terms then GET /:id — adapter CRUD smoke', async () => {
@@ -296,7 +282,7 @@ describe('Custom Invoice Routes', () => {
       },
     });
     expect(createRes.statusCode).toBe(201);
-    const created = parse(createRes.body).data;
+    const created = parse(createRes.body);
     expect(created._id).toBeDefined();
     expect(created.name).toBe('NET 30 (e2e)');
 
@@ -306,7 +292,7 @@ describe('Custom Invoice Routes', () => {
       headers: h(),
     });
     expect(getRes.statusCode).toBe(200);
-    expect(parse(getRes.body).data._id).toBe(created._id);
+    expect(parse(getRes.body)._id).toBe(created._id);
 
     // /:id/schedule still lives on this resource (computed projection,
     // raw route — see payment-term.resource.ts).
@@ -317,7 +303,7 @@ describe('Custom Invoice Routes', () => {
       payload: { invoiceDate: '2026-04-25T00:00:00.000Z', totalAmount: 10000 },
     });
     expect(schedRes.statusCode).toBe(200);
-    const sched = parse(schedRes.body).data;
+    const sched = parse(schedRes.body);
     expect(Array.isArray(sched)).toBe(true);
     expect(sched.length).toBe(1);
   });
@@ -336,9 +322,8 @@ describe('Custom Invoice Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.moveType).toBe('receipt');
-    expect(body.data.status).toBe('posted');
+    expect(body.moveType).toBe('receipt');
+    expect(body.status).toBe('posted');
   });
 });
 
@@ -355,8 +340,8 @@ describe('Workflow Integration', () => {
     // May be 200 or 404 depending on streamline registration timing
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body.success).toBe(true);
-      expect(Array.isArray(body.data)).toBe(true);
+      // Streamline plugin returns either the array directly or { data: [...] }.
+      expect(Array.isArray(body) || Array.isArray(body?.data)).toBe(true);
     }
   });
 });

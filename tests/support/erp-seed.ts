@@ -38,36 +38,79 @@ export function ctx(orgId: string, actorId = 'test-actor'): FlowContext {
 
 // ── Branch Setup ─────────────────────────────────────────────────────────────
 
+/**
+ * Idempotent branch scaffolding. The setupFiles boot reuses one
+ * MongoMemoryServer per worker, so a scenario file's beforeAll can land on
+ * a `flow_inventory_nodes` collection that already has a `(orgId, 'DEFAULT')`
+ * row from a previous file — `.create()` would throw E11000 there. Upsert
+ * makes setup truly per-test-orgId-safe and lets the same orgId be reseeded
+ * mid-suite (e.g. after a `cleanAll` between describe blocks).
+ */
 export async function setupBranch(flow: FlowEngine, orgId: string) {
   const uid = () => `${orgId.slice(-4)}-${Math.random().toString(36).slice(2, 6)}`;
 
-  const node = await flow.models.InventoryNode.create({
-    organizationId: orgId,
-    code: 'DEFAULT',
-    name: 'Default Warehouse',
-    type: 'warehouse',
-    status: 'active',
-    isDefault: true,
-  });
+  const node = await flow.models.InventoryNode.findOneAndUpdate(
+    { organizationId: orgId, code: 'DEFAULT' },
+    {
+      $setOnInsert: {
+        organizationId: orgId,
+        code: 'DEFAULT',
+        name: 'Default Warehouse',
+        type: 'warehouse',
+        status: 'active',
+        isDefault: true,
+      },
+    },
+    { upsert: true, returnDocument: 'after' },
+  );
   const nodeId = node._id.toString();
 
-  await flow.models.Location.create({
-    organizationId: orgId, nodeId, code: LOC.stock, name: 'Stock',
-    type: 'storage', status: 'active', allowNegativeStock: false,
-    allowReservations: true, barcode: `BC-STK-${uid()}`,
-  });
-  await flow.models.Location.create({
-    organizationId: orgId, nodeId, code: LOC.vendor, name: 'Vendor',
-    type: 'vendor', status: 'active', allowNegativeStock: true, barcode: `BC-VND-${uid()}`,
-  });
-  await flow.models.Location.create({
-    organizationId: orgId, nodeId, code: LOC.customer, name: 'Customer',
-    type: 'customer', status: 'active', allowNegativeStock: true, barcode: `BC-CST-${uid()}`,
-  });
-  await flow.models.Location.create({
-    organizationId: orgId, nodeId, code: LOC.adjustment, name: 'Adjustment',
-    type: 'inventory_loss', status: 'active', allowNegativeStock: true, barcode: `BC-ADJ-${uid()}`,
-  });
+  const locations: Array<{ code: string; name: string; type: string; allowNegativeStock: boolean; barcode: string; allowReservations?: boolean }> = [
+    { code: LOC.stock, name: 'Stock', type: 'storage', allowNegativeStock: false, allowReservations: true, barcode: `BC-STK-${uid()}` },
+    { code: LOC.vendor, name: 'Vendor', type: 'vendor', allowNegativeStock: true, barcode: `BC-VND-${uid()}` },
+    { code: LOC.customer, name: 'Customer', type: 'customer', allowNegativeStock: true, barcode: `BC-CST-${uid()}` },
+    { code: LOC.adjustment, name: 'Adjustment', type: 'inventory_loss', allowNegativeStock: true, barcode: `BC-ADJ-${uid()}` },
+  ];
+  for (const loc of locations) {
+    await flow.models.Location.findOneAndUpdate(
+      { organizationId: orgId, code: loc.code },
+      {
+        $setOnInsert: {
+          organizationId: orgId,
+          nodeId,
+          code: loc.code,
+          name: loc.name,
+          type: loc.type,
+          status: 'active',
+          allowNegativeStock: loc.allowNegativeStock,
+          ...(loc.allowReservations !== undefined ? { allowReservations: loc.allowReservations } : {}),
+          barcode: loc.barcode,
+        },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
+  }
+
+  // Warm up the `flow_stock_events` collection. `ensureFlowReady` calls
+  // `Model.createCollection()` on every flow model, but MongoMemoryReplSet
+  // promotes a collection from local-only to replicated only on its first
+  // WRITE. The first transactional write to `flow_stock_events` (fired by
+  // procurement.receive / postMove / transfer-receive) trips a
+  // catalog-change retry inside Mongo's `session.withTransaction` and the
+  // txn aborts before the retry resolves. One write+delete here, outside
+  // any transaction, forces full catalog propagation. Production never
+  // sees this — it's a MongoMemoryReplSet artifact — but the warmup is a
+  // no-op there. Idempotent: each setupBranch call re-warms the collection,
+  // which is harmless since we delete the probe doc.
+  const stockEventColl = (flow.models as Record<string, { collection?: { insertOne: (d: unknown) => Promise<{ insertedId: unknown }>; deleteOne: (q: unknown) => Promise<unknown> } }>).StockEvent?.collection;
+  if (stockEventColl) {
+    try {
+      const probe = await stockEventColl.insertOne({ __warmup: true, ts: Date.now() });
+      await stockEventColl.deleteOne({ _id: probe.insertedId });
+    } catch {
+      // Best-effort — surface the underlying transactional retry instead.
+    }
+  }
 
   return { nodeId };
 }

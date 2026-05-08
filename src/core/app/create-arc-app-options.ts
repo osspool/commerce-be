@@ -5,7 +5,8 @@ import type { ErrorMapper } from "@classytic/arc/plugins";
 import { createTenantKeyGenerator } from "@classytic/arc/scope";
 import { defineErrorMapper } from "@classytic/arc/utils";
 import { FlowError } from "@classytic/flow/domain";
-import { InvalidTransitionError } from "@classytic/order";
+import { AccountingError } from "@classytic/ledger";
+import { IllegalTransitionError } from "@classytic/primitives/state-machine";
 import config from "#config/index.js";
 import type { AppContext } from "#core/app/context.js";
 import { getAppPreset } from "#core/app/get-app-preset.js";
@@ -52,11 +53,15 @@ const flowErrorMapper = defineErrorMapper<FlowError>({
   }),
 });
 
-// Order/Fulfillment FSM rejects invalid state transitions (e.g. `deliver`
-// before `ship`, unknown action). These are client-caused — map to 422
-// instead of letting them leak as 500.
-const invalidTransitionMapper = defineErrorMapper<InvalidTransitionError>({
-  type: InvalidTransitionError,
+// Order / Fulfillment / any FSM-bearing aggregate (Flow's StockMove,
+// ProcurementOrder, return, scrap, wave …) throws this when a status
+// transition isn't allowed (e.g. `deliver` before `ship`, unknown action).
+// Client-caused → map to 422 instead of letting it leak as 500. The error
+// type is canonical via `@classytic/primitives/state-machine` — every
+// kernel that uses `defineStateMachine` throws this same class, so one
+// mapper covers the whole stack.
+const invalidTransitionMapper = defineErrorMapper<IllegalTransitionError>({
+  type: IllegalTransitionError,
   toResponse: (err) => ({
     status: 422,
     code: err.code,
@@ -64,9 +69,25 @@ const invalidTransitionMapper = defineErrorMapper<InvalidTransitionError>({
   }),
 });
 
+// `@classytic/ledger`'s `AccountingError` carries `.status` (HTTP) and
+// `.code` (domain — e.g. `PERIOD_LOCKED_DAILY`, `IMMUTABLE_ENTRY`,
+// `CREDIT_LIMIT_EXCEEDED`). Without this mapper, arc 2.13's error handler
+// drops `.code` and emits `arc.<status>` (`arc.conflict`), erasing the
+// finance-domain semantic that clients (and tests) discriminate on.
+const accountingErrorMapper = defineErrorMapper<AccountingError>({
+  type: AccountingError,
+  toResponse: (err) => ({
+    status: err.status ?? 400,
+    code: err.code ?? 'ACCOUNTING_ERROR',
+    message: err.message,
+    ...(err.fields ? { details: err.fields as never } : {}),
+  }),
+});
+
 const flowErrorMappers: ErrorMapper[] = [
   flowErrorMapper,
   invalidTransitionMapper,
+  accountingErrorMapper,
 ];
 
 // Resolve the resource dir as a URL relative to *this* file so the same value
@@ -95,6 +116,16 @@ export function createArcAppOptions({
     cors: {
       ...config.cors,
       allowedHeaders: getCorsAllowedHeaders(),
+    },
+    // Cap multipart uploads (CSV import, image upload). Hosts hitting the
+    // limit get a 413 before the route handler runs. JSON body limit stays
+    // at Fastify's default — Arc 2.14 doesn't surface that knob and 1 MiB
+    // is adequate for commerce JSON traffic.
+    multipart: {
+      limits: {
+        fileSize: config.httpLimits.multipartFileSize,
+        files: config.httpLimits.multipartFiles,
+      },
     },
     // Disabled in dev/test — Next.js auth hooks refetch on every HMR and route
     // transition, exhausting the IP bucket in minutes. In prod, exempt auth
@@ -131,6 +162,11 @@ export function createArcAppOptions({
       },
       queryCache: true,
       metrics: true,
+      // Custom health plugin registered in `register-infra-plugins.ts` with
+      // Mongo + Flow-engine readiness checks. Arc's default has no domain
+      // awareness — `/_health/ready` would 200 while engines are still
+      // bootstrapping.
+      health: false,
     },
     resourcePrefix: "/api/v1",
     // Explicit `resources` wins over `resourceDir` per arc 2.11. Tests pass a

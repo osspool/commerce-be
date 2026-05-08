@@ -137,8 +137,8 @@ async function fetchStock(
     headers: { ...env.auth.as('admin').headers, 'x-organization-id': env.orgId },
   });
   expect(res.statusCode).toBe(200);
-  const body = parse<{ docs: Array<Record<string, unknown>> }>(res.body);
-  const product = body?.docs.find((d) => String(d._id) === productId) as
+  const body = parse<{ data: Array<Record<string, unknown>> }>(res.body);
+  const product = body?.data.find((d) => String(d._id) === productId) as
     | {
         branchStock?: {
           variants?: Array<{ sku: string; quantity: number }>;
@@ -216,8 +216,7 @@ describe('POST /inventory/adjustments — wall-clock performance', () => {
 
     const body = parse<{ success: boolean; data: { newQuantity: number } }>(res.body);
     expect(res.statusCode, `body: ${res.body}`).toBe(200);
-    expect(body?.success).toBe(true);
-    expect(body?.data.newQuantity).toBe(5);
+    expect(body?.newQuantity).toBe(5);
 
     // Target is 500ms; assert at 3x that so CI headroom doesn't cause flaky
     // failures. If this ever exceeds 1500ms, the 3-txn regression is back.
@@ -271,8 +270,8 @@ describe('POST /inventory/adjustments — wall-clock performance', () => {
       data: { processed: number; failed: number };
     }>(res.body);
     expect(res.statusCode, `body: ${res.body}`).toBe(200);
-    expect(body?.data.processed).toBe(5);
-    expect(body?.data.failed).toBe(0);
+    expect(body?.processed).toBe(5);
+    expect(body?.failed).toBe(0);
 
     // Parallel dispatch proof: a 5-item batch should be no worse than
     // 2x a single adjust. The serial old-path would be ~5x, so this

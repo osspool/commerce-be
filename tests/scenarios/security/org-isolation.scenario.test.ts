@@ -160,7 +160,8 @@ describe('Org isolation — notifications do not leak across branches', () => {
       headers: hA(),
     });
     expect(selfRes.statusCode).toBe(200);
-    const selfData = parse(selfRes.body)?.data as Array<{ title: string }>;
+    const selfBody = parse(selfRes.body) as { data: Array<{ title: string }> };
+    const selfData = selfBody.data;
     expect(selfData.find((n) => n.title === 'A only')).toBeTruthy();
 
     // Admin A forging branch B id. The notifications resource currently
@@ -177,7 +178,8 @@ describe('Org isolation — notifications do not leak across branches', () => {
       headers: { ...hA(), 'x-organization-id': orgB },
     });
     if (forgedRes.statusCode === 200) {
-      const forgedData = parse(forgedRes.body)?.data as Array<{ title: string }>;
+      const forgedBody = parse(forgedRes.body) as { data: Array<{ title: string }> };
+      const forgedData = forgedBody.data;
       expect(forgedData.find((n) => n.title === 'A only')).toBeUndefined();
     } else {
       expect([401, 403]).toContain(forgedRes.statusCode);
@@ -190,7 +192,8 @@ describe('Org isolation — notifications do not leak across branches', () => {
       headers: hB(),
     });
     expect(bRes.statusCode).toBe(200);
-    const bData = parse(bRes.body)?.data as Array<{ title: string }>;
+    const bBody = parse(bRes.body) as { data: Array<{ title: string }> };
+    const bData = bBody.data;
     expect(bData.find((n) => n.title === 'A only')).toBeUndefined();
   });
 });

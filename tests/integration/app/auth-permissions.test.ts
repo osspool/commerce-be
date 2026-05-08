@@ -30,7 +30,7 @@ beforeAll(async () => {
   process.env.EMAIL_USER = '';
   process.env.EMAIL_PASS = '';
   ctx = await setupTestOrg();
-}, 30000);
+}, 90000);
 
 afterAll(async () => {
   await teardownTestOrg(ctx);

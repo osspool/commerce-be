@@ -21,7 +21,7 @@ process.env.NODE_ENV = 'test';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
-import { createFlowEngine } from '@classytic/flow';
+import { createFlowEngine, ensureFlowReady } from '@classytic/flow';
 
 // ── Test Setup ──────────────────────────────────────────
 
@@ -63,10 +63,9 @@ beforeAll(async () => {
     catalog: catalogBridge,
   });
 
-  // Pre-create collections
-  for (const model of Object.values(flow.models)) {
-    await model.createCollection();
-  }
+  // Materialise all collections, build indexes, and warm up the replica-set
+  // catalog so the first transactional write doesn't trip on catalog changes.
+  await ensureFlowReady(flow, { warmupWrites: true });
 }, 60_000);
 
 afterAll(async () => {
@@ -558,7 +557,7 @@ describe('Flow Inventory E2E', () => {
 
       // The seedStock created moves. Query them.
       const result = await flow.repositories.move.getAll({ filters: {}, ...ctx() });
-      const moves = result.docs ?? result;
+      const moves = result.data ?? result;
       expect(moves.length).toBeGreaterThan(0);
 
       // Every move should have required fields

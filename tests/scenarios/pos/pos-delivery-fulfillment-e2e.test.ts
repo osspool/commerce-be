@@ -207,7 +207,7 @@ describe('POS delivery → fulfillment wiring', () => {
   it('walk-in pickup (default) creates NO fulfillment — just a goods-leave-on-sale order', async () => {
     const res = await placePosOrder({}); // no deliveryMethod → default 'pickup'
     expect(res.status).toBe(201);
-    const order = res.body?.data as { orderNumber: string; _id: string };
+    const order = res.body as { orderNumber: string; _id: string };
 
     const fulfillments = await getFulfillmentsForOrder(order.orderNumber);
     expect(fulfillments.length, 'pickup orders must not create fulfillments').toBe(0);
@@ -228,7 +228,7 @@ describe('POS delivery → fulfillment wiring', () => {
 
     const res = await placePosOrder({ deliveryMethod: 'delivery', deliveryAddress });
     expect(res.status).toBe(201);
-    const order = res.body?.data as { orderNumber: string; _id: string };
+    const order = res.body as { orderNumber: string; _id: string };
 
     const fulfillments = await getFulfillmentsForOrder(order.orderNumber);
     expect(fulfillments.length, 'delivery POS orders must create a fulfillment').toBe(1);
@@ -277,7 +277,7 @@ describe('POS delivery → fulfillment wiring', () => {
 
     const res = await placePosOrder({ deliveryMethod: 'delivery', deliveryAddress });
     expect(res.status).toBe(201);
-    const order = res.body?.data as { orderNumber: string };
+    const order = res.body as { orderNumber: string };
 
     const fulfillments = await getFulfillmentsForOrder(order.orderNumber);
     expect(fulfillments.length).toBe(1);
@@ -296,7 +296,7 @@ describe('POS delivery → fulfillment wiring', () => {
     // order detail page. No crash, no 500.
     const res = await placePosOrder({ deliveryMethod: 'delivery' }); // no address
     expect(res.status).toBe(201);
-    const order = res.body?.data as { orderNumber: string; _id: string };
+    const order = res.body as { orderNumber: string; _id: string };
 
     const fulfillments = await getFulfillmentsForOrder(order.orderNumber);
     expect(fulfillments.length).toBe(0);

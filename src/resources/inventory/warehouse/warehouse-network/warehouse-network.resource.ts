@@ -34,7 +34,7 @@ const warehouseNetworkResource = defineResource({
       raw: true,
       schema: warehouseNetworkSchemas.get,
       handler: async (_req: FastifyRequest, reply: FastifyReply) => {
-        return reply.send({ success: true, data: { entries: [] } });
+        return reply.send({ entries: [] });
       },
     },
     {
@@ -69,7 +69,7 @@ const warehouseNetworkResource = defineResource({
           },
           ctx,
         );
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
   ],

@@ -16,15 +16,12 @@
  * — schema validation runs first; whatever survives gets the boundary.
  */
 
-import {
-  type EventLogger,
-  type ValidationResult,
-  wrapWithBoundary,
-  wrapWithSchema,
-} from '@classytic/arc/events';
+import { type ValidationResult, wrapWithBoundary, wrapWithSchema } from '@classytic/arc/events';
+import type { EventLogger } from '@classytic/primitives/events';
 import config from '#config/index.js';
 import { subscribe } from '#lib/events/arcEvents.js';
 import logger from '#lib/utils/logger.js';
+import { sanitizeDisplayName } from '#resources/sales/customers/customer.name-utils.js';
 import {
   OrderPaidEvent,
   PurchaseReceivedEvent,
@@ -86,11 +83,18 @@ export function registerInvoiceEventHandlers(): void {
             if (!data.organizationId || !data.customerId || !data.orderId) return;
             if (data.totalAmount == null) return;
 
+            // Snapshot guard: `data.customerName` rides on the OrderPaid
+            // event payload and originates upstream from `customer.name`.
+            // Sanitize before persisting onto the invoice — empty/token-
+            // shaped strings degrade to `undefined` so the invoice's
+            // partner-name renderer falls through to its fallback rather
+            // than printing `gcqAUBgGpRnDZbyPgKbS` on the customer's bill.
+            const partnerName = sanitizeDisplayName(data.customerName, '') || undefined;
             await invoice().record.createAndPost(
               {
                 moveType: 'out_invoice',
                 partnerId: data.customerId,
-                partnerName: data.customerName,
+                partnerName,
                 sourceType: 'Order',
                 sourceId: data.orderId,
                 lines: [

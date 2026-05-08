@@ -69,10 +69,8 @@ export function createContactRepositoryAdapter(_ctx: CrmRequestContext): Contact
 
     async findByEmail(email) {
       const normalized = email.toLowerCase().trim();
-      const doc = await (
-        repo as unknown as { Model: { findOne: (q: object) => Promise<ICustomer | null> } }
-      ).Model.findOne({ 'contact.email': normalized });
-      return doc ? toContact(doc) : null;
+      const doc = await repo.getByQuery({ 'contact.email': normalized });
+      return doc ? toContact(doc as unknown as ICustomer) : null;
     },
 
     async list(filter: ContactFilter = {}) {
@@ -81,10 +79,8 @@ export function createContactRepositoryAdapter(_ctx: CrmRequestContext): Contact
       if (filter.ownerId) query['crm.ownerId'] = filter.ownerId;
       if (filter.accountId) query['crm.accountId'] = filter.accountId;
       if (filter.tags && filter.tags.length) query.tags = { $all: [...filter.tags] };
-      const docs = await (repo as unknown as { Model: { find: (q: object) => Promise<ICustomer[]> } }).Model.find(
-        query,
-      );
-      return docs.map(toContact);
+      const docs = await repo.findAll(query);
+      return (docs as unknown as ICustomer[]).map(toContact);
     },
 
     async create(input) {

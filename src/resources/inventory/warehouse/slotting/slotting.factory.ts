@@ -81,7 +81,7 @@ export function createSkuSlotAssignmentResource() {
             policyId?: string;
           };
           const doc = await flow().repositories.skuSlotAssignment.assignSlot(body, ctx);
-          return { success: true, data: doc, status: 201 };
+          return { data: doc, status: 201 };
         },
       },
       {
@@ -101,7 +101,7 @@ export function createSkuSlotAssignmentResource() {
             policyId?: string;
           };
           const doc = await flow().repositories.skuSlotAssignment.reslot(body, ctx);
-          return { success: true, data: doc, status: 200 };
+          return { data: doc, status: 200 };
         },
       },
       {
@@ -119,7 +119,7 @@ export function createSkuSlotAssignmentResource() {
             deactivatedBy?: string;
           };
           const doc = await flow().repositories.skuSlotAssignment.deactivate(body, ctx);
-          return { success: true, data: doc, status: 200 };
+          return { data: doc, status: 200 };
         },
       },
     ],

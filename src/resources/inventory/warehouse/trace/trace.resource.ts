@@ -10,6 +10,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { enterpriseModeGuard, flow, flowCtxGuard } from '../shared/helpers.js';
 import { traceSchemas } from './trace.schemas.js';
+import { NotFoundError } from '@classytic/arc/utils';
 
 const enterpriseGuards = [enterpriseModeGuard.preHandler, flowCtxGuard.preHandler];
 
@@ -34,9 +35,9 @@ const traceResource = defineResource({
         const { lotCode, skuRef } = req.query as { lotCode: string; skuRef: string };
         const result = await flow().services.trace.traceLot(lotCode, skuRef, ctx);
         if (!result) {
-          return reply.code(404).send({ success: false, error: `Lot ${lotCode} not found for SKU ${skuRef}` });
+          throw new NotFoundError(`Lot ${lotCode} not found for SKU ${skuRef}`);
         }
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
     {
@@ -52,9 +53,9 @@ const traceResource = defineResource({
         const { serialCode, skuRef } = req.query as { serialCode: string; skuRef: string };
         const result = await flow().services.trace.traceSerial(serialCode, skuRef, ctx);
         if (!result) {
-          return reply.code(404).send({ success: false, error: `Serial ${serialCode} not found for SKU ${skuRef}` });
+          throw new NotFoundError(`Serial ${serialCode} not found for SKU ${skuRef}`);
         }
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
     {
@@ -70,9 +71,9 @@ const traceResource = defineResource({
         const { lotCode, skuRef } = req.body as { lotCode: string; skuRef: string };
         const result = await flow().services.trace.recallLot(lotCode, skuRef, ctx);
         if (!result) {
-          return reply.code(404).send({ success: false, error: `Lot ${lotCode} not found for SKU ${skuRef}` });
+          throw new NotFoundError(`Lot ${lotCode} not found for SKU ${skuRef}`);
         }
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
   ],

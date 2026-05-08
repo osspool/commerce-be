@@ -1,4 +1,5 @@
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { QueryParser } from '@classytic/mongokit';
 import { z } from 'zod';
 import crmPermissions from '#config/permissions/crm.js';

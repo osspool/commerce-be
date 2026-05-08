@@ -37,6 +37,7 @@ let orgId: string;
 // Additional actors beyond the creator-admin minted by bootScenarioApp.
 let inventoryStaffToken: string;
 let branchManagerToken: string;
+let branchManagerUserId: string;
 
 const h = (token: string) => ({ authorization: `Bearer ${token}`, 'x-organization-id': orgId });
 const adminH = () => ({ ...adminAuth.as('admin').headers, 'x-organization-id': orgId });
@@ -115,6 +116,7 @@ beforeAll(async () => {
 
   inventoryStaffToken = await signInUser(staffEmail);
   branchManagerToken = await signInUser(mgrEmail);
+  branchManagerUserId = mgr.userId;
   if (!inventoryStaffToken || !branchManagerToken) {
     throw new Error('Failed to sign in scenario actors');
   }
@@ -144,9 +146,7 @@ describe('Scenario: Scrap lifecycle (draft → approve → execute)', () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    const data = body?.data as Record<string, unknown>;
+    const data = parse(res.body) as Record<string, unknown>;
     expect(data.status).toBe('draft');
     expect(data.scrapNumber).toMatch(/^SCR-/);
     expect(data.skuRef).toBe('SKU-SCN-A');
@@ -164,12 +164,11 @@ describe('Scenario: Scrap lifecycle (draft → approve → execute)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    expect(Array.isArray(body?.docs)).toBe(true);
+    expect(Array.isArray(body?.data)).toBe(true);
     expect(typeof body?.total).toBe('number');
     expect(typeof body?.page).toBe('number');
     expect(typeof body?.limit).toBe('number');
-    expect((body?.docs as Array<{ _id: string }>).some((d) => d._id === scrapId)).toBe(true);
+    expect((body?.data as Array<{ _id: string }>).some((d) => d._id === scrapId)).toBe(true);
   });
 
   it('GET /scrap/:id returns the single-doc envelope {success, data}', async () => {
@@ -180,37 +179,76 @@ describe('Scenario: Scrap lifecycle (draft → approve → execute)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    expect((body?.data as { _id: string })._id).toBe(scrapId);
+    expect((body as { _id: string })._id).toBe(scrapId);
   });
 
-  it('branch_manager approves the scrap via POST /:id/action {action: "approve"} and status advances', async () => {
-    const res = await server.inject({
+  it('branch_manager submits + decides the scrap via the unified approval preset and status advances', async () => {
+    // Stage 1 — attach a single-step chain via submit_for_approval. The
+    // branch_manager is both submitter and approver for this scenario; the
+    // permission for both is `scrapApprove`.
+    const submitRes = await server.inject({
       method: 'POST',
       url: `${API}/inventory/scrap/${scrapId}/action`,
       headers: managerH(),
-      payload: { action: 'approve' },
+      payload: {
+        action: 'submit_for_approval',
+        chain: {
+          order: 'sequential',
+          steps: [{ id: 'mgr', approvers: [{ id: branchManagerUserId }] }],
+        },
+      },
     });
-    expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    expect((body?.data as { status: string }).status).toBe('approved');
+    expect(submitRes.statusCode, submitRes.body).toBe(200);
+    expect((parse(submitRes.body) as { status: string }).status).toBe('pending_approval');
+
+    // Stage 2 — apply the manager's decision, chain resolves to approved,
+    // `onApproved` hook flips the doc status.
+    const decideRes = await server.inject({
+      method: 'POST',
+      url: `${API}/inventory/scrap/${scrapId}/action`,
+      headers: managerH(),
+      payload: {
+        action: 'decide',
+        stepId: 'mgr',
+        approverId: branchManagerUserId,
+        decision: 'approved',
+      },
+    });
+    expect(decideRes.statusCode, decideRes.body).toBe(200);
+    expect((parse(decideRes.body) as { status: string }).status).toBe('approved');
   });
 
-  it('inventory_staff CANNOT approve a scrap (403) — the permission boundary holds', async () => {
-    // Draft another one, try to approve as staff.
+  it('inventory_staff CANNOT decide a scrap (403) — the permission boundary holds', async () => {
+    // Draft another one, then have manager submit, try to decide as staff.
     const draft = await server.inject({
       method: 'POST',
       url: `${API}/inventory/scrap`,
       headers: staffH(),
       payload: { skuRef: 'SKU-SCN-B', locationId: 'loc-scn-b', quantity: 1, reason: 'expired' },
     });
-    const id = (parse(draft.body)?.data as { _id: string })._id;
+    const id = (parse(draft.body) as { _id: string })._id;
+    await server.inject({
+      method: 'POST',
+      url: `${API}/inventory/scrap/${id}/action`,
+      headers: managerH(),
+      payload: {
+        action: 'submit_for_approval',
+        chain: {
+          order: 'sequential',
+          steps: [{ id: 'mgr', approvers: [{ id: branchManagerUserId }] }],
+        },
+      },
+    });
     const res = await server.inject({
       method: 'POST',
       url: `${API}/inventory/scrap/${id}/action`,
       headers: staffH(),
-      payload: { action: 'approve' },
+      payload: {
+        action: 'decide',
+        stepId: 'mgr',
+        approverId: branchManagerUserId,
+        decision: 'approved',
+      },
     });
     expect(res.statusCode).toBe(403);
   });
@@ -252,9 +290,7 @@ describe('Scenario: Standard cost publish (platformAdmin gate)', () => {
       payload: { skuRef: sku, standardCost: 150, currency: 'BDT' },
     });
     expect(res.statusCode).toBe(201);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    const data = body?.data as Record<string, unknown>;
+    const data = parse(res.body) as Record<string, unknown>;
     expect(data.skuRef).toBe(sku);
     expect(data.standardCost).toBe(150);
     expect(data.currency).toBe('BDT');
@@ -269,9 +305,8 @@ describe('Scenario: Standard cost publish (platformAdmin gate)', () => {
       headers: staffH(),
     });
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    expect((body?.data as { skuRef: string }).skuRef).toBe(sku);
+    const body = parse(res.body) as { data: { skuRef: string } };
+    expect(body.data.skuRef).toBe(sku);
   });
 
   it('publishing a new cost supersedes the previous (append-only semantics)', async () => {
@@ -287,7 +322,7 @@ describe('Scenario: Standard cost publish (platformAdmin gate)', () => {
       url: `${API}/inventory/standard-costs/active?skuRef=${sku}`,
       headers: adminH(),
     });
-    expect((parse(active.body)?.data as { standardCost: number }).standardCost).toBe(175);
+    expect((parse(active.body) as { data: { standardCost: number } }).data.standardCost).toBe(175);
   });
 
   it('update route is disabled — PATCH /:id returns 404', async () => {
@@ -326,7 +361,7 @@ describe('Scenario: Landed-cost draft guard', () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    const data = parse(res.body)?.data as Record<string, unknown>;
+    const data = parse(res.body) as Record<string, unknown>;
     expect(data.status).toBe('draft');
     expect(Array.isArray(data.costLines)).toBe(true);
     landedId = data._id as string;
@@ -340,7 +375,7 @@ describe('Scenario: Landed-cost draft guard', () => {
       payload: { vendorBillRef: 'VB-001-UPDATED' },
     });
     expect(res.statusCode).toBe(200);
-    expect((parse(res.body)?.data as { vendorBillRef: string }).vendorBillRef).toBe('VB-001-UPDATED');
+    expect((parse(res.body) as { vendorBillRef: string }).vendorBillRef).toBe('VB-001-UPDATED');
   });
 
   it('DELETE is disabled on landed-cost — 404', async () => {

@@ -13,6 +13,7 @@ import permissions from '#config/permissions.js';
 import { events } from './events.js';
 import notificationRepository from './notification.repository.js';
 import { listQuerySchema, markReadParamsSchema } from './notification.schemas.js';
+import { NotFoundError } from '@classytic/arc/utils';
 
 function getUserScope(req: ArcRequest): { userId: string; organizationId: string } {
   const userId = req.user?.id as string;
@@ -46,7 +47,7 @@ export default defineResource({
         const { userId, organizationId } = getUserScope(req);
         const query = req.query as { page?: number; limit?: number; unreadOnly?: boolean; type?: string };
         const result = await notificationRepository.listForUser(organizationId, userId, query);
-        return reply.send({ success: true, data: result.data, pagination: result.pagination });
+        return reply.send(result);
       },
     },
 
@@ -60,7 +61,7 @@ export default defineResource({
       handler: async (req: ArcRequest, reply: FastifyReply) => {
         const { userId, organizationId } = getUserScope(req);
         const count = await notificationRepository.countUnread(organizationId, userId);
-        return reply.send({ success: true, data: { count } });
+        return reply.send({ count });
       },
     },
 
@@ -76,8 +77,8 @@ export default defineResource({
         const { userId, organizationId } = getUserScope(req);
         const { id } = req.params as { id: string };
         const doc = await notificationRepository.markRead(organizationId, userId, id);
-        if (!doc) return reply.status(404).send({ success: false, error: 'Notification not found' });
-        return reply.send({ success: true, data: doc });
+        if (!doc) throw new NotFoundError('Notification not found');
+        return reply.send(doc);
       },
     },
 
@@ -91,7 +92,7 @@ export default defineResource({
       handler: async (req: ArcRequest, reply: FastifyReply) => {
         const { userId, organizationId } = getUserScope(req);
         const modifiedCount = await notificationRepository.markAllRead(organizationId, userId);
-        return reply.send({ success: true, data: { modifiedCount } });
+        return reply.send({ modifiedCount });
       },
     },
 

@@ -15,6 +15,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import config from '#config/index.js';
 import permissions from '#config/permissions.js';
 import { enterpriseModeGuard, flow, flowCtxGuard } from '../shared/helpers.js';
+import { ServiceUnavailableError } from '@classytic/arc/utils';
 
 const enterpriseGuards = [enterpriseModeGuard.preHandler, flowCtxGuard.preHandler];
 
@@ -47,14 +48,14 @@ const qualityResource = config.inventory.qualityEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.quality;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Quality service not available' });
+            if (!svc) throw new ServiceUnavailableError('Quality service not available');
             const points = await svc.findPointsByTrigger(
               (req.query as Record<string, string>).triggerOn ?? 'receipt',
               (req.query as Record<string, string>).skuRef,
               (req.query as Record<string, string>).nodeId,
               ctx,
             );
-            return reply.send({ success: true, data: points });
+            return reply.send(points);
           },
         },
         {
@@ -66,9 +67,9 @@ const qualityResource = config.inventory.qualityEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.quality;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Quality service not available' });
+            if (!svc) throw new ServiceUnavailableError('Quality service not available');
             const point = await svc.createPoint(req.body as any, ctx);
-            return reply.code(201).send({ success: true, data: point });
+            return reply.code(201).send(point);
           },
         },
         {
@@ -85,7 +86,7 @@ const qualityResource = config.inventory.qualityEnabled
             const filter: Record<string, unknown> = {};
             if (status) filter.status = status;
             const checks = await repos.qualityCheck.findAll(filter, { organizationId: ctx.organizationId, lean: true });
-            return reply.send({ success: true, data: checks });
+            return reply.send(checks);
           },
         },
         {
@@ -98,10 +99,10 @@ const qualityResource = config.inventory.qualityEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.quality;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Quality service not available' });
+            if (!svc) throw new ServiceUnavailableError('Quality service not available');
             const { moveGroupId, triggerOn } = req.body as { moveGroupId: string; triggerOn: string };
             const checks = await svc.generateChecks(moveGroupId, triggerOn, ctx);
-            return reply.send({ success: true, data: checks });
+            return reply.send(checks);
           },
         },
         {
@@ -114,9 +115,9 @@ const qualityResource = config.inventory.qualityEnabled
             const { id } = req.params as { id: string };
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.quality;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Quality service not available' });
+            if (!svc) throw new ServiceUnavailableError('Quality service not available');
             const check = await svc.recordResult(id, req.body as any, ctx);
-            return reply.send({ success: true, data: check });
+            return reply.send(check);
           },
         },
         {
@@ -130,10 +131,10 @@ const qualityResource = config.inventory.qualityEnabled
             const { id } = req.params as { id: string };
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.quality;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Quality service not available' });
+            if (!svc) throw new ServiceUnavailableError('Quality service not available');
             const { disposition } = req.body as { disposition: string };
             const check = await svc.applyDisposition(id, disposition as any, ctx);
-            return reply.send({ success: true, data: check });
+            return reply.send(check);
           },
         },
       ],

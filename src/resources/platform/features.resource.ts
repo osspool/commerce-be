@@ -28,7 +28,7 @@ const featuresResource = defineResource({
       summary: 'Get feature license manifest',
       description: 'Returns enabled modules with tier levels and capabilities.',
       handler: async (_req: FastifyRequest, reply: FastifyReply) => {
-        reply.send({ success: true, data: getFeatureManifest() });
+        reply.send(getFeatureManifest());
       },
     },
   ],

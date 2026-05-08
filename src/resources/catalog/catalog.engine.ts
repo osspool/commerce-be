@@ -24,6 +24,7 @@ import type { CatalogEngine } from '@classytic/catalog/engine';
 import mongoose from 'mongoose';
 import { eventTransport } from '#lib/events/EventBus.js';
 import { outboxStore } from '#shared/outbox/index.js';
+import { shouldAutoIndex } from '#shared/db/auto-index.js';
 
 // ── Inventory bridge (catalog → Flow) ────────────────────────────────
 
@@ -233,7 +234,8 @@ export async function ensureCatalogEngine(): Promise<CatalogEngine> {
       engine = await createCatalog({
         connection: mongoose.connection,
         mode: 'global',
-        autoIndex: process.env.NODE_ENV !== 'production',
+        autoIndex: shouldAutoIndex(),
+        forceRecreate: process.env.NODE_ENV === 'test',
         // Share Arc's event transport — structural compat, no cast needed.
         eventTransport: eventTransport as CatalogEventTransport,
         // Host-owned outbox for durable event delivery (PACKAGE_RULES §5.5).
@@ -246,7 +248,12 @@ export async function ensureCatalogEngine(): Promise<CatalogEngine> {
           exclusions: false,
           scheduling: false,
           relationships: false,
-          compliance: false,
+          // Enabled so catalog ships the ComplianceMetadata shape (hsCode under
+          // exportControl, hazmat, age restriction, brand) and emits
+          // `catalog:product.compliance_changed`. Mushak 6.3 generation reads
+          // hsCode through the invoice's catalog bridge — see
+          // src/resources/accounting/invoice/bridges/catalog.bridge.ts.
+          compliance: true,
           offers: false,
         },
         bridges: {

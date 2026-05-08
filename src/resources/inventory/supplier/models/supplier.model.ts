@@ -57,6 +57,18 @@ export interface ISupplier {
    * import supplier for customs-clearance handling.
    */
   countryCode?: string | null;
+  /**
+   * True when we must deduct VDS (VAT Deducted at Source) from payments to
+   * this supplier. Per BD VAT Act, designated withholding entities must hold
+   * back the VDS portion and remit directly to NBR. When set, the vendor-bill
+   * posting splits A/P: `Cr 2111 A/P (net)` + `Cr 2136 VDS Payable (VDS portion)`.
+   */
+  withholdVds?: boolean;
+  /**
+   * Fraction of the input VAT to withhold as VDS. Defaults to 0.5 (50%)
+   * per NBR SRO-254-AIN/2019/MUSAK-11. Only relevant when `withholdVds=true`.
+   */
+  vdsRate?: number;
   createdBy?: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
   createdAt?: Date;
@@ -182,6 +194,8 @@ const supplierSchema = new Schema<ISupplier, SupplierModel>(
     isTruncatedRateSupplier: { type: Boolean, default: false },
     bondedWarehouseSupplier: { type: Boolean, default: false },
     countryCode: { type: String, trim: true, default: null },
+    withholdVds: { type: Boolean, default: false },
+    vdsRate: { type: Number, default: 0.5, min: 0, max: 1 },
     // softDeletePlugin needs the field declared with `default: null` so
     // newly-created docs match the `{ deletedAt: null }` filter (default
     // `filterMode: 'null'`). See supplier.repository.ts.

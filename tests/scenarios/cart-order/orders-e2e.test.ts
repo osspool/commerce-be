@@ -233,8 +233,7 @@ describe('Orders v2 — place-order pipeline', () => {
 
     expect(res.statusCode).toBeLessThan(400);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    const order = body?.data as Record<string, unknown> | undefined;
+    const order = body as Record<string, unknown> | undefined;
     expect(order?.orderNumber).toMatch(/^ORD-\d{4}-\d+$/);
     expect(order?.organizationId).toBe(orgId);
     expect(order?.status).toBe('pending');
@@ -250,7 +249,7 @@ describe('Orders v2 — place-order pipeline', () => {
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
     // Arc auto-CRUD list returns `{ success, docs, totalDocs, ... }` at top level.
-    const docs = (body?.docs as Array<Record<string, unknown>>) ?? [];
+    const docs = (body?.data as Array<Record<string, unknown>>) ?? [];
     expect(docs.length).toBeGreaterThanOrEqual(1);
     for (const d of docs) expect(d.organizationId).toBe(orgId);
   });
@@ -263,7 +262,7 @@ describe('Orders v2 — place-order pipeline', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect((body?.data as Record<string, unknown>)?.orderNumber).toBe(createdOrderNumber);
+    expect((body as Record<string, unknown>)?.orderNumber).toBe(createdOrderNumber);
   });
 });
 
@@ -277,7 +276,7 @@ describe('Orders v2 — FSM transitions via /:id/action', () => {
     });
     expect(res.statusCode).toBeLessThan(400);
     const body = parse(res.body);
-    expect((body?.data as Record<string, unknown>)?.status).toBe('confirmed');
+    expect((body as Record<string, unknown>)?.status).toBe('confirmed');
   });
 
   it('rejects an invalid FSM transition with non-2xx', async () => {
@@ -307,9 +306,8 @@ describe('Orders v2 — GET /orders/my (authenticated customer history)', () => 
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
 
-    const docs = (body?.docs as Array<Record<string, unknown>>) ?? [];
+    const docs = (body?.data as Array<Record<string, unknown>>) ?? [];
     expect(docs.length).toBeGreaterThanOrEqual(1);
     expect(docs.find((o) => o.orderNumber === createdOrderNumber)).toBeDefined();
 
@@ -326,7 +324,7 @@ describe('Orders v2 — GET /orders/my (authenticated customer history)', () => 
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    const docs = (body?.docs as Array<Record<string, unknown>>) ?? [];
+    const docs = (body?.data as Array<Record<string, unknown>>) ?? [];
     // Earlier FSM test confirmed the order, so the pending query must NOT
     // return it. Proves the filter is actually forwarded.
     expect(docs.find((o) => o.orderNumber === createdOrderNumber)).toBeUndefined();
@@ -340,7 +338,7 @@ describe('Orders v2 — GET /orders/my (authenticated customer history)', () => 
     const res = await server.inject({ method: 'GET', url: `${API}/orders/my` });
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      const docs = (body?.docs as Array<Record<string, unknown>>) ?? [];
+      const docs = (body?.data as Array<Record<string, unknown>>) ?? [];
       expect(docs.length).toBe(0);
     } else {
       expect(res.statusCode).toBeGreaterThanOrEqual(400);
@@ -355,7 +353,7 @@ describe('Orders v2 — GET /orders/my (authenticated customer history)', () => 
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect((body?.data as Record<string, unknown>)?.orderNumber).toBe(createdOrderNumber);
+    expect((body as Record<string, unknown>)?.orderNumber).toBe(createdOrderNumber);
   });
 
   it('GET /orders/my/:orderNumber returns 404 for an unknown orderNumber', async () => {
@@ -397,7 +395,7 @@ describe('Orders v2 — multi-tenant isolation (auto-wired in 3.6)', () => {
     });
     expect(verify.statusCode).toBe(200);
     const verifyBody = parse(verify.body);
-    expect((verifyBody?.data as Record<string, unknown>)?.status).toBe('confirmed');
+    expect((verifyBody as Record<string, unknown>)?.status).toBe('confirmed');
   });
 });
 
@@ -416,7 +414,7 @@ describe('Orders v2 — fulfillment domain verbs', () => {
     });
     expect(res.statusCode).toBeLessThan(400);
     const body = parse(res.body);
-    const doc = body?.data as Record<string, unknown> | undefined;
+    const doc = body as Record<string, unknown> | undefined;
     expect(doc?.fulfillmentNumber).toMatch(/^FUL-\d{4}-\d+$/);
     expect(doc?.organizationId).toBe(orgId);
     createdFulfillmentNumber = doc!.fulfillmentNumber as string;
@@ -429,9 +427,11 @@ describe('Orders v2 — fulfillment domain verbs', () => {
       headers: auth.as('admin').headers,
     });
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const result = body?.data as Record<string, unknown> | undefined;
-    const docs = (result?.docs as Array<Record<string, unknown>>) ?? [];
+    const body = parse(res.body) as Record<string, unknown> | null;
+    // Handler spreads mongokit pagination at the top level — `docs`
+    // sibling of `success`, NOT under `data` (matches arc-next list
+    // convention). Older shape was `body.docs`.
+    const docs = (body?.data as Array<Record<string, unknown>>) ?? [];
     expect(docs.length).toBeGreaterThanOrEqual(1);
     expect(docs.every((d) => d.orderNumber === createdOrderNumber)).toBe(true);
   });
@@ -464,7 +464,7 @@ describe('Orders v2 — order-change domain verbs', () => {
     });
     expect(res.statusCode).toBeLessThan(400);
     const body = parse(res.body);
-    const doc = body?.data as Record<string, unknown> | undefined;
+    const doc = body as Record<string, unknown> | undefined;
     expect(doc?.changeNumber).toMatch(/^CHG-\d{4}-\d+$/);
     expect(doc?.organizationId).toBe(orgId);
   });
@@ -477,8 +477,7 @@ describe('Orders v2 — order-change domain verbs', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    const result = body?.data as Record<string, unknown> | undefined;
-    const docs = (result?.docs as Array<Record<string, unknown>>) ?? [];
+    const docs = (body?.data as Array<Record<string, unknown>>) ?? [];
     expect(docs.length).toBeGreaterThanOrEqual(1);
   });
 });

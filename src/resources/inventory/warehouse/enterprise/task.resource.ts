@@ -11,6 +11,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import config from '#config/index.js';
 import permissions from '#config/permissions.js';
 import { enterpriseModeGuard, flow, flowCtxGuard } from '../shared/helpers.js';
+import { ServiceUnavailableError } from '@classytic/arc/utils';
 
 const enterpriseGuards = [enterpriseModeGuard.preHandler, flowCtxGuard.preHandler];
 
@@ -40,10 +41,10 @@ const taskResource = config.inventory.tasksEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.task;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Task service not available' });
+            if (!svc) throw new ServiceUnavailableError('Task service not available');
             const { moveGroupId } = req.body as { moveGroupId: string };
             const tasks = await svc.generateFromMoveGroup(moveGroupId, ctx);
-            return reply.send({ success: true, data: tasks });
+            return reply.send(tasks);
           },
         },
         {
@@ -55,9 +56,9 @@ const taskResource = config.inventory.tasksEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.task;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Task service not available' });
+            if (!svc) throw new ServiceUnavailableError('Task service not available');
             const queue = await svc.createQueue(req.body as any, ctx);
-            return reply.code(201).send({ success: true, data: queue });
+            return reply.code(201).send(queue);
           },
         },
         {
@@ -70,10 +71,10 @@ const taskResource = config.inventory.tasksEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.task;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Task service not available' });
+            if (!svc) throw new ServiceUnavailableError('Task service not available');
             const { queueId, operatorId } = req.body as { queueId: string; operatorId: string };
             const task = await svc.getNextTask(queueId, operatorId, ctx);
-            return reply.send({ success: true, data: task });
+            return reply.send(task);
           },
         },
         {
@@ -87,9 +88,9 @@ const taskResource = config.inventory.tasksEnabled
             const { id } = req.params as { id: string };
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.task;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Task service not available' });
+            if (!svc) throw new ServiceUnavailableError('Task service not available');
             const intent = await svc.getScanIntent(id, ctx);
-            return reply.send({ success: true, data: intent });
+            return reply.send(intent);
           },
         },
         {
@@ -103,9 +104,9 @@ const taskResource = config.inventory.tasksEnabled
             const { id } = req.params as { id: string };
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.task;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Task service not available' });
+            if (!svc) throw new ServiceUnavailableError('Task service not available');
             const task = await svc.completeTask(id, req.body as any, ctx);
-            return reply.send({ success: true, data: task });
+            return reply.send(task);
           },
         },
         {
@@ -119,10 +120,10 @@ const taskResource = config.inventory.tasksEnabled
             const { id } = req.params as { id: string };
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.task;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Task service not available' });
+            if (!svc) throw new ServiceUnavailableError('Task service not available');
             const { exceptionCode, note } = req.body as { exceptionCode: string; note: string };
             const task = await svc.reportException(id, exceptionCode as any, note, ctx);
-            return reply.send({ success: true, data: task });
+            return reply.send(task);
           },
         },
         {
@@ -135,14 +136,14 @@ const taskResource = config.inventory.tasksEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.task;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Task service not available' });
+            if (!svc) throw new ServiceUnavailableError('Task service not available');
             const { operatorId, queueId, deviceType } = req.body as {
               operatorId: string;
               queueId: string;
               deviceType: string;
             };
             const session = await svc.startSession(operatorId, queueId, deviceType as any, ctx);
-            return reply.code(201).send({ success: true, data: session });
+            return reply.code(201).send(session);
           },
         },
         {
@@ -155,9 +156,9 @@ const taskResource = config.inventory.tasksEnabled
             const { id } = req.params as { id: string };
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.task;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Task service not available' });
+            if (!svc) throw new ServiceUnavailableError('Task service not available');
             const session = await svc.endSession(id, ctx);
-            return reply.send({ success: true, data: session });
+            return reply.send(session);
           },
         },
       ],

@@ -13,7 +13,7 @@
  * is folded into the inventory cost (matching NBR rules — if you can't
  * claim it, it's part of what you paid for the goods).
  *
- * Debit:  1161 Raw Materials / 1163 Finished Goods / 1165 Merchandise (net)
+ * Debit:  1161 Raw Materials / 1163 Finished Goods / 1164 Merchandise (net)
  * Debit:  1150.VATxx.INPUT Input VAT (claimable portion, if any)
  * Credit: 2111 Accounts Payable (or 1112 Bank if paid immediately)
  */
@@ -21,21 +21,26 @@
 import { inputVatAccount } from '../../tax/tax.accounts.js';
 import { rateCodeForRate } from '../../tax/tax.split.js';
 import type { AccountingRegime } from '../../tax/tax-resolver.js';
+import { BD } from '../bd-account-codes.js';
 import type { PostingInput, PostingItem } from '../posting.service.js';
+import { displayRef } from './_label-helpers.js';
 
 const INVENTORY_ACCOUNTS: Record<string, string> = {
-  raw_materials: '1161',
-  finished_goods: '1163',
-  merchandise: '1165',
-  packing: '1167',
-  default: '1165', // Merchandise (retail default)
+  raw_materials: BD.rawMaterials,
+  finished_goods: BD.finishedGoods,
+  merchandise: BD.merchandise,
+  packing: BD.packingMaterials,
+  default: BD.merchandise, // Trading goods — retail default
 };
 
-const ACCOUNTS_PAYABLE = '2111';
-const BANK_ACCOUNT = '1112';
+const ACCOUNTS_PAYABLE = BD.ap;
+const BANK_ACCOUNT = BD.cash;
 
 export interface PurchaseData {
   purchaseId: string;
+  /** Human-readable purchase reference (e.g. `PO-2026-04-0042`). When
+   *  absent, the JE label falls back to a short ObjectId tail. */
+  purchaseReferenceNumber?: string;
   supplierId: string;
   /**
    * Total amount payable to supplier (paisa), inclusive of tax.
@@ -142,7 +147,7 @@ export function purchaseToPosting(data: PurchaseData, options: { autoPost?: bool
 
   return {
     journalType: 'PURCHASES',
-    label: data.description || `Purchase #${data.purchaseId}`,
+    label: data.description || `Purchase ${displayRef(data.purchaseReferenceNumber, data.purchaseId)}`,
     date: data.date,
     items,
     idempotencyKey: `purchase-${data.purchaseId}`,

@@ -90,9 +90,7 @@ describe('Payment webhooks — manual verification', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    const data = body?.data as { status: string; verifiedAt: string; publicId: string };
+    const data = parse(res.body) as { status: string; verifiedAt: string; publicId: string };
     expect(data.status).toBe('verified');
     expect(data.verifiedAt).toBeTruthy();
     expect(data.publicId).toMatch(/^txn_/);
@@ -161,8 +159,7 @@ describe('Payment webhooks — manual rejection', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const data = body?.data as { status: string; failureReason: string };
+    const data = parse(res.body) as { status: string; failureReason: string };
     expect(data.status).toBe('failed');
     expect(data.failureReason).toBe('invalid TrxID');
   });
@@ -206,7 +203,6 @@ describe('Payment webhooks — provider webhook (public)', () => {
     });
     expect(res.statusCode).toBe(404);
     const body = parse(res.body);
-    expect(body?.success).toBe(false);
     expect(String(body?.message)).toMatch(/not registered/i);
   });
 

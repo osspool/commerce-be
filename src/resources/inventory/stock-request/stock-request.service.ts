@@ -3,7 +3,7 @@ import logger from '#lib/utils/logger.js';
 import branchRepository from '#resources/commerce/branch/branch.repository.js';
 import { buildFlowContext, DEFAULT_LOCATION, skuRefFromProduct } from '../flow/context-helpers.js';
 import { getFlowEngine } from '../flow/flow-engine.js';
-import transferService from '../transfer/transfer.service.js';
+import { getTransferEngine } from '../_engines/transfer.engine.js';
 import type { IRequestItem, StockRequestDocument } from './models/stock-request.model.js';
 import StockRequest, { RequestPriority, StockRequestStatus } from './models/stock-request.model.js';
 import stockRequestRepository from './stock-request.repository.js';
@@ -267,15 +267,22 @@ class StockRequestService {
       throw new Error('No items with approved quantities');
     }
 
-    const transfer = await transferService.createTransfer(
+    const transfer = await getTransferEngine().repositories.stockTransfer.createTransfer(
       {
-        senderBranchId: String(request.fulfillingBranch),
-        receiverBranchId: String(request.requestingBranch),
-        items: transferItems,
+        senderBranch: String(request.fulfillingBranch),
+        receiverBranch: String(request.requestingBranch),
+        items: transferItems.map((item: { productId: string; variantSku?: string; quantity: number; productName?: string; cartonNumber?: string; notes?: string }) => ({
+          product: item.productId,
+          variantSku: item.variantSku,
+          quantity: item.quantity,
+          productName: item.productName ?? '',
+          cartonNumber: item.cartonNumber,
+          notes: item.notes,
+        })),
         remarks: `Fulfilling request ${request.requestNumber}`,
-        ...(transferData as Record<string, unknown>),
+        ...((transferData as Record<string, unknown> | undefined) ?? {}),
       },
-      actorId,
+      { actorId: actorId as string },
     );
 
     const isPartial = request.totalQuantityFulfilled < request.totalQuantityApproved;

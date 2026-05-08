@@ -174,10 +174,9 @@ describe('GET /accounting/posting/oversight', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
     // ctx.orgId + branchA + branchB
-    expect(body.data.branches.length).toBeGreaterThanOrEqual(3);
-    const ids = body.data.branches.map((b: any) => b.branchId);
+    expect(body.branches.length).toBeGreaterThanOrEqual(3);
+    const ids = body.branches.map((b: any) => b.branchId);
     expect(ids).toContain(branchA);
     expect(ids).toContain(branchB);
   });
@@ -193,7 +192,7 @@ describe('GET /accounting/posting/oversight', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const branch = body.data.branches.find((b: any) => b.branchId === branchA);
+    const branch = body.branches.find((b: any) => b.branchId === branchA);
     expect(branch).toBeDefined();
     expect(branch.lastClosedDate).toBeNull();
     expect(branch.daysBehind).toBeNull();
@@ -214,7 +213,7 @@ describe('GET /accounting/posting/oversight', () => {
     });
 
     const body = JSON.parse(res.body);
-    const branch = body.data.branches.find((b: any) => b.branchId === branchA);
+    const branch = body.branches.find((b: any) => b.branchId === branchA);
     expect(branch.lastClosedDate).toBe(dateStr);
     expect(branch.daysBehind).toBeGreaterThanOrEqual(2);
     expect(branch.daysBehind).toBeLessThanOrEqual(4); // tolerate BD/UTC offset
@@ -239,7 +238,7 @@ describe('GET /accounting/posting/oversight', () => {
     });
 
     const body = JSON.parse(res.body);
-    expect(body.data.summary.maxDaysBehind).toBeGreaterThanOrEqual(4);
+    expect(body.summary.maxDaysBehind).toBeGreaterThanOrEqual(4);
   });
 
   it('requires admin or finance_admin', async () => {

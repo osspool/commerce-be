@@ -17,10 +17,13 @@
  * invoked only when an order has paymentMethod = 'credit'.
  */
 
+import { calculateVDS } from '@classytic/bd-tax';
 import type { PostingInput, PostingItem } from '../posting.service.js';
+import { BD } from '../bd-account-codes.js';
+import { displayPartner } from './_label-helpers.js';
 
-const ACCOUNTS_RECEIVABLE = '1141';
-const SALES_REVENUE = '4111';
+const ACCOUNTS_RECEIVABLE = BD.ar;
+const SALES_REVENUE = BD.revenue;
 
 export interface CustomerInvoiceData {
   orderId: string;
@@ -32,6 +35,20 @@ export interface CustomerInvoiceData {
   dueDate?: Date;
   creditDays?: number;
   invoiceNumber?: string;
+  /**
+   * VAT amount (paisa) in this invoice. Required to calculate VDS split
+   * when `withholdVds=true`. If omitted, VDS is skipped even when the
+   * buyer flag is set.
+   */
+  vatAmount?: number;
+  /**
+   * True when the buyer is a designated VDS withholding entity (govt,
+   * large corporate). When set, the A/R debit is net of VDS, and
+   * 1153 VDS Receivable absorbs the withheld portion.
+   */
+  withholdVds?: boolean;
+  /** Fraction of VAT withheld. Defaults to 0.5 per NBR SRO-254. */
+  vdsRate?: number;
 }
 
 function computeDueDate(data: CustomerInvoiceData): Date {
@@ -41,24 +58,47 @@ function computeDueDate(data: CustomerInvoiceData): Date {
   return d;
 }
 
-export function customerInvoiceToPosting(data: CustomerInvoiceData): PostingInput {
+export function customerInvoiceToPosting(
+  data: CustomerInvoiceData,
+  options: { autoPost?: boolean } = {},
+): PostingInput {
+  // VDS Receivable: buyer withholds VDS portion from payment; we book the net
+  // A/R and a separate VDS Receivable asset (offset against output VAT at filing).
+  const vdsResult =
+    data.withholdVds && (data.vatAmount ?? 0) > 0
+      ? calculateVDS(data.vatAmount as number, data.vdsRate ?? 0.5)
+      : null;
+  const vdsAmount = vdsResult?.vdsAmount ?? 0;
+  const arDebit = data.totalAmount - vdsAmount;
+
   const items: PostingItem[] = [
     {
       accountCode: ACCOUNTS_RECEIVABLE,
-      debit: data.totalAmount,
+      debit: arDebit,
       credit: 0,
-      label: 'A/R from customer',
+      label: vdsAmount > 0 ? 'A/R from customer (net of VDS withheld)' : 'A/R from customer',
       partnerId: data.customerId,
       partnerType: 'customer',
       maturityDate: computeDueDate(data),
     },
-    {
-      accountCode: SALES_REVENUE,
-      debit: 0,
-      credit: data.totalAmount,
-      label: 'Sales revenue',
-    },
   ];
+
+  if (vdsAmount > 0) {
+    items.push({
+      accountCode: BD.vdsReceivable,
+      debit: vdsAmount,
+      credit: 0,
+      label: `VDS Receivable — buyer withheld ${Math.round((data.vdsRate ?? 0.5) * 100)}% of output VAT`,
+    });
+  }
+
+  items.push({
+    accountCode: SALES_REVENUE,
+    debit: 0,
+    credit: data.totalAmount,
+    label: 'Sales revenue',
+  });
+
   return {
     journalType: 'SALES',
     label: data.invoiceNumber ? `Invoice ${data.invoiceNumber}` : `Invoice for Order ${data.orderId}`,
@@ -66,13 +106,20 @@ export function customerInvoiceToPosting(data: CustomerInvoiceData): PostingInpu
     items,
     idempotencyKey: `customer-invoice-${data.orderId}`,
     sourceRef: { sourceModel: 'Order', sourceId: data.orderId },
-    autoPost: true,
+    // Documents (issued invoices) default to Draft so finance can review the
+    // amount, due date, and customer before it hits A/R. Industry standard
+    // (Odoo, ERPNext). Pass `options.autoPost: true` to skip review.
+    autoPost: options.autoPost ?? false,
   };
 }
 
 export interface CustomerReceiptData {
   orderId: string;
   customerId: string;
+  /** Customer display name (e.g. "Acme Industries"). When set, the JE
+   *  label reads `Receipt — Acme Industries` instead of leaking the raw
+   *  customer ObjectId. */
+  customerName?: string;
   amount: number;
   date: Date;
   /** Cash/bank account code. Defaults to 1112 Bank. */
@@ -80,8 +127,11 @@ export interface CustomerReceiptData {
   reference?: string;
 }
 
-export function customerReceiptToPosting(data: CustomerReceiptData): PostingInput {
-  const to = data.toAccountCode ?? '1112';
+export function customerReceiptToPosting(
+  data: CustomerReceiptData,
+  options: { autoPost?: boolean } = {},
+): PostingInput {
+  const to = data.toAccountCode ?? BD.cash; // Cash at Bank (Current Account)
   const items: PostingItem[] = [
     {
       accountCode: to,
@@ -100,12 +150,14 @@ export function customerReceiptToPosting(data: CustomerReceiptData): PostingInpu
   ];
   return {
     journalType: 'CASH_RECEIPTS',
-    label: `Receipt from customer ${data.customerId}`,
+    label: `Receipt — ${displayPartner(data.customerName, data.customerId, 'Customer')}`,
     date: data.date,
     items,
     idempotencyKey: `customer-receipt-${data.orderId}-${data.date.getTime()}-${data.amount}`,
     sourceRef: { sourceModel: 'Order', sourceId: data.orderId },
-    autoPost: true,
+    // Receipts represent confirmed treasury events (cash in the bank). Posted
+    // by default — there's nothing to review.
+    autoPost: options.autoPost ?? true,
   };
 }
 

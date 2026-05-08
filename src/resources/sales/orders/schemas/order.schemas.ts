@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BD } from '#resources/accounting/posting/bd-account-codes.js';
 
 const idParam = z.object({ id: z.string().min(1) });
 const orderNumberParam = z.object({ orderNumber: z.string().min(1) });
@@ -65,7 +66,9 @@ export const codSettlementSchema = {
       actualReceived: numericInput,
       courierCommission: numericInput,
       writeoff: numericInput.optional(),
-      cashAccount: z.enum(['1111', '1112']).optional(),
+      // Limit to canonical chart codes — never hardcode literals here, the
+       // ledger-bd chart has renumbered Bank `1112 → 1113` once already.
+      cashAccount: z.enum([BD.pettyCash, BD.cash]).optional(),
       notes: z.string().optional(),
       date: z.string().optional(),
     })

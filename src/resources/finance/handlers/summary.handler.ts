@@ -204,5 +204,5 @@ export async function getFinanceSummary(
 
   const rows = await getTransactionModel().aggregate(pipeline);
   const data = buildFinanceSummary(rows as FinanceAggRow[]);
-  return reply.send({ success: true, data });
+  return reply.send(data);
 }

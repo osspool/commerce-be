@@ -24,6 +24,7 @@ import {
   validateGuestBody,
 } from './guest-checkout.js';
 import { executePlacement } from './placement.service.js';
+import { NotFoundError, ValidationError } from '@classytic/arc/utils';
 
 const guestOrderResource = defineResource({
   name: 'guest-order',
@@ -47,7 +48,7 @@ const guestOrderResource = defineResource({
       raw: true,
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         if (!config.sales.guestCheckoutEnabled) {
-          return reply.status(404).send({ success: false, error: 'Not found' });
+          throw new NotFoundError('Not found');
         }
 
         const sanitized = sanitizeGuestBody(req.body);
@@ -56,11 +57,13 @@ const guestOrderResource = defineResource({
           guestInput = validateGuestBody(sanitized);
         } catch (err) {
           if (err instanceof GuestCheckoutValidationError) {
-            return reply.status(400).send({
-              success: false,
-              error: err.message,
-              ...(err.field ? { field: err.field } : {}),
-            });
+            const ve = new ValidationError(err.message);
+            // Surface the field so storefront can highlight the input. Arc's
+            // ErrorContract spreads `details` onto the response shape, so
+            // `body.field` matches the legacy contract test expects.
+            (ve as unknown as { details: Record<string, unknown> }).details = { field: err.field };
+            (ve as unknown as { field?: string }).field = err.field;
+            throw ve;
           }
           throw err;
         }
@@ -98,7 +101,7 @@ const guestOrderResource = defineResource({
 
         // Surface the customer id so the storefront can bind a local
         // "track my order" reference without requiring sign-in.
-        if (result.status === 201 && result.body.success) {
+        if (result.status === 201) {
           result.body.guestCustomerId = customer.id;
         }
         return reply.status(result.status).send(result.body);

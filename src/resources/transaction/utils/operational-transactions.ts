@@ -90,6 +90,11 @@ export async function createVerifiedOperationalExpenseTransaction(params: Operat
 
   const transactionPayload: Record<string, unknown> = {
     amount,
+    // The Transaction schema (`@classytic/revenue`) requires `currency`.
+    // Hard-coded to BDT — this codebase is single-tenant Bangladesh; if we
+    // ever fork to another country, this should pick up `TENANT_CURRENCY_LITERAL`
+    // from `lib/tenant.ts` (FE) or its be-prod equivalent.
+    currency: 'BDT',
     net,
     tax,
     flow: 'outflow',

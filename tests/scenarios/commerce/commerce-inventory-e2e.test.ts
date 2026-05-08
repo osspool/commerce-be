@@ -476,7 +476,7 @@ describe('10. Full Procurement Cycle', () => {
 
     // Verify move audit trail
     const result = await flow.repositories.move.getAll({ filters: { skuRef: sku }, ...ctx() });
-    const moves = result.docs ?? result;
+    const moves = result.data ?? result;
     expect(moves.length).toBe(1);
     expect(moves[0].operationType).toBe('receipt');
     expect(moves[0].quantityDone).toBe(1000);

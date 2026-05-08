@@ -26,6 +26,11 @@ beforeAll(async () => {
   // branch.model.ts (which targets the `organization` collection).
   Branch = mongoose.models.TestBranch as Model<IBranch>
     || mongoose.model<IBranch>('TestBranch', branchSchema);
+
+  // Mongoose builds indexes asynchronously after `mongoose.connect`. The
+  // unique-code constraint is enforced by the index, so the duplicate-code
+  // test will succeed silently unless we wait for indexing to complete.
+  await Branch.init();
 });
 
 afterAll(async () => {

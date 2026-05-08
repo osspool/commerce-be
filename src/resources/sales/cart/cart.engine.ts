@@ -12,6 +12,7 @@ import mongoose from 'mongoose';
 import { eventTransport } from '#lib/events/EventBus.js';
 import { eventRegistry } from '#shared/event-registry.js';
 import { outboxStore } from '#shared/outbox/index.js';
+import { shouldAutoIndex } from '#shared/db/auto-index.js';
 import { catalogBridge } from './cart.bridges.js';
 
 let _engine: CartEngine | null = null;
@@ -29,7 +30,8 @@ export async function initCartEngine(): Promise<CartEngine> {
   registerCartEvents();
   _engine = await createCart({
     connection: mongoose.connection,
-    autoIndex: process.env.NODE_ENV !== 'production',
+    autoIndex: shouldAutoIndex(),
+    forceRecreate: process.env.NODE_ENV === 'test',
     kinds: [skuKind, variantKind],
     bridges: { catalog: catalogBridge },
     defaultCurrency: process.env.DEFAULT_CURRENCY || 'BDT',

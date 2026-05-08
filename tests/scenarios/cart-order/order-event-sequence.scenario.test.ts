@@ -153,7 +153,7 @@ describe('Order event sequence — golden path', () => {
     // 1. Place
     const placeRes = await placeOrder(2);
     expect(placeRes.statusCode).toBe(201);
-    const order = parse(placeRes.body)?.data as {
+    const order = parse(placeRes.body) as {
       orderNumber: string;
       status: string;
       metadata?: { reservationRefs?: unknown[] };
@@ -183,9 +183,14 @@ describe('Order event sequence — golden path', () => {
       },
     });
     expect(fulRes.statusCode).toBeLessThan(400);
-    const fulfillment = parse(fulRes.body)?.data as { fulfillmentNumber: string };
+    const fulfillment = parse(fulRes.body) as { fulfillmentNumber: string };
 
     // 4. Ship — stock leaves the warehouse, reservation consumed.
+    //    `ledger-cogs-bridge` fires `accounting:order.fulfilled` on this
+    //    transition (toStatus === 'shipped'). Matches ERPNext (Delivery
+    //    Note.on_submit) and Odoo (`stock.move._action_done`) — COGS is
+    //    recognized at the moment inventory leaves, not at delivery
+    //    confirmation. See [ledger-cogs-bridge.ts:6-9].
     const shipRes = await env.server.inject({
       method: 'POST',
       url: `${API}/fulfillments/${fulfillment.fulfillmentNumber}/action`,
@@ -198,10 +203,16 @@ describe('Order event sequence — golden path', () => {
     expect(stock.onHand).toBe(8);
     expect(stock.reserved).toBe(0);
 
-    // Ship should NOT fire accounting:order.fulfilled — that's a deliver hook.
-    expect(spy.count('accounting:order.fulfilled')).toBe(0);
+    // Ship publishes accounting:order.fulfilled (fire-and-forget; may be
+    // async). Wait for it before asserting the count.
+    const fulfilledEvt = await spy.waitFor('accounting:order.fulfilled', 2000);
+    expect(fulfilledEvt).toBeTruthy();
+    expect((fulfilledEvt!.payload as { orderId: string }).orderId).toBeTruthy();
+    expect(spy.count('accounting:order.fulfilled')).toBe(1);
 
-    // 5. Deliver — publishes accounting:order.fulfilled
+    // 5. Deliver — confirms receipt; does NOT re-fire COGS posting (the
+    //    journal entry was already cut on ship). Idempotent in the sense
+    //    that stock state doesn't change either.
     const delRes = await env.server.inject({
       method: 'POST',
       url: `${API}/fulfillments/${fulfillment.fulfillmentNumber}/action`,
@@ -210,10 +221,7 @@ describe('Order event sequence — golden path', () => {
     });
     expect(delRes.statusCode).toBeLessThan(400);
 
-    // Event fires from the deliver handler (fire-and-forget, may be async)
-    const fulfilledEvt = await spy.waitFor('accounting:order.fulfilled', 2000);
-    expect(fulfilledEvt).toBeTruthy();
-    expect((fulfilledEvt!.payload as { orderId: string }).orderId).toBeTruthy();
+    // Still exactly one — deliver is a no-op for COGS.
     expect(spy.count('accounting:order.fulfilled')).toBe(1);
   }, 60_000);
 });
@@ -264,7 +272,7 @@ describe('Cancel before ship — reservation released, no fulfilled event', () =
 
     const placeRes = await placeOrder(3);
     expect(placeRes.statusCode).toBe(201);
-    const order = parse(placeRes.body)?.data as { orderNumber: string };
+    const order = parse(placeRes.body) as { orderNumber: string };
 
     let stock = await getStockAvail();
     expect(stock.reserved).toBe(3);

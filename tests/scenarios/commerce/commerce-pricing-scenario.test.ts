@@ -195,14 +195,14 @@ describe('Commerce Pricing Scenario', () => {
     if (res.statusCode >= 400) console.log('Pricelist create response:', res.statusCode, res.body);
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    pricelistId = body.data._id;
+
+    pricelistId = body._id;
     expect(pricelistId).toBeTruthy();
-    expect(body.data.name).toBe('Wholesale Q2 2026');
-    expect(body.data.rules).toHaveLength(1);
-    expect(body.data.rules[0].scope).toBe('product');
-    expect(body.data.rules[0].scopeRef).toBe(productId);
-    expect(body.data.rules[0].percentDiscount).toBe(15);
+    expect(body.name).toBe('Wholesale Q2 2026');
+    expect(body.rules).toHaveLength(1);
+    expect(body.rules[0].scope).toBe('product');
+    expect(body.rules[0].scopeRef).toBe(productId);
+    expect(body.rules[0].percentDiscount).toBe(15);
   });
 
   it('GET /pricelists/:id — retrieves the pricelist', async () => {
@@ -214,8 +214,8 @@ describe('Commerce Pricing Scenario', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data._id).toBe(pricelistId);
+
+    expect(body._id).toBe(pricelistId);
   });
 
   it('PATCH /pricelists/:id — toggles isActive', async () => {
@@ -229,8 +229,8 @@ describe('Commerce Pricing Scenario', () => {
     if (res.statusCode !== 200) console.log('Pricelist update response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.isActive).toBe(false);
+
+    expect(body.isActive).toBe(false);
 
     // Restore so the customer-assignment step below runs against an active list
     const restore = await server.inject({
@@ -257,11 +257,11 @@ describe('Commerce Pricing Scenario', () => {
     if (res.statusCode >= 400) console.log('Customer create response:', res.statusCode, res.body);
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    customerId = body.data._id;
+
+    customerId = body._id;
     expect(customerId).toBeTruthy();
-    expect(body.data.name?.given).toBe('Wholesale');
-    expect(body.data.customerType).toBe('wholesale');
+    expect(body.name?.given).toBe('Wholesale');
+    expect(body.customerType).toBe('wholesale');
   });
 
   it('PATCH /customers/:id — assigns the pricelist to the customer', async () => {
@@ -278,9 +278,9 @@ describe('Commerce Pricing Scenario', () => {
     if (res.statusCode !== 200) console.log('Customer patch response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.priceListId?.toString()).toBe(pricelistId);
-    expect(body.data.customerType).toBe('wholesale');
+
+    expect(body.priceListId?.toString()).toBe(pricelistId);
+    expect(body.customerType).toBe('wholesale');
   });
 
   it('GET /customers/:id — the assignment persists on read', async () => {
@@ -292,12 +292,12 @@ describe('Commerce Pricing Scenario', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.priceListId?.toString()).toBe(pricelistId);
+
+    expect(body.priceListId?.toString()).toBe(pricelistId);
   });
 
-  it('GET /health — app still healthy after full pricing cycle', async () => {
-    const res = await server.inject({ method: 'GET', url: '/health' });
+  it('GET /_health/live — app still healthy after full pricing cycle', async () => {
+    const res = await server.inject({ method: 'GET', url: '/_health/live' });
     expect(res.statusCode).toBe(200);
   });
 });

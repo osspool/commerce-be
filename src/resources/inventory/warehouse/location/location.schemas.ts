@@ -9,7 +9,7 @@ import { z } from 'zod';
 
 const idParam = z.object({ id: z.string() });
 
-const successData = <T extends z.ZodType>(schema: T) => z.object({ success: z.literal(true), data: schema });
+const successData = <T extends z.ZodType>(schema: T) => schema;
 
 const coordinatesSchema = z.object({
   zone: z.string().optional(),

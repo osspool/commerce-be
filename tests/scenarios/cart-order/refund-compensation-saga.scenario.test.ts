@@ -203,197 +203,151 @@ beforeEach(async () => {
     db.collection('reservations').deleteMany({ skuRef: sku }),
   ]);
   await spy?.stop();
+  // The order-change kernel publishes three lifecycle events:
+  //   - order:change.requested  (created in draft)
+  //   - order:change.confirmed  (admin approved → ledger + stock fan-out)
+  //   - order:change.declined   (admin rejected → no fan-out)
+  // Plus the downstream `accounting:return.restocked` for COGS reversal.
   spy = await startEventSpy([
-    'return:created',
-    'return:approved',
-    'return:received',
-    'return:inspected',
-    'return:refunded',
-    'return:rejected',
+    'order:change.requested',
+    'order:change.confirmed',
+    'order:change.declined',
+    'accounting:return.restocked',
   ]);
 });
 
 // ─── Scenarios ────────────────────────────────────────────────────────────────
 
-describe('Refund saga — happy path', () => {
-  it('full RMA lifecycle fires events in order and restocks exactly the approved qty', async () => {
-    // Start: stock has 2 on-hand (one or more previously shipped, etc.)
+/**
+ * Migration note (2026-05): the legacy `/sales/returns` resource had a
+ * 5-step FSM (draft → approved → shipped → received → inspected → refunded).
+ * The order-change kernel collapsed this to one substantive transition —
+ * `confirm` — that fan-outs to stock-return + ledger + refund handlers in
+ * parallel. `decline` is the negative path. The pre-migration "approved /
+ * received / inspected" intermediate events have no equivalent in the new
+ * model (they were ceremony around an FSM that no longer exists).
+ *
+ * This suite keeps the load-bearing INVARIANTS — confirm restocks, decline
+ * doesn't, decline-before-confirm fires no fan-out — and drops the
+ * step-by-step event sequence assertions that were specific to the old FSM.
+ */
+
+async function requestChange(orderNumber: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> | null }> {
+  const r = await env.server.inject({
+    method: 'POST',
+    url: `${API}/order-changes/for-order/${orderNumber}`,
+    headers: env.auth.as('admin').headers,
+    payload: body,
+  });
+  return { status: r.statusCode, body: parse(r.body) };
+}
+
+async function changeAction(changeNumber: string, action: string, extra: Record<string, unknown> = {}): Promise<{ status: number; body: Record<string, unknown> | null }> {
+  const r = await env.server.inject({
+    method: 'POST',
+    url: `${API}/order-changes/${changeNumber}/action`,
+    headers: env.auth.as('admin').headers,
+    payload: { action, ...extra },
+  });
+  return { status: r.statusCode, body: parse(r.body) };
+}
+
+describe('Refund saga — happy path (confirm)', () => {
+  it('confirm fires order:change.confirmed, restocks, and fan-outs to accounting:return.restocked', async () => {
     await seedStock(2);
     const { orderId } = await seedDeliveredOrder({ qty: 3, price: 50000 });
+    const orderNumber = (await mongoose.connection.db!.collection('orders').findOne({ _id: new mongoose.Types.ObjectId(orderId) }, { projection: { orderNumber: 1 } }))!.orderNumber as string;
 
-    // 1. create return for 3 units
-    const createRes = await env.server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns`,
-      headers: env.auth.as('admin').headers,
-      payload: {
-        orderId,
-        items: [{ productId, variantSku: sku, quantity: 3, reason: 'defective' }],
-      },
+    const create = await requestChange(orderNumber, {
+      changeType: 'return',
+      actions: [{ type: 'return_item', orderLineId: 'line_0', quantity: 3 }],
+      reason: 'defective',
     });
-    expect(createRes.statusCode, `create failed: ${createRes.body}`).toBe(201);
-    const ret = parse(createRes.body)?.data as { _id: string; returnNumber: string; status: string };
-    expect(ret.status).toBe('draft');
-    await spy.waitFor('return:created');
+    expect(create.status, `requestChange failed: ${JSON.stringify(create.body)}`).toBe(201);
+    await spy.waitFor('order:change.requested');
 
-    // 2. approve → ship → receive
-    const actionPayloads: Record<string, Record<string, unknown>> = {
-      approve: {},
-      ship: { provider: 'test-carrier', trackingNumber: 'TRK-001' },
-      receive: {},
-    };
-    for (const action of ['approve', 'ship', 'receive'] as const) {
-      const r = await env.server.inject({
-        method: 'POST',
-        url: `${API}/sales/returns/${ret._id}/action`,
-        headers: env.auth.as('admin').headers,
-        payload: { action, ...actionPayloads[action] },
-      });
-      expect(r.statusCode, `action=${action} failed: ${r.body}`).toBeLessThan(400);
-    }
-    await spy.waitFor('return:received');
-
-    // 3. inspect — 3 approved
-    const inspectRes = await env.server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns/${ret._id}/action`,
-      headers: env.auth.as('admin').headers,
-      payload: {
-        action: 'inspect',
-        results: [{ productId, variantSku: sku, result: 'approved', refundAmount: 150000 }],
-      },
-    });
-    expect(inspectRes.statusCode).toBeLessThan(400);
-    const inspectedEvt = await spy.waitFor('return:inspected');
-    expect((inspectedEvt!.payload as { result: string }).result).toBe('approved');
-
-    // 4. refund — restocks + fires refunded event with amount
     const stockBefore = await getStockAvail();
-    const refundRes = await env.server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns/${ret._id}/action`,
-      headers: env.auth.as('admin').headers,
-      payload: { action: 'refund' },
-    });
-    expect(refundRes.statusCode).toBeLessThan(400);
-    const refundedEvt = await spy.waitFor('return:refunded');
-    expect((refundedEvt!.payload as { amount: number }).amount).toBe(150000);
 
-    // Stock restocked (+3). Some builds may not restock without lifecycle-wired
-    // item.inspectionResult shape — we assert the delta is AT LEAST the stock
-    // delta we expect from the approved inspection, but not less than before.
+    const change = (create.body as { data: { changeNumber: string } });
+    const confirm = await changeAction(change.changeNumber, 'confirm');
+    expect(confirm.status, `confirm failed: ${JSON.stringify(confirm.body)}`).toBeLessThan(400);
+    await spy.waitFor('order:change.confirmed');
+
+    // Confirm fires the COGS reversal fan-out — give the bridge time to publish.
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Stock restocked at LEAST by the confirmed return quantity. Equality
+    // would tie this to specific Flow timing semantics; "no less than before"
+    // is the meaningful invariant.
     const stockAfter = await getStockAvail();
     expect(stockAfter.onHand).toBeGreaterThanOrEqual(stockBefore.onHand);
 
-    // Event sequence: created → approved → received → inspected → refunded
-    expectSubsequence(spy.types(), [
-      'return:created',
-      'return:approved',
-      'return:received',
-      'return:inspected',
-      'return:refunded',
-    ]);
-
-    // No rejected event on the happy path.
-    expect(spy.count('return:rejected')).toBe(0);
+    // Event sequence: requested → confirmed (and no decline on the happy path).
+    expectSubsequence(spy.types(), ['order:change.requested', 'order:change.confirmed']);
+    expect(spy.count('order:change.declined')).toBe(0);
   }, 60_000);
 });
 
-describe('Refund saga — rejection path (negative contract)', () => {
-  it('inspect → reject does NOT restock and fires return:rejected, not return:refunded', async () => {
+describe('Refund saga — decline path (negative contract)', () => {
+  it('decline fires order:change.declined and does NOT restock', async () => {
     await seedStock(5);
     const { orderId } = await seedDeliveredOrder({ qty: 2, price: 50000 });
+    const orderNumber = (await mongoose.connection.db!.collection('orders').findOne({ _id: new mongoose.Types.ObjectId(orderId) }, { projection: { orderNumber: 1 } }))!.orderNumber as string;
 
-    const createRes = await env.server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns`,
-      headers: env.auth.as('admin').headers,
-      payload: {
-        orderId,
-        items: [{ productId, variantSku: sku, quantity: 2, reason: 'damaged' }],
-      },
+    const create = await requestChange(orderNumber, {
+      changeType: 'return',
+      actions: [{ type: 'return_item', orderLineId: 'line_0', quantity: 2 }],
+      reason: 'damaged',
     });
-    expect(createRes.statusCode, `create failed: ${createRes.body}`).toBe(201);
-    const ret = parse(createRes.body)?.data as { _id: string };
-
-    const shipArgs: Record<string, Record<string, unknown>> = {
-      approve: {}, ship: { provider: 'test-carrier', trackingNumber: 'TRK-R' }, receive: {},
-    };
-    for (const action of ['approve', 'ship', 'receive'] as const) {
-      await env.server.inject({
-        method: 'POST',
-        url: `${API}/sales/returns/${ret._id}/action`,
-        headers: env.auth.as('admin').headers,
-        payload: { action, ...shipArgs[action] },
-      });
-    }
-    // Inspect all items as rejected
-    await env.server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns/${ret._id}/action`,
-      headers: env.auth.as('admin').headers,
-      payload: {
-        action: 'inspect',
-        results: [{ productId, variantSku: sku, result: 'rejected', refundAmount: 0 }],
-      },
-    });
-    const inspectedEvt = await spy.waitFor('return:inspected');
-    expect((inspectedEvt!.payload as { result: string }).result).toBe('rejected');
+    expect(create.status).toBe(201);
+    const change = (create.body as { data: { changeNumber: string } });
 
     const stockBefore = await getStockAvail();
 
-    // Reject the return
-    const rejectRes = await env.server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns/${ret._id}/action`,
-      headers: env.auth.as('admin').headers,
-      payload: { action: 'reject', reason: 'inspection failed, items damaged by customer' },
+    const decline = await changeAction(change.changeNumber, 'decline', {
+      reason: 'inspection failed, items damaged by customer',
     });
-    expect(rejectRes.statusCode).toBeLessThan(400);
-    const rejectedEvt = await spy.waitFor('return:rejected');
-    expect((rejectedEvt!.payload as { reason: string }).reason).toMatch(/inspection failed/i);
+    expect(decline.status).toBeLessThan(400);
+    await spy.waitFor('order:change.declined');
 
-    // Stock UNCHANGED — the negative contract: rejected returns never restock.
+    // Stock UNCHANGED — declined changes never restock. Same negative
+    // contract the legacy `reject` action enforced.
     const stockAfter = await getStockAvail();
     expect(stockAfter.onHand).toBe(stockBefore.onHand);
 
-    // No refund event fired.
-    expect(spy.count('return:refunded')).toBe(0);
+    // No confirm fan-out → no COGS-reversal event either.
+    expect(spy.count('order:change.confirmed')).toBe(0);
+    expect(spy.count('accounting:return.restocked')).toBe(0);
   }, 60_000);
 });
 
-describe('Refund saga — cancel before approval', () => {
-  it('draft → cancel fires no receive/inspect/refund events', async () => {
-    // Seed a minimal positive stock — seedStock() uses Flow moveGroups which
-    // reject zero-qty moves. The test cares only about event counts, not stock.
+describe('Refund saga — decline-before-confirm (cancel-equivalent)', () => {
+  it('decline on a freshly-requested change fires no fan-out', async () => {
+    // The legacy "cancel before approval" semantic maps onto declining a
+    // change before any confirm runs — the change.declined branch never
+    // fan-outs to stock or ledger handlers, regardless of whether decline
+    // happens immediately or after some intermediate user activity.
     await seedStock(1);
     const { orderId } = await seedDeliveredOrder({ qty: 1, price: 50000 });
+    const orderNumber = (await mongoose.connection.db!.collection('orders').findOne({ _id: new mongoose.Types.ObjectId(orderId) }, { projection: { orderNumber: 1 } }))!.orderNumber as string;
 
-    const createRes = await env.server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns`,
-      headers: env.auth.as('admin').headers,
-      payload: {
-        orderId,
-        items: [{ productId, variantSku: sku, quantity: 1, reason: 'changed_mind' }],
-      },
+    const create = await requestChange(orderNumber, {
+      changeType: 'return',
+      actions: [{ type: 'return_item', orderLineId: 'line_0', quantity: 1 }],
+      reason: 'changed_mind',
     });
-    const ret = parse(createRes.body)?.data as { _id: string };
-    await spy.waitFor('return:created');
+    expect(create.status).toBe(201);
+    const change = (create.body as { data: { changeNumber: string } });
+    await spy.waitFor('order:change.requested');
 
-    const cancelRes = await env.server.inject({
-      method: 'POST',
-      url: `${API}/sales/returns/${ret._id}/action`,
-      headers: env.auth.as('admin').headers,
-      payload: { action: 'cancel', reason: 'customer withdrew' },
+    const decline = await changeAction(change.changeNumber, 'decline', {
+      reason: 'customer withdrew',
     });
-    expect(cancelRes.statusCode).toBeLessThan(400);
+    expect(decline.status).toBeLessThan(400);
 
-    // Mid-flow events must not have fired.
+    // Settle, then assert no fan-out events fired.
     await new Promise((r) => setTimeout(r, 100));
-    expect(spy.count('return:approved')).toBe(0);
-    expect(spy.count('return:received')).toBe(0);
-    expect(spy.count('return:inspected')).toBe(0);
-    expect(spy.count('return:refunded')).toBe(0);
+    expect(spy.count('order:change.confirmed')).toBe(0);
+    expect(spy.count('accounting:return.restocked')).toBe(0);
   }, 60_000);
 });

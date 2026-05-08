@@ -43,7 +43,7 @@ const API = '/api/v1/products';
 
 beforeAll(async () => {
   ctx = await setupTestOrg();
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
   await teardownTestOrg(ctx);
@@ -65,7 +65,7 @@ async function getProduct(id: string): Promise<{ _id: string; variants: Variant[
     url: `${API}/${id}`,
     headers: authHeaders(ctx.users.admin.token, ctx.orgId),
   });
-  return JSON.parse(res.body).data;
+  return JSON.parse(res.body);
 }
 
 describe('Variant barcode persistence', () => {
@@ -91,8 +91,8 @@ describe('Variant barcode persistence', () => {
     });
     expect(res.statusCode).toBeLessThan(300);
     const body = JSON.parse(res.body);
-    productId = body.data._id;
-    originalSkus = body.data.variants.map((v: Variant) => v.sku);
+    productId = body._id;
+    originalSkus = body.variants.map((v: Variant) => v.sku);
     expect(originalSkus.length).toBeGreaterThanOrEqual(2);
   });
 

@@ -45,14 +45,14 @@ function h() {
 
 async function createDraftPO(vendorRef: string, sku: string, qty = 10) {
   const nodesRes = await server.inject({ method: 'GET', url: `${API}/inventory/nodes`, headers: h() });
-  const nodeId = JSON.parse(nodesRes.body).data[0]._id;
+  const nodeId = JSON.parse(nodesRes.body)[0]._id;
 
   const locsRes = await server.inject({
     method: 'GET',
     url: `${API}/inventory/locations?nodeId=${encodeURIComponent(nodeId)}`,
     headers: h(),
   });
-  const locs = JSON.parse(locsRes.body).data as Array<{ _id: string; type: string }>;
+  const locs = JSON.parse(locsRes.body) as Array<{ _id: string; type: string }>;
   const storage = locs.find((l) => l.type === 'storage' || l.type === 'stock') ?? locs[0];
 
   const createRes = await server.inject({
@@ -67,7 +67,7 @@ async function createDraftPO(vendorRef: string, sku: string, qty = 10) {
     },
   });
   expect([200, 201]).toContain(createRes.statusCode);
-  return JSON.parse(createRes.body).data._id as string;
+  return JSON.parse(createRes.body)._id as string;
 }
 
 function action(poId: string, payload: Record<string, unknown>) {
@@ -130,12 +130,12 @@ describe('Procurement approval chain (T2.1)', () => {
       decision: 'approved',
     });
     expect(financeOk.statusCode).toBe(200);
-    expect(JSON.parse(financeOk.body).data.approvalChain.status).toBe('approved');
+    expect(JSON.parse(financeOk.body).approvals.status).toBe('approved');
 
     // approve now succeeds
     const finalApprove = await action(poId, { action: 'approve' });
     expect(finalApprove.statusCode).toBe(200);
-    expect(JSON.parse(finalApprove.body).data.status).toBe('approved');
+    expect(JSON.parse(finalApprove.body).status).toBe('approved');
   });
 
   it('parallel chain with quorum (2-of-3) blocks until quorum is reached', async () => {
@@ -172,7 +172,7 @@ describe('Procurement approval chain (T2.1)', () => {
       approverId: 'dir-2',
       decision: 'approved',
     });
-    expect(JSON.parse(second.body).data.approvalChain.status).toBe('approved');
+    expect(JSON.parse(second.body).approvals.status).toBe('approved');
 
     const ok = await action(poId, { action: 'approve' });
     expect(ok.statusCode).toBe(200);
@@ -199,7 +199,7 @@ describe('Procurement approval chain (T2.1)', () => {
       decision: 'rejected',
       note: 'budget unavailable',
     });
-    expect(JSON.parse(rejected.body).data.approvalChain.status).toBe('rejected');
+    expect(JSON.parse(rejected.body).approvals.status).toBe('rejected');
 
     const blocked = await action(poId, { action: 'approve' });
     expect(blocked.statusCode).toBe(422);
@@ -211,6 +211,6 @@ describe('Procurement approval chain (T2.1)', () => {
 
     const ok = await action(poId, { action: 'approve' });
     expect(ok.statusCode).toBe(200);
-    expect(JSON.parse(ok.body).data.status).toBe('approved');
+    expect(JSON.parse(ok.body).status).toBe('approved');
   });
 });

@@ -56,21 +56,25 @@ describe('Branch bootstrap — idempotency', () => {
       organizationId: orgId,
       lean: true,
     } as Parameters<typeof flow.repositories.location.getAll>[0]);
-    const nodeCountBefore = (nodesBefore as { docs?: unknown[] })?.docs?.length
+    const nodeCountBefore = (nodesBefore as { data?: unknown[] })?.data?.length
       ?? (nodesBefore as unknown[]).length;
-    const locCountBefore = (locationsBefore as { docs?: unknown[] })?.docs?.length
+    const locCountBefore = (locationsBefore as { data?: unknown[] })?.data?.length
       ?? (locationsBefore as unknown[]).length;
 
     // First explicit invocation. Returns counters (locations only — node
-    // create isn't tracked there). Either reports `existing: 4` (erp-seed
-    // already ran) or fills in any missing locations to 4.
+    // create isn't tracked there). The bootstrap seeds 5 locations now:
+    // stock + vendor + customer + adjustment + return-holding (RMA QC
+    // bay, added in the RMA-flow rollout). erp-seed's `setupBranch` only
+    // pre-seeds the original 4 (it predates the RMA bay), so this first
+    // call typically reports `created: 1, existing: 4`. Total stays 5.
+    const TOTAL_LOCATIONS = 5;
     const first = await bootstrapLocationsForOrg(orgId);
-    expect(first.created + first.existing).toBe(4);
+    expect(first.created + first.existing).toBe(TOTAL_LOCATIONS);
 
     // Second invocation MUST be a pure no-op: every location already exists.
     const second = await bootstrapLocationsForOrg(orgId);
     expect(second.created).toBe(0);
-    expect(second.existing).toBe(4);
+    expect(second.existing).toBe(TOTAL_LOCATIONS);
 
     // Verify the after-state matches before-state (or +1 node max if the
     // erp-seed node didn't carry isDefault — bootstrap would then have
@@ -83,9 +87,9 @@ describe('Branch bootstrap — idempotency', () => {
       organizationId: orgId,
       lean: true,
     } as Parameters<typeof flow.repositories.location.getAll>[0]);
-    const nodeCountAfter = (nodesAfter as { docs?: unknown[] })?.docs?.length
+    const nodeCountAfter = (nodesAfter as { data?: unknown[] })?.data?.length
       ?? (nodesAfter as unknown[]).length;
-    const locCountAfter = (locationsAfter as { docs?: unknown[] })?.docs?.length
+    const locCountAfter = (locationsAfter as { data?: unknown[] })?.data?.length
       ?? (locationsAfter as unknown[]).length;
 
     // Zero growth from before/after — proves the second call was a no-op.
@@ -96,15 +100,16 @@ describe('Branch bootstrap — idempotency', () => {
     expect(locCountAfter).toBe(locCountBefore);
 
     // Exactly one default node is the canonical post-bootstrap state.
-    const docsAfter = (nodesAfter as { docs?: Array<{ isDefault?: boolean }> })?.docs
+    const docsAfter = (nodesAfter as { data?: Array<{ isDefault?: boolean }> })?.data
       ?? (nodesAfter as Array<{ isDefault?: boolean }>);
     const defaultNodes = docsAfter.filter((n) => n.isDefault === true);
     expect(defaultNodes.length).toBe(1);
 
-    // And the four canonical codes are all present.
-    const locDocs = (locationsAfter as { docs?: Array<{ code?: string }> })?.docs
+    // And the five canonical codes are all present:
+    // stock, vendor, customer, adjustment, return-holding (RMA QC bay).
+    const locDocs = (locationsAfter as { data?: Array<{ code?: string }> })?.data
       ?? (locationsAfter as Array<{ code?: string }>);
     const codes = locDocs.map((d) => d.code).filter(Boolean).sort();
-    expect(codes).toEqual(['adjustment', 'customer', 'stock', 'vendor']);
+    expect(codes).toEqual(['adjustment', 'customer', 'return_holding', 'stock', 'vendor']);
   }, 60_000);
 });

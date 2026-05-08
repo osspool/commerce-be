@@ -23,6 +23,7 @@ import { requireOrgMembership, requireRoles } from '@classytic/arc/permissions';
 import mongoose from 'mongoose';
 import { posEngine } from '#resources/sales/pos/pos.engine.js';
 import { bdToday } from '#lib/utils/bd-date.js';
+import { ConflictError, NotFoundError, ValidationError, createDomainError, createError } from '@classytic/arc/utils';
 
 const branchMember = requireOrgMembership();
 const financeAdmin = requireRoles('admin', 'finance_admin');
@@ -47,11 +48,7 @@ const postingResource = defineResource({
       handler: async (req: any, reply: any) => {
         const orgId = req.scope?.organizationId;
         if (!orgId) {
-          return reply.status(400).send({
-            success: false,
-            code: 'NO_BRANCH_CONTEXT',
-            message: 'Organization context required',
-          });
+          throw createDomainError('NO_BRANCH_CONTEXT', 'Organization context required', 400);
         }
         const orgObjectId = mongoose.Types.ObjectId.isValid(orgId)
           ? new mongoose.Types.ObjectId(orgId)
@@ -62,10 +59,7 @@ const postingResource = defineResource({
         })
           .select('_id state registerId openingCashierId openedAt blindClosedAt salesCount salesTotal')
           .lean();
-        return reply.send({
-          success: true,
-          data: { activeShifts: shifts, currentBdDate: bdToday() },
-        });
+        return reply.send({ activeShifts: shifts, currentBdDate: bdToday() });
       },
     },
     {
@@ -82,23 +76,15 @@ const postingResource = defineResource({
         const body = (req.body ?? {}) as { reason?: string };
         const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
         if (reason.length < 3) {
-          return reply.status(400).send({
-            success: false,
-            code: 'REASON_REQUIRED',
-            message: 'Reason (3+ chars) required for force-close audit trail',
-          });
+          throw createDomainError('REASON_REQUIRED', 'Reason (3+ chars) required for force-close audit trail', 400);
         }
 
         const shift = await posEngine.models.Shift.findById(shiftId).lean();
         if (!shift) {
-          return reply.status(404).send({ success: false, message: 'Shift not found' });
+          throw new NotFoundError('Shift not found');
         }
         if (['closed', 'orphaned_closed'].includes((shift as { state: string }).state)) {
-          return reply.status(409).send({
-            success: false,
-            code: 'SHIFT_FINALIZED',
-            message: 'Shift is already finalized',
-          });
+          throw createDomainError('SHIFT_FINALIZED', 'Shift is already finalized', 409);
         }
 
         const actor = (req as { user?: { _id?: unknown; id?: unknown; name?: unknown } }).user;
@@ -121,16 +107,13 @@ const postingResource = defineResource({
             },
             'manual force-close',
           );
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         } catch (err) {
           req.log.error(
             { err: (err as Error).message, shiftId, branchId },
             'manual force-close failed',
           );
-          return reply.status(500).send({
-            success: false,
-            message: (err as Error).message ?? 'Force-close failed',
-          });
+          throw createError(500, (err as Error).message ?? 'Force-close failed');
         }
       },
     },
@@ -234,24 +217,21 @@ const postingResource = defineResource({
         );
 
         return reply.send({
-          success: true,
-          data: {
-            currentBdDate: today,
-            branches,
-            staleShifts: stale.map((s) => ({
-              shiftId: String(s._id),
-              branchId: String(s.organizationId),
-              branchName: orgsById.get(String(s.organizationId))?.name ?? null,
-              registerId: s.registerId,
-              state: s.state,
-              businessDate: s.businessDate,
-            })),
-            summary: {
-              totalBranches: branches.length,
-              totalStale,
-              branchesWithStale,
-              maxDaysBehind,
-            },
+          currentBdDate: today,
+          branches,
+          staleShifts: stale.map((s) => ({
+            shiftId: String(s._id),
+            branchId: String(s.organizationId),
+            branchName: orgsById.get(String(s.organizationId))?.name ?? null,
+            registerId: s.registerId,
+            state: s.state,
+            businessDate: s.businessDate,
+          })),
+          summary: {
+            totalBranches: branches.length,
+            totalStale,
+            branchesWithStale,
+            maxDaysBehind,
           },
         });
       },

@@ -27,6 +27,12 @@ export interface ReportQuery {
   accountId?: string;
   accountIds?: string;
   branchId?: string;
+  /**
+   * Comparative-period mode for time-bucketed reports. When set, the
+   * outer `dateOption`/`dateValue` defines the boundary; the kernel
+   * expands it into per-month or per-quarter columns plus a YTD total.
+   */
+  comparative?: 'monthly' | 'quarterly';
 }
 
 export function toObjectId(id: string): mongoose.Types.ObjectId {
@@ -80,6 +86,11 @@ export const dateQuerySchema = {
     endDate: { type: 'string', description: 'For custom range (YYYY-MM-DD)' },
     accountId: { type: 'string', description: 'Filter by account ID' },
     branchId: { type: 'string', description: 'Filter by branch (optional)' },
+    comparative: {
+      type: 'string',
+      enum: ['monthly', 'quarterly'],
+      description: 'Expand the period into per-month or per-quarter columns + a YTD total',
+    },
   },
 } as const;
 

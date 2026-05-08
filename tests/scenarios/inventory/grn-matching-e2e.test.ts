@@ -56,7 +56,10 @@ async function createProcurement(items: Array<{ skuRef: string; quantity: number
     headers: auth.as('admin').headers,
     payload: {
       vendorRef: 'vendor-001',
-      destinationNodeId: orgId,
+      // Omit destinationNodeId — earlier versions passed orgId here, but
+      // that's the branch organizationId, not a Flow InventoryNode._id.
+      // The factory now auto-resolves the branch's default warehouse node
+      // and its `stock` location, which is the canonical happy path.
       items,
     },
   });
@@ -129,26 +132,24 @@ describe('GRN + 3-Way Matching E2E', () => {
       { skuRef: 'SKU-WIDGET-A', quantity: 100, unitCost: 500 },
       { skuRef: 'SKU-WIDGET-B', quantity: 50, unitCost: 300 },
     ]);
-    expect(result.success).toBe(true);
-    expect(result.data.orderNumber).toMatch(/^PO-/);
-    expect(result.data.items).toHaveLength(2);
-    expect(result.data.items[0].quantityInvoiced).toBe(0);
-    poId = result.data._id;
+    expect(result.orderNumber).toMatch(/^PO-/);
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0].quantityInvoiced).toBe(0);
+    poId = result._id;
   });
 
   it('match status is pending before receipt', async () => {
     const result = await getMatchStatus(poId);
-    expect(result.success).toBe(true);
-    expect(result.data.fullyMatched).toBe(false);
-    expect(result.data.lines[0].status).toBe('pending');
-    expect(result.data.lines[1].status).toBe('pending');
+    expect(result.fullyMatched).toBe(false);
+    expect(result.lines[0].status).toBe('pending');
+    expect(result.lines[1].status).toBe('pending');
   });
 
   it('approves the procurement order', async () => {
     const res = await approveProcurement(poId);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('approved');
+
+    expect(body.status).toBe('approved');
   });
 
   it('receives goods (creates GRN via Flow receipt)', async () => {
@@ -157,50 +158,40 @@ describe('GRN + 3-Way Matching E2E', () => {
       { skuRef: 'SKU-WIDGET-B', quantityReceived: 50 },
     ]);
     const body = parse(res.body);
-    if (!body?.success) {
-      // Expose the actual response when the receive call fails so the
-      // assertion message is actionable instead of `false ≠ true`.
-      throw new Error(`procurement receive failed: ${res.statusCode} ${res.body}`);
-    }
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('received');
+    expect(body.status).toBe('received');
   });
 
   it('match status shows received after goods receipt', async () => {
     const result = await getMatchStatus(poId);
-    expect(result.success).toBe(true);
-    expect(result.data.fullyMatched).toBe(false);
-    expect(result.data.lines[0].status).toBe('received');
-    expect(result.data.lines[0].quantityReceived).toBe(100);
-    expect(result.data.lines[0].quantityToInvoice).toBe(100);
-    expect(result.data.lines[1].status).toBe('received');
-    expect(result.data.lines[1].quantityToInvoice).toBe(50);
+    expect(result.fullyMatched).toBe(false);
+    expect(result.lines[0].status).toBe('received');
+    expect(result.lines[0].quantityReceived).toBe(100);
+    expect(result.lines[0].quantityToInvoice).toBe(100);
+    expect(result.lines[1].status).toBe('received');
+    expect(result.lines[1].quantityToInvoice).toBe(50);
   });
 
   it('receipt moves are grouped by PO line index', async () => {
     const result = await getReceiptMoves(poId);
-    expect(result.success).toBe(true);
     // Line 0 = SKU-WIDGET-A, Line 1 = SKU-WIDGET-B
-    expect(result.data['0']).toBeDefined();
-    expect(result.data['1']).toBeDefined();
-    expect(result.data['0'][0].quantity).toBe(100);
-    expect(result.data['1'][0].quantity).toBe(50);
+    expect(result['0']).toBeDefined();
+    expect(result['1']).toBeDefined();
+    expect(result['0'][0].quantity).toBe(100);
+    expect(result['1'][0].quantity).toBe(50);
   });
 
   it('reports partial invoice (vendor bill for line 0 only)', async () => {
     const result = await reportInvoiced(poId, [
       { lineIndex: 0, skuRef: 'SKU-WIDGET-A', quantityInvoiced: 100, billRef: 'BILL-001' },
     ]);
-    expect(result.success).toBe(true);
-    expect(result.data.fullyMatched).toBe(false);
-    expect(result.data.lines[0].status).toBe('matched');
-    expect(result.data.lines[1].status).toBe('received'); // not yet invoiced
+    expect(result.fullyMatched).toBe(false);
+    expect(result.lines[0].status).toBe('matched');
+    expect(result.lines[1].status).toBe('received'); // not yet invoiced
   });
 
   it('validate match fails when not fully invoiced', async () => {
     const result = await validateMatch(poId);
-    expect(result.success).toBe(true);
-    expect(result.data.valid).toBe(false);
+    expect(result.valid).toBe(false);
   });
 
   it('reports full invoice (both lines)', async () => {
@@ -208,17 +199,15 @@ describe('GRN + 3-Way Matching E2E', () => {
       { lineIndex: 0, skuRef: 'SKU-WIDGET-A', quantityInvoiced: 100 },
       { lineIndex: 1, skuRef: 'SKU-WIDGET-B', quantityInvoiced: 50 },
     ]);
-    expect(result.success).toBe(true);
-    expect(result.data.fullyMatched).toBe(true);
-    expect(result.data.lines[0].status).toBe('matched');
-    expect(result.data.lines[1].status).toBe('matched');
+    expect(result.fullyMatched).toBe(true);
+    expect(result.lines[0].status).toBe('matched');
+    expect(result.lines[1].status).toBe('matched');
   });
 
   it('validate match passes when fully matched', async () => {
     const result = await validateMatch(poId);
-    expect(result.success).toBe(true);
-    expect(result.data.valid).toBe(true);
-    expect(result.data.variances).toHaveLength(0);
+    expect(result.valid).toBe(true);
+    expect(result.variances).toHaveLength(0);
   });
 
   it('rejects invalid line index', async () => {
@@ -251,7 +240,7 @@ describe('GRN Variance Detection', () => {
     const created = await createProcurement([
       { skuRef: 'SKU-VAR-A', quantity: 100, unitCost: 500 },
     ]);
-    poId = created.data._id;
+    poId = created._id;
     await approveProcurement(poId);
     await receiveProcurement(poId, [
       { skuRef: 'SKU-VAR-A', quantityReceived: 100 },
@@ -262,23 +251,20 @@ describe('GRN Variance Detection', () => {
     const result = await reportInvoiced(poId, [
       { lineIndex: 0, skuRef: 'SKU-VAR-A', quantityInvoiced: 120 },
     ]);
-    expect(result.success).toBe(true);
-    expect(result.data.lines[0].status).toBe('over_invoiced');
+    expect(result.lines[0].status).toBe('over_invoiced');
   });
 
   it('validate match fails with over-invoice variance', async () => {
     const result = await validateMatch(poId);
-    expect(result.success).toBe(true);
-    expect(result.data.valid).toBe(false);
-    expect(result.data.variances).toHaveLength(1);
-    expect(result.data.variances[0].status).toBe('over_invoiced');
+    expect(result.valid).toBe(false);
+    expect(result.variances).toHaveLength(1);
+    expect(result.variances[0].status).toBe('over_invoiced');
   });
 
   it('validate match passes with lenient tolerance', async () => {
     const result = await validateMatch(poId, {
       quantityOverInvoiceTolerance: 0.25,
     });
-    expect(result.success).toBe(true);
-    expect(result.data.valid).toBe(true);
+    expect(result.valid).toBe(true);
   });
 });

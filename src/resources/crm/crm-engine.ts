@@ -43,7 +43,7 @@ export interface CrmServices {
 }
 
 export function buildCrmServices(ctx: CrmRequestContext): CrmServices | null {
-  if (config.crm.mode === 'off') return null;
+  if (!config.crm.enabled) return null;
 
   const events: EventTransport = eventTransport as unknown as EventTransport;
   // Host-owned transactional outbox — events durably persisted alongside

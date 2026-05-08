@@ -10,6 +10,7 @@
 import type { FlowContext } from '@classytic/flow';
 import branchRepository from '#resources/commerce/branch/branch.repository.js';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
+import inventoryRepository from '#resources/inventory/inventory.repository.js';
 import { buildFlowContext, DEFAULT_LOCATION, skuRefFromProduct } from './context-helpers.js';
 import { getFlowEngine } from './flow-engine.js';
 
@@ -269,28 +270,18 @@ class PosLookupService {
   }
 
   /**
-   * Get branch stock summary from Flow quants.
+   * Get branch stock summary.
+   *
+   * Delegates to `inventoryRepository.getStockSummary`, which joins catalog
+   * (active variant set) with Flow (positive-stock count) so never-received
+   * variants correctly land in `outOfStockCount`. The previous in-place loop
+   * over quants couldn't see them. See [inventory.repository.ts:getStockSummary]
+   * for the architecture rationale.
    */
-  async getBranchStockSummary(branchId: string | { toString(): string }): Promise<BranchStockSummary> {
-    const flow = getFlowEngine();
-    const ctx = buildFlowContext(branchId);
-
-    const quants = await flow.repositories.quant.findMany({ locationId: DEFAULT_LOCATION }, ctx);
-
-    const LOW_STOCK_THRESHOLD = 10;
-    let totalItems = 0;
-    let totalQuantity = 0;
-    let lowStockCount = 0;
-    let outOfStockCount = 0;
-
-    for (const q of quants) {
-      totalItems++;
-      totalQuantity += q.quantityOnHand;
-      if (q.quantityOnHand <= 0) outOfStockCount++;
-      else if (q.quantityOnHand <= LOW_STOCK_THRESHOLD) lowStockCount++;
-    }
-
-    return { totalItems, totalQuantity, lowStockCount, outOfStockCount };
+  async getBranchStockSummary(
+    branchId: string | { toString(): string },
+  ): Promise<BranchStockSummary> {
+    return inventoryRepository.getStockSummary(String(branchId));
   }
 
   private _setCacheWithLimit(key: string, value: CacheEntry<LookupResult>): void {

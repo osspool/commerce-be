@@ -169,8 +169,8 @@ describe('Reservation Lifecycle', () => {
     if (res.statusCode !== 201) console.log('Purchase create response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    purchaseId = body.data._id;
+
+    purchaseId = body._id;
     expect(purchaseId).toBeTruthy();
   });
 
@@ -187,8 +187,8 @@ describe('Reservation Lifecycle', () => {
     if (res.statusCode !== 200) console.log('Purchase receive response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('received');
+
+    expect(body.status).toBe('received');
   });
 
   // --- Step 3: Verify baseline availability ---
@@ -202,10 +202,10 @@ describe('Reservation Lifecycle', () => {
 
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.quantityOnHand).toBe(SEED_QTY);
-    expect(body.data.quantityAvailable).toBe(SEED_QTY);
-    expect(body.data.quantityReserved).toBe(0);
+
+    expect(body.quantityOnHand).toBe(SEED_QTY);
+    expect(body.quantityAvailable).toBe(SEED_QTY);
+    expect(body.quantityReserved).toBe(0);
   });
 
   // --- Scenario 1: Reserve stock reduces availability ---
@@ -227,11 +227,11 @@ describe('Reservation Lifecycle', () => {
     if (res.statusCode !== 201) console.log('Reserve response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    reservationId1 = body.data._id;
+
+    reservationId1 = body._id;
     expect(reservationId1).toBeTruthy();
-    expect(body.data.quantity).toBe(15);
-    expect(body.data.status).toMatch(/active|confirmed|reserved/);
+    expect(body.quantity).toBe(15);
+    expect(body.status).toMatch(/active|confirmed|reserved/);
 
     // Verify availability decreased
     const availRes = await server.inject({
@@ -242,11 +242,10 @@ describe('Reservation Lifecycle', () => {
 
     expect(availRes.statusCode).toBe(200);
     const avail = parse(availRes.body);
-    expect(avail.success).toBe(true);
     // On-hand stays the same, reserved increases, available decreases
-    expect(avail.data.quantityOnHand).toBe(SEED_QTY);
-    expect(avail.data.quantityReserved).toBe(15);
-    expect(avail.data.quantityAvailable).toBe(SEED_QTY - 15);
+    expect(avail.quantityOnHand).toBe(SEED_QTY);
+    expect(avail.quantityReserved).toBe(15);
+    expect(avail.quantityAvailable).toBe(SEED_QTY - 15);
   });
 
   // --- Scenario 2: Cancel reservation releases stock ---
@@ -261,7 +260,6 @@ describe('Reservation Lifecycle', () => {
     if (res.statusCode !== 200) console.log('Release response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
     // Verify availability restored
     const availRes = await server.inject({
@@ -272,9 +270,8 @@ describe('Reservation Lifecycle', () => {
 
     expect(availRes.statusCode).toBe(200);
     const avail = parse(availRes.body);
-    expect(avail.success).toBe(true);
-    expect(avail.data.quantityReserved).toBe(0);
-    expect(avail.data.quantityAvailable).toBe(SEED_QTY);
+    expect(avail.quantityReserved).toBe(0);
+    expect(avail.quantityAvailable).toBe(SEED_QTY);
   });
 
   // --- Scenario 3: Reserve against insufficient stock fails ---
@@ -301,11 +298,11 @@ describe('Reservation Lifecycle', () => {
       // If the engine allows it (soft reservation semantics), verify the response
       // and check that availability check would flag insufficient stock
       const body = parse(res.body);
-      if (body?.success && body?.data?._id) {
+      if (body?._id) {
         // Clean up: release the reservation if it was created
         await server.inject({
           method: 'POST',
-          url: `${API}/inventory/reservations/${body.data._id}/release`,
+          url: `${API}/inventory/reservations/${body._id}/release`,
           headers: auth.as('admin').headers,
         });
       }
@@ -322,9 +319,8 @@ describe('Reservation Lifecycle', () => {
 
       expect(checkRes.statusCode).toBe(200);
       const check = parse(checkRes.body);
-      expect(check.success).toBe(true);
-      expect(check.data.allAvailable).toBe(false);
-      expect(check.data.items[0].sufficient).toBe(false);
+      expect(check.allAvailable).toBe(false);
+      expect(check.items[0].sufficient).toBe(false);
     }
   });
 
@@ -347,8 +343,8 @@ describe('Reservation Lifecycle', () => {
     if (res.statusCode !== 201) console.log('Reserve for fulfill response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    reservationId2 = body.data._id;
+
+    reservationId2 = body._id;
     expect(reservationId2).toBeTruthy();
   });
 
@@ -381,9 +377,9 @@ describe('Reservation Lifecycle', () => {
     if (res.statusCode !== 201) console.log('POS order response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    orderId = body.data._id;
-    orderNumber = body.data.orderNumber ?? body.data.publicId;
+
+    orderId = body._id;
+    orderNumber = body.orderNumber ?? body.publicId;
     expect(orderId).toBeTruthy();
   });
 
@@ -393,7 +389,7 @@ describe('Reservation Lifecycle', () => {
       url: `${API}/orders/${orderId}`,
       headers: auth.as('admin').headers,
     });
-    const order = parse(orderRes.body)?.data;
+    const order = parse(orderRes.body);
     const lines = order?.lines ?? [];
 
     const res = await server.inject({
@@ -410,8 +406,8 @@ describe('Reservation Lifecycle', () => {
 
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    fulfillmentId = body.data.fulfillmentNumber;
+
+    fulfillmentId = body.fulfillmentNumber;
     expect(fulfillmentId).toBeTruthy();
   });
 
@@ -427,7 +423,7 @@ describe('Reservation Lifecycle', () => {
       if (res.statusCode !== 200) console.log(`Fulfill ${action} response:`, res.statusCode, res.body);
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
+
     }
   });
 
@@ -442,7 +438,6 @@ describe('Reservation Lifecycle', () => {
     if (res.statusCode !== 200) console.log('Consume response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
     // Verify stock: started with 50, sold 10 => 40 on hand, 0 reserved
     const availRes = await server.inject({
@@ -453,10 +448,9 @@ describe('Reservation Lifecycle', () => {
 
     expect(availRes.statusCode).toBe(200);
     const avail = parse(availRes.body);
-    expect(avail.success).toBe(true);
-    expect(avail.data.quantityOnHand).toBe(SEED_QTY - 10);
-    expect(avail.data.quantityReserved).toBe(0);
-    expect(avail.data.quantityAvailable).toBe(SEED_QTY - 10);
+    expect(avail.quantityOnHand).toBe(SEED_QTY - 10);
+    expect(avail.quantityReserved).toBe(0);
+    expect(avail.quantityAvailable).toBe(SEED_QTY - 10);
   });
 
   // --- Scenario 5: Multiple reservations respect total available ---
@@ -481,8 +475,7 @@ describe('Reservation Lifecycle', () => {
     if (res1.statusCode !== 201) console.log('Reserve 20 response:', res1.statusCode, res1.body);
     expect(res1.statusCode).toBe(201);
     const first = parse(res1.body);
-    expect(first.success).toBe(true);
-    const firstReservationId = first.data._id;
+    const firstReservationId = first._id;
 
     // Verify: 40 on hand, 20 reserved, 20 available
     const midAvail = await server.inject({
@@ -491,8 +484,8 @@ describe('Reservation Lifecycle', () => {
       headers: auth.as('admin').headers,
     });
     const midData = parse(midAvail.body);
-    expect(midData.data.quantityReserved).toBe(20);
-    expect(midData.data.quantityAvailable).toBe(20);
+    expect(midData.quantityReserved).toBe(20);
+    expect(midData.quantityAvailable).toBe(20);
 
     // Try to reserve 40 more — exceeds the 20 remaining available
     const res2 = await server.inject({
@@ -514,11 +507,11 @@ describe('Reservation Lifecycle', () => {
     } else {
       // If the engine allows over-reservation, batch check should still flag it
       const body2 = parse(res2.body);
-      if (body2?.success && body2?.data?._id) {
+      if (body2?._id) {
         // Clean up the over-reservation
         await server.inject({
           method: 'POST',
-          url: `${API}/inventory/reservations/${body2.data._id}/release`,
+          url: `${API}/inventory/reservations/${body2._id}/release`,
           headers: auth.as('admin').headers,
         });
       }
@@ -550,8 +543,8 @@ describe('Reservation Lifecycle', () => {
 
   // --- Health check ---
 
-  it('GET /health — app still healthy after reservation lifecycle', async () => {
-    const res = await server.inject({ method: 'GET', url: '/health' });
+  it('GET /_health/live — app still healthy after reservation lifecycle', async () => {
+    const res = await server.inject({ method: 'GET', url: '/_health/live' });
     expect(res.statusCode).toBe(200);
   });
 });

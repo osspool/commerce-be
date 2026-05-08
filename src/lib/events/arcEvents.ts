@@ -1,5 +1,5 @@
-import type { DomainEvent, EventHandler } from '@classytic/arc/events';
-import { createEvent } from '@classytic/arc/events';
+import type { DomainEvent, EventHandler } from '@classytic/primitives/events';
+import { createEvent } from '@classytic/primitives/events';
 import { eventTransport } from './EventBus.js';
 
 interface EventApi {

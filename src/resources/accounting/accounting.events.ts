@@ -32,11 +32,8 @@ import { postingHandlers } from "./events/posting-handlers.registry.js";
 let handlersRegistered = false;
 
 export function registerAccountingEventHandlers(): void {
-  if (!config.accounting.enabled || config.accounting.mode === "simple") {
-    logger.info(
-      { mode: config.accounting.mode },
-      "Accounting auto-posting disabled",
-    );
+  if (!config.accounting.enabled) {
+    logger.info("Accounting subsystem disabled — auto-posting handlers not registered");
     return;
   }
 
@@ -63,7 +60,6 @@ export function registerAccountingEventHandlers(): void {
   // the schemas are introspectable via OpenAPI / EventRegistry at runtime.
   logger.info(
     {
-      mode: config.accounting.mode,
       count: postingHandlers.length,
       handlers: postingHandlers.map((h) => h.event.name),
     },

@@ -30,6 +30,19 @@ export const ledgerRestockBridgeHandler: TransitionHandler = {
     const wasShipped = ctx.fromStatus === 'fulfilled' || ctx.fromStatus === 'completed';
     if (!wasShipped) return;
 
+    // RMA-originated full refunds: the `changeConfirmedLedgerRestockBridgeHandler`
+    // has already posted the per-line COGS reversal at change.confirm time.
+    // Skip here so we don't double-reverse. RMA-confirm reason follows the
+    // convention `Full refund via {return|exchange|claim} CHG-...` set by
+    // change-confirmed-refund.ts.
+    if (typeof ctx.reason === 'string' && /^Full refund via (return|exchange|claim) /.test(ctx.reason)) {
+      deps.logger.debug?.(
+        { orderNumber: ctx.orderNumber, reason: ctx.reason },
+        'ledger-restock-bridge: RMA-driven refund — COGS reversal already done by change-confirmed-ledger-restock-bridge',
+      );
+      return;
+    }
+
     if (isWriteOffDisposition({ reason: ctx.reason })) {
       deps.logger.debug?.(
         { orderNumber: ctx.orderNumber, reason: ctx.reason },

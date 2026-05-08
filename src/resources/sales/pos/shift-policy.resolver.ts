@@ -11,7 +11,7 @@
  * Shift handlers snapshot the resolved policy onto the shift at open time.
  */
 
-import Branch from '#resources/commerce/branch/branch.model.js';
+import branchRepository from '#resources/commerce/branch/branch.repository.js';
 import PlatformConfig from '#resources/platform/platform.model.js';
 import { DEFAULT_SHIFT_POLICY, type ShiftPolicy } from './shift.constants.js';
 
@@ -73,7 +73,7 @@ function toPlain(value: unknown): Partial<ShiftPolicy> | null {
  */
 export async function resolveShiftPolicy(branchId: string): Promise<ShiftPolicy> {
   const [branch, platform] = await Promise.all([
-    Branch.findById(branchId).lean(),
+    branchRepository.getById(branchId, { lean: true, throwOnNotFound: false }),
     PlatformConfig.findOne({ isSingleton: true }).lean(),
   ]);
 

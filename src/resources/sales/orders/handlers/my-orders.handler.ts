@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ensureOrderEngine } from '../order.engine.js';
 import { getAuthUserId, type OrderRepository, readPagination } from './shared.js';
+import { NotFoundError } from '@classytic/arc/utils';
 
 export async function listMyOrdersHandler(req: FastifyRequest, reply: FastifyReply) {
   const q = req.query as { page?: string; limit?: string; status?: string; sort?: string };
@@ -9,9 +10,8 @@ export async function listMyOrdersHandler(req: FastifyRequest, reply: FastifyRep
   const userId = getAuthUserId(req);
   if (!userId) {
     return reply.send({
-      success: true,
       method: 'offset',
-      docs: [],
+      data: [],
       page,
       limit,
       total: 0,
@@ -28,14 +28,14 @@ export async function listMyOrdersHandler(req: FastifyRequest, reply: FastifyRep
   const repo = engine.repositories.order as unknown as OrderRepository;
   const result = await repo.getAll({ filters, page, limit, sort });
 
-  return reply.send({ success: true, ...result });
+  return reply.send(result);
 }
 
 export async function getMyOrderHandler(req: FastifyRequest, reply: FastifyReply) {
   const { id } = req.params as { id: string };
   const userId = getAuthUserId(req);
   if (!userId) {
-    return reply.status(404).send({ success: false, error: 'Order not found' });
+    throw new NotFoundError('Order not found');
   }
 
   const isObjectId = /^[a-f0-9]{24}$/i.test(id);
@@ -54,7 +54,7 @@ export async function getMyOrderHandler(req: FastifyRequest, reply: FastifyReply
   );
 
   if (!order) {
-    return reply.status(404).send({ success: false, error: 'Order not found' });
+    throw new NotFoundError('Order not found');
   }
-  return reply.send({ success: true, data: order });
+  return reply.send(order);
 }

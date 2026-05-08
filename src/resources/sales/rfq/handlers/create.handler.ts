@@ -2,6 +2,7 @@ import { repoOptionsFromCtx } from '@classytic/order';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getContextFromReq } from '#shared/context.js';
 import { rfqRepository } from '../rfq.engine.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 /**
  * Repo-driven create. Mongoose's auto-derived create body shape is too
@@ -28,11 +29,11 @@ export async function createRfqHandler(req: FastifyRequest, reply: FastifyReply)
       },
       repoOptionsFromCtx(ctx),
     );
-    reply.status(201).send({ success: true, data: rfq });
+    reply.status(201).send(rfq);
   } catch (err) {
     const e = err as { code?: string; message?: string };
     if (e?.code === 'RFQ_MISSING_LINE_ITEMS' || e?.code === 'RFQ_MISSING_VENDORS') {
-      return reply.status(400).send({ success: false, error: e.message, code: e.code });
+      throw new ValidationError(e.message ?? 'RFQ validation failed');
     }
     throw err;
   }

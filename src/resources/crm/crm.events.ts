@@ -11,10 +11,10 @@
  * 3. `crm:opportunity.lost`   → flip Customer.crm.stage to 'churned'
  *
  * Wired from `registerCrmEventBridges(eventTransport)` at app startup when
- * `config.crm.mode !== 'off'`.
+ * `config.crm.enabled` is true.
  */
 
-import type { DomainEvent, EventHandler, EventTransport } from '@classytic/arc/events';
+import type { DomainEvent, EventHandler, EventTransport } from '@classytic/primitives/events';
 import { CRM_EVENTS } from '@classytic/crm';
 import pino from 'pino';
 import customerRepository from '#resources/sales/customers/customer.repository.js';

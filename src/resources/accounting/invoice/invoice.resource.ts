@@ -11,7 +11,8 @@
  * Feature-gated: INVOICE_ENGINE env var.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { buildCrudSchemasFromModel, QueryParser } from '@classytic/mongokit';
 import config from '#config/index.js';
@@ -116,9 +117,14 @@ export async function buildInvoiceResource(
     // (Domain callers — action router, workflows — still go through
     // `createDraft()` and get the same default.)
     hooks: {
+      // Arc 2.13 expects `beforeCreate` to return `AnyRecord | undefined` —
+      // either a transformed patch or undefined to pass through. We mutate
+      // ctx.data in place (legacy contract — defaulting `currency`); add an
+      // explicit `return undefined` so the new typed signature is satisfied.
       beforeCreate: async (ctx) => {
         const data = ctx.data as Record<string, unknown>;
         if (!data.currency) data.currency = 'BDT';
+        return undefined;
       },
     },
 

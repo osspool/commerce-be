@@ -30,7 +30,6 @@ class StockRequestController extends BaseController {
     const userId = String(context.user?._id || context.user?.id || '');
     const request = await stockRequestService.createRequest(context.body as Record<string, unknown>, userId);
     return {
-      success: true,
       data: request as unknown as AnyRecord,
       status: 201,
     };

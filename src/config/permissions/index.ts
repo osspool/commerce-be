@@ -21,6 +21,8 @@ import commerce, {
   reviews,
   sizeGuides,
 } from './commerce.js';
+import type { ApprovalPermissions } from './approval.js';
+import approval from './approval.js';
 import type { CmsPermissions, MediaPermissions } from './content.js';
 import { cms, media } from './content.js';
 import type { CustomerPermissions } from './customers.js';
@@ -58,6 +60,7 @@ export interface AllPermissions {
   inventory: InventoryPermissions;
   cms: CmsPermissions;
   media: MediaPermissions;
+  approval: ApprovalPermissions;
   loyalty: LoyaltyPermissions;
   promotions: PromotionPermissions;
   notifications: NotificationPermissions;
@@ -82,6 +85,7 @@ const permissions: AllPermissions = {
   inventory,
   cms,
   media,
+  approval,
   loyalty,
   promotions,
   notifications,

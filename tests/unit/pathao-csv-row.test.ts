@@ -190,8 +190,14 @@ describe('orderToPathaoRow', () => {
     // found. The caller (exportPathaoCsv) keeps the order in the CSV; the
     // Pathao import side will reject it, which is the correct failure signal
     // — "this order isn't ready to ship, fix it".
+    //
+    // recipientName falls back to the literal "Customer" (not empty) by
+    // design — see logistics.controller.ts: `sanitizeDisplayName` swaps
+    // OAuth nanoids and missing names for "Customer" so the courier label
+    // still prints. Pathao's import will then reject on missing phone /
+    // address, surfacing the right failure mode.
     const row = orderToPathaoRow(makeOrder(), undefined);
-    expect(row.recipientName).toBe('');
+    expect(row.recipientName).toBe('Customer');
     expect(row.recipientPhone).toBe('');
     expect(row.recipientAddress).toBe('');
     // Quantity / weight still computed from the order lines.

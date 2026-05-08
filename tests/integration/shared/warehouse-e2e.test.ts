@@ -99,15 +99,14 @@ describe('Inventory Capabilities', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(['simple', 'standard', 'enterprise']).toContain(body.data.mode);
-    expect(body.data.features).toMatchObject({
+    expect(['simple', 'standard', 'enterprise']).toContain(body.mode);
+    expect(body.features).toMatchObject({
       quality: expect.any(Boolean),
       tasks: expect.any(Boolean),
       dispatch: expect.any(Boolean),
       rfid: expect.any(Boolean),
     });
-    expect(['wac', 'fifo', 'fefo']).toContain(body.data.valuationMethod);
+    expect(['wac', 'fifo', 'fefo']).toContain(body.valuationMethod);
   });
 
   it('GET /inventory/capabilities without auth should return 401', async () => {
@@ -132,13 +131,22 @@ describe('Warehouse Node CRUD', () => {
       payload: { code: 'WH-MAIN', name: 'Main Warehouse', type: 'warehouse' },
     });
 
-    // 201 = created, 403 = auth works but perms not configured in test org
-    expect([201, 403]).toContain(res.statusCode);
+    // Acceptable outcomes:
+    //   201 — created (FLOW_MODE=enterprise allows multiple warehouses).
+    //   403 — perms not configured in test org.
+    //   400 — `standard` plan rejects a second warehouse because Better
+    //         Auth's branch-create hook already auto-bootstrapped one. The
+    //         400 carries the "Only 1 warehouse allowed on 'standard'
+    //         plan" message; that's the canonical limit, not a test bug.
+    expect([201, 400, 403]).toContain(res.statusCode);
     if (res.statusCode === 201) {
       const body = JSON.parse(res.body);
-      expect(body.success).toBe(true);
-      expect(body.data.code).toBe('WH-MAIN');
-      nodeId = body.data._id;
+      expect(body.code).toBe('WH-MAIN');
+      nodeId = body._id;
+    } else if (res.statusCode === 400) {
+      // Confirm the limit message — surfaces a regression if the gate
+      // moves or rephrases (e.g. silently allows a second warehouse).
+      expect(res.body).toMatch(/Only 1 warehouse allowed/i);
     }
   });
 
@@ -156,7 +164,7 @@ describe('Warehouse Node CRUD', () => {
     });
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
-      expect(JSON.parse(res.body).data._id).toBe(nodeId);
+      expect(JSON.parse(res.body)._id).toBe(nodeId);
     }
   });
 
@@ -224,8 +232,8 @@ describe('Location CRUD', () => {
     expect([200, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
       const body = JSON.parse(res.body);
-      expect(body.data).toHaveProperty('zones');
-      expect(body.data).toHaveProperty('totalLocations');
+      expect(body).toHaveProperty('zones');
+      expect(body).toHaveProperty('totalLocations');
     }
   });
 
@@ -258,7 +266,7 @@ describe('Location CRUD', () => {
 
     if (list.statusCode !== 200) return; // perms not configured → nothing to assert
     const body = JSON.parse(list.body);
-    const systemLoc = body.data.find((l: { code: string }) =>
+    const systemLoc = body.find((l: { code: string }) =>
       ['stock', 'vendor', 'customer', 'adjustment'].includes(l.code),
     );
     if (!systemLoc) return;
@@ -269,7 +277,7 @@ describe('Location CRUD', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(403);
-    expect(JSON.parse(res.body).error).toMatch(/system location/i);
+    expect(JSON.parse(res.body).message).toMatch(/system location/i);
   });
 
   it('DELETE /locations/:id should 404 for unknown id', async () => {
@@ -291,7 +299,7 @@ describe('Location CRUD', () => {
     });
     if (list.statusCode !== 200) return;
     const body = JSON.parse(list.body);
-    const nodeId = body.data[0]?.nodeId;
+    const nodeId = body[0]?.nodeId;
     if (!nodeId) return;
 
     const created = await server.inject({
@@ -306,7 +314,7 @@ describe('Location CRUD', () => {
       },
     });
     if (created.statusCode !== 201) return;
-    const locId = JSON.parse(created.body).data._id;
+    const locId = JSON.parse(created.body)._id;
 
     const res = await server.inject({
       method: 'DELETE',
@@ -314,7 +322,6 @@ describe('Location CRUD', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body).success).toBe(true);
 
     // Confirm it is gone
     const after = await server.inject({
@@ -368,10 +375,9 @@ describe('Location CRUD', () => {
     const nodesRes = await server.inject({ method: 'GET', url: `${API}/inventory/nodes`, headers: h() });
     expect(nodesRes.statusCode).toBe(200);
     const nodesBody = JSON.parse(nodesRes.body);
-    expect(nodesBody.success).toBe(true);
-    expect(Array.isArray(nodesBody.data)).toBe(true);
+    expect(Array.isArray(nodesBody)).toBe(true);
 
-    const defaultNode = (nodesBody.data as Array<{ _id: string; code: string; isDefault?: boolean }>)
+    const defaultNode = (nodesBody as Array<{ _id: string; code: string; isDefault?: boolean }>)
       .find((n) => n.isDefault === true || n.code === 'DEFAULT');
     expect(defaultNode, 'bootstrap did not create a default node for this org').toBeDefined();
     const nodeId = defaultNode!._id;
@@ -383,11 +389,8 @@ describe('Location CRUD', () => {
     });
     expect(locsRes.statusCode).toBe(200);
     const locsBody = JSON.parse(locsRes.body);
-    expect(locsBody.success).toBe(true);
-    expect(Array.isArray(locsBody.data)).toBe(true);
-    expect(typeof locsBody.total).toBe('number');
-    expect(locsBody.total).toBe(locsBody.data.length);
-    return { nodeId, locations: locsBody.data };
+    expect(Array.isArray(locsBody)).toBe(true);
+    return { nodeId, locations: locsBody };
   }
 
   it('bootstrap contract: system locations are created with NO barcode field', async () => {
@@ -425,9 +428,8 @@ describe('Location CRUD', () => {
     });
     expect(first.statusCode).toBe(201);
     const firstBody = JSON.parse(first.body);
-    expect(firstBody.success).toBe(true);
-    expect(firstBody.data.barcode).toBe(barcode);
-    expect(firstBody.data.nodeId).toBe(nodeId);
+    expect(firstBody.barcode).toBe(barcode);
+    expect(firstBody.nodeId).toBe(nodeId);
 
     const second = await server.inject({
       method: 'POST',
@@ -464,7 +466,7 @@ describe('Location CRUD', () => {
     });
     expect(first.statusCode).toBe(201);
     const firstBody = JSON.parse(first.body);
-    expect(firstBody.data.barcode ?? null).toBeNull();
+    expect(firstBody.barcode ?? null).toBeNull();
 
     const second = await server.inject({
       method: 'POST',
@@ -478,7 +480,7 @@ describe('Location CRUD', () => {
       },
     });
     expect(second.statusCode).toBe(201);
-    expect(JSON.parse(second.body).data.barcode ?? null).toBeNull();
+    expect(JSON.parse(second.body).barcode ?? null).toBeNull();
   });
 
   it('PATCH /locations/:id — mutates name/barcode and GET returns the updated doc', async () => {
@@ -496,7 +498,7 @@ describe('Location CRUD', () => {
       },
     });
     expect(createdRes.statusCode).toBe(201);
-    const created = JSON.parse(createdRes.body).data;
+    const created = JSON.parse(createdRes.body);
     expect(created._id).toBeTruthy();
 
     const newBarcode = `BC-PATCH-${Date.now().toString(36).toUpperCase()}`;
@@ -508,9 +510,8 @@ describe('Location CRUD', () => {
     });
     expect(patch.statusCode).toBe(200);
     const patchBody = JSON.parse(patch.body);
-    expect(patchBody.success).toBe(true);
-    expect(patchBody.data.name).toBe('Updated Name');
-    expect(patchBody.data.barcode).toBe(newBarcode);
+    expect(patchBody.name).toBe('Updated Name');
+    expect(patchBody.barcode).toBe(newBarcode);
 
     // Read-through: confirm the mutation persisted and the raw repo doc
     // comes back unchanged by any downstream middleware.
@@ -521,9 +522,9 @@ describe('Location CRUD', () => {
     });
     expect(after.statusCode).toBe(200);
     const afterBody = JSON.parse(after.body);
-    expect(afterBody.data.name).toBe('Updated Name');
-    expect(afterBody.data.barcode).toBe(newBarcode);
-    expect(afterBody.data._id).toBe(created._id);
+    expect(afterBody.name).toBe('Updated Name');
+    expect(afterBody.barcode).toBe(newBarcode);
+    expect(afterBody._id).toBe(created._id);
   });
 });
 

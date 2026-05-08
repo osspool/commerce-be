@@ -75,10 +75,9 @@ describe('Branches — list + lookup', () => {
     const res = await server.inject({ method: 'GET', url: `${API}/branches`, headers: h() });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body) as Record<string, unknown> | null;
-    expect(body?.success).toBe(true);
     // Arc's list renders `{ success, docs, page, limit, total, pages, hasNext, hasPrev }`
     // at the root (no `data` wrapper). Pin the envelope here.
-    expect(Array.isArray((body as { docs?: unknown[] } | null)?.docs)).toBe(true);
+    expect(Array.isArray((body as { data?: unknown[] } | null)?.data)).toBe(true);
     expect(typeof (body as { total?: number } | null)?.total).toBe('number');
     expect(typeof (body as { page?: number } | null)?.page).toBe('number');
     expect((body as { total: number }).total).toBeGreaterThanOrEqual(1);
@@ -94,7 +93,7 @@ describe('Branches — list + lookup', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data as { _id: string; code: string };
+    const data = parse(res.body) as { _id: string; code: string };
     expect(data._id).toBe(headOfficeId);
     expect(String(data.code).toUpperCase()).toBe(code);
   });
@@ -117,7 +116,7 @@ describe('Branches — default branch', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data as { _id: string; isDefault: boolean };
+    const data = parse(res.body) as { _id: string; isDefault: boolean };
     expect(data.isDefault).toBe(true);
     expect(data._id).toBe(headOfficeId);
   });

@@ -97,7 +97,7 @@ describe('open shift', () => {
     const res = await openShift({ openingCash: 300 });
     expect(res.statusCode).toBe(201);
     const body = parse(res.body)!;
-    const shift = body.data as Record<string, unknown>;
+    const shift = body as Record<string, unknown>;
 
     expect(shift.state).toBe('open');
     expect(shift.openingCash).toBe(300);
@@ -116,8 +116,8 @@ describe('open shift', () => {
     const res = await openShift({ openingCash: 200 });
     expect(res.statusCode).toBe(409);
     const body = parse(res.body)!;
-    expect(body.success).toBe(false);
-    expect(body.data).toBeTruthy(); // returns existing shift
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(body).toBeTruthy(); // returns existing shift
   });
 
   it('enforces requiredOpeningFloat when set on branch policy', async () => {
@@ -132,7 +132,7 @@ describe('open shift', () => {
   it('derives businessDate from branch timezone', async () => {
     await setBranchPolicy(env.orgId, { autoCloseTimezone: 'Asia/Dhaka' });
     const res = await openShift({ openingCash: 0 });
-    const shift = (parse(res.body)!.data as Record<string, unknown>);
+    const shift = (parse(res.body) as Record<string, unknown>);
     const bd = String(shift.businessDate);
     // ISO string — date part only, trailing Z means UTC midnight of BD day.
     expect(bd).toMatch(/T00:00:00\.000Z$/);
@@ -143,13 +143,13 @@ describe('current shift query', () => {
   it('returns null when no shift is open', async () => {
     const res = await getCurrent();
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body)!.data).toBeNull();
+    expect(parse(res.body)).toBeNull();
   });
 
   it('returns the open shift after creation', async () => {
     await openShift({ openingCash: 100 });
     const res = await getCurrent();
-    const data = parse(res.body)!.data as Record<string, unknown>;
+    const data = parse(res.body) as Record<string, unknown>;
     expect(data).toBeTruthy();
     expect(data.state).toBe('open');
   });
@@ -158,7 +158,7 @@ describe('current shift query', () => {
 describe('cash movements', () => {
   async function openAndGetId(opening = 300): Promise<string> {
     const res = await openShift({ openingCash: opening });
-    return String((parse(res.body)!.data as { _id: string })._id);
+    return String((parse(res.body) as { _id: string })._id);
   }
 
   it('records cash-in with reason code + updates cashInAmount', async () => {
@@ -167,9 +167,7 @@ describe('cash movements', () => {
       amount: 50, reasonCode: 'till_top_up', note: 'Added small notes',
     });
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body)!;
-    // Arc action wraps in {success, data} or returns the doc — handle both.
-    const shift = (body.data ?? body) as Record<string, unknown>;
+    const shift = parse(res.body) as Record<string, unknown>;
     expect((shift.cashMovements as unknown[]).length).toBe(1);
     const cashRow = (shift.paymentBreakdown as Array<{ method: string; cashInAmount: number }>).find((r) => r.method === 'cash');
     expect(cashRow?.cashInAmount).toBe(50);
@@ -206,14 +204,14 @@ describe('cash movements', () => {
 describe('pause / resume (handover)', () => {
   async function openAndGetId(): Promise<string> {
     const res = await openShift({ openingCash: 100 });
-    return String((parse(res.body)!.data as { _id: string })._id);
+    return String((parse(res.body) as { _id: string })._id);
   }
 
   it('pause moves state open → paused and sets pausedAt', async () => {
     const id = await openAndGetId();
     const res = await action(id, 'pause', { notes: 'lunch' });
     expect(res.statusCode).toBe(200);
-    const shift = (parse(res.body)!.data ?? parse(res.body)) as Record<string, unknown>;
+    const shift = parse(res.body) as Record<string, unknown>;
     expect(shift.state).toBe('paused');
     expect(shift.pausedAt).toBeTruthy();
   });
@@ -223,7 +221,7 @@ describe('pause / resume (handover)', () => {
     await action(id, 'pause');
     const res = await action(id, 'resume');
     expect(res.statusCode).toBe(200);
-    const shift = (parse(res.body)!.data ?? parse(res.body)) as Record<string, unknown>;
+    const shift = parse(res.body) as Record<string, unknown>;
     expect(shift.state).toBe('open');
     expect(shift.resumedAt).toBeTruthy();
   });
@@ -245,14 +243,14 @@ describe('pause / resume (handover)', () => {
 describe('direct close (variance gate)', () => {
   async function openAndGetId(opening = 300): Promise<string> {
     const res = await openShift({ openingCash: opening });
-    return String((parse(res.body)!.data as { _id: string })._id);
+    return String((parse(res.body) as { _id: string })._id);
   }
 
   it('closes with zero variance — no override needed', async () => {
     const id = await openAndGetId(300);
     const res = await action(id, 'close', { countedCash: 300, notes: 'end of day' });
     expect(res.statusCode).toBe(200);
-    const shift = (parse(res.body)!.data ?? parse(res.body)) as Record<string, unknown>;
+    const shift = parse(res.body) as Record<string, unknown>;
     expect(shift.state).toBe('closed');
     expect(shift.closedBy).toBe('cashier');
     expect(shift.cashDifference).toBe(0);
@@ -262,7 +260,7 @@ describe('direct close (variance gate)', () => {
     const id = await openAndGetId(300);
     const res = await action(id, 'close', { countedCash: 350 });
     expect(res.statusCode).toBe(200);
-    const shift = (parse(res.body)!.data ?? parse(res.body)) as Record<string, unknown>;
+    const shift = parse(res.body) as Record<string, unknown>;
     expect(shift.state).toBe('closed');
     expect(shift.cashDifference).toBe(50);
   });
@@ -283,12 +281,21 @@ describe('direct close (variance gate)', () => {
       managerOverrideReason: 'Disputed; customer short-changed returned cash',
     });
     expect(res.statusCode).toBe(200);
-    const shift = (parse(res.body)!.data ?? parse(res.body)) as Record<string, unknown>;
+    const shift = parse(res.body) as Record<string, unknown>;
     expect(shift.state).toBe('closed');
     expect(shift.closedBy).toBe('manager');
-    const approval = shift.varianceApproval as Record<string, unknown> | null;
-    expect(approval).toBeTruthy();
-    expect(approval!.status).toBe('approved');
+    // Persistence layer rewrote variance overrides as P7 canonical `approvals`
+    // (an ApprovalChain), not a bespoke `varianceApproval` blob. The chain
+    // carries one `variance-override` step with the manager's decision + note.
+    const approvals = shift.approvals as {
+      status?: string;
+      steps?: Array<{ id?: string; decisions?: Array<{ note?: string }> }>;
+    } | null;
+    expect(approvals).toBeTruthy();
+    expect(approvals!.status).toBe('approved');
+    const step = approvals!.steps?.[0];
+    expect(step?.id).toBe('variance-override');
+    expect(step?.decisions?.[0]?.note).toBe('Disputed; customer short-changed returned cash');
   });
 
   it('rejects close on a policy that requires blind-close', async () => {
@@ -303,14 +310,14 @@ describe('blind close / reconcile', () => {
   async function openBlindBranch(opening = 300): Promise<string> {
     await setBranchPolicy(env.orgId, { blindCloseRequired: true });
     const res = await openShift({ openingCash: opening });
-    return String((parse(res.body)!.data as { _id: string })._id);
+    return String((parse(res.body) as { _id: string })._id);
   }
 
   it('blind-close moves open → blind_closed; counts recorded', async () => {
     const id = await openBlindBranch(300);
     const res = await action(id, 'blind-close', { countedCash: 320, notes: 'cashier count' });
     expect(res.statusCode).toBe(200);
-    const shift = (parse(res.body)!.data ?? parse(res.body)) as Record<string, unknown>;
+    const shift = parse(res.body) as Record<string, unknown>;
     expect(shift.state).toBe('blind_closed');
     expect(shift.blindClosedAt).toBeTruthy();
     expect(shift.countedCash).toBe(320);
@@ -349,28 +356,28 @@ describe('branch isolation (header-scoped, bearer-auth convention)', () => {
   it('/current is scoped by x-organization-id header', async () => {
     await openShift({ openingCash: 100 }, env.orgId);
     const resA = parse((await getCurrent(env.orgId)).body)!;
-    expect((resA.data as { openingCash: number })?.openingCash).toBe(100);
+    expect((resA as { openingCash: number })?.openingCash).toBe(100);
 
     // Branch B has no shift (beforeEach cleared).
     const resB = parse((await getCurrent(branchB)).body)!;
-    expect(resB.data).toBeNull();
+    expect(resB).toBeNull();
   });
 
   it('closing branch A shift does not affect branch B shift', async () => {
     const aOpen = parse((await openShift({ openingCash: 100 }, env.orgId)).body)!;
-    const aId = String((aOpen.data as { _id: string })._id);
+    const aId = String((aOpen as { _id: string })._id);
     await openShift({ openingCash: 200 }, branchB);
 
     await action(aId, 'close', { countedCash: 100 }, env.orgId);
 
     const bCurrent = parse((await getCurrent(branchB)).body)!;
-    expect((bCurrent.data as { state: string })?.state).toBe('open');
+    expect((bCurrent as { state: string })?.state).toBe('open');
   });
 
   it('action on a shift whose branch differs from the header is rejected (403)', async () => {
     // Open at branch A, then try to close it claiming header: branchB.
     const aOpen = parse((await openShift({ openingCash: 100 }, env.orgId)).body)!;
-    const aId = String((aOpen.data as { _id: string })._id);
+    const aId = String((aOpen as { _id: string })._id);
     const res = await action(aId, 'close', { countedCash: 100 }, branchB);
     expect(res.statusCode).toBe(403);
   });

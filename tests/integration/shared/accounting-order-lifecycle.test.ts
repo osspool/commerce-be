@@ -4,7 +4,7 @@
  * Tests the complete commerce-to-accounting pipeline:
  *
  *   1. Seed BFRS chart of accounts (company-wide)
- *   2. Verify correct account types exist (1111, 1112, 1122, 4111, 2131, 5111, 1165, 2111)
+ *   2. Verify correct account types exist (1111, 1112, 1122, 4111, 2131, 5111, 1164, 2111)
  *   3. Online order paid (cash + VAT)  → SALES journal entry
  *   4. Online order paid (bkash + VAT) → SALES journal entry (mobile banking)
  *   5. Online order paid (card, no VAT) → SALES journal entry (2 lines only)
@@ -106,17 +106,20 @@ async function insertTransaction(overrides: Record<string, unknown> = {}) {
 async function insertOrder(orderId: mongoose.Types.ObjectId, overrides: Record<string, unknown> = {}) {
   const db = mongoose.connection.db!;
 
+  // Order shape mirrors what the COGS handler reads:
+  // `lines[].snapshot.costPrice * quantity` per
+  // [order-fulfilled.handler.ts:65-66](src/resources/accounting/events/handlers/order-fulfilled.handler.ts#L65-L66).
   const defaults = {
     _id: orderId,
     customerName: 'Test Customer',
     customerPhone: '+8801712345678',
-    items: [
+    lines: [
       {
         product: new mongoose.Types.ObjectId(),
         name: 'Test Product A',
         quantity: 2,
         price: 50000, // 500 BDT each
-        costPriceAtSale: 30000, // 300 BDT cost each
+        snapshot: { costPrice: 30000 }, // 300 BDT cost each
         vatRate: 15,
         vatAmount: 15000,
       },
@@ -125,7 +128,7 @@ async function insertOrder(orderId: mongoose.Types.ObjectId, overrides: Record<s
         name: 'Test Product B',
         quantity: 1,
         price: 50000, // 500 BDT
-        costPriceAtSale: 25000, // 250 BDT cost
+        snapshot: { costPrice: 25000 }, // 250 BDT cost
         vatRate: 15,
         vatAmount: 7500,
       },
@@ -232,7 +235,6 @@ describe('Phase 1 — Chart of Accounts (BFRS Seed)', () => {
 
     expect([200, 201]).toContain(res.statusCode);
     const body = safeParseBody(res.body);
-    expect(body?.success).toBe(true);
   });
 
   it('has Cash in Hand — Petty Cash (1111)', async () => {
@@ -241,17 +243,17 @@ describe('Phase 1 — Chart of Accounts (BFRS Seed)', () => {
   });
 
   it('has Cash at Bank — Current Account (1112)', async () => {
-    const id = await getAccountId('1112');
+    const id = await getAccountId('1113');
     expect(id).toBeTruthy();
   });
 
   it('has Mobile Banking — bKash/Nagad/Rocket (1122)', async () => {
-    const id = await getAccountId('1122');
+    const id = await getAccountId('1126');
     expect(id).toBeTruthy();
   });
 
-  it('has Merchandise Inventory (1165)', async () => {
-    const id = await getAccountId('1165');
+  it('has Merchandise Inventory (1164)', async () => {
+    const id = await getAccountId('1164');
     expect(id).toBeTruthy();
   });
 
@@ -275,8 +277,8 @@ describe('Phase 1 — Chart of Accounts (BFRS Seed)', () => {
     expect(id).toBeTruthy();
   });
 
-  it('has Inventory Write-down / Obsolescence (6703)', async () => {
-    const id = await getAccountId('6703');
+  it('has Inventory Write-down / Obsolescence (6711)', async () => {
+    const id = await getAccountId('6711');
     expect(id).toBeTruthy();
   });
 });
@@ -291,8 +293,9 @@ describe('Phase 2 — Order Payment → SALES Entry', () => {
 
   beforeAll(async () => {
     accountIds['1111'] = await getAccountId('1111');
-    accountIds['1112'] = await getAccountId('1112');
-    accountIds['1122'] = await getAccountId('1122');
+    accountIds['1113'] = await getAccountId('1113');
+    accountIds['1125'] = await getAccountId('1125'); // Gateway Clearing — card / online
+    accountIds['1126'] = await getAccountId('1126');
     accountIds['4111'] = await getAccountId('4111');
     accountIds['2132'] = await getAccountId('2132');
   });
@@ -347,7 +350,7 @@ describe('Phase 2 — Order Payment → SALES Entry', () => {
     expect(entry).toBeTruthy();
 
     const debitItem = entry!.journalItems.find((i: any) => i.debit > 0);
-    expect(debitItem.account.toString()).toBe(accountIds['1122']); // Mobile Banking
+    expect(debitItem.account.toString()).toBe(accountIds['1126']); // Mobile Banking
     expect(debitItem.debit).toBe(200000);
 
     const revenueItem = entry!.journalItems.find((i: any) => i.account.toString() === accountIds['4111']);
@@ -356,7 +359,7 @@ describe('Phase 2 — Order Payment → SALES Entry', () => {
     assertBalanced(entry);
   });
 
-  it('card order without VAT → 2-line entry (debit 1112, credit 4111)', async () => {
+  it('card order without VAT → 2-line entry (debit 1125 Gateway Clearing, credit 4111)', async () => {
     const { txnId } = await insertTransaction({
       amount: 300000,  // 3000 BDT
       tax: 0,          // No VAT
@@ -372,8 +375,10 @@ describe('Phase 2 — Order Payment → SALES Entry', () => {
     // Only 2 lines — no VAT line
     expect(entry!.journalItems.length).toBe(2);
 
+    // Card debits Gateway Clearing — held by Stripe / SSLCommerz / ShurjoPay
+    // until daily settlement reaches the bank, NOT direct to bank.
     const debitItem = entry!.journalItems.find((i: any) => i.debit > 0);
-    expect(debitItem.account.toString()).toBe(accountIds['1112']); // Bank Account
+    expect(debitItem.account.toString()).toBe(accountIds['1125']);
 
     const revenueItem = entry!.journalItems.find((i: any) => i.credit > 0);
     expect(revenueItem.account.toString()).toBe(accountIds['4111']); // Sales Revenue
@@ -404,14 +409,30 @@ describe('Phase 2 — Order Payment → SALES Entry', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Phase 3 — Order Fulfilled → COGS Entry', () => {
-  it('creates INVENTORY entry: debit 5111 (COGS), credit 1165 (Inventory)', async () => {
+  it('creates INVENTORY entry: debit 5111 (COGS), credit 1164 (Inventory)', async () => {
     const orderId = new mongoose.Types.ObjectId();
 
-    // Insert order with cost prices
+    // Order shape mirrors what the COGS handler reads: `lines[].snapshot.costPrice`.
     await insertOrder(orderId, {
-      items: [
-        { product: new mongoose.Types.ObjectId(), name: 'Shirt', quantity: 3, price: 100000, costPriceAtSale: 60000, vatRate: 15, vatAmount: 45000 },
-        { product: new mongoose.Types.ObjectId(), name: 'Pants', quantity: 2, price: 150000, costPriceAtSale: 90000, vatRate: 15, vatAmount: 45000 },
+      lines: [
+        {
+          product: new mongoose.Types.ObjectId(),
+          name: 'Shirt',
+          quantity: 3,
+          price: 100000,
+          snapshot: { costPrice: 60000 },
+          vatRate: 15,
+          vatAmount: 45000,
+        },
+        {
+          product: new mongoose.Types.ObjectId(),
+          name: 'Pants',
+          quantity: 2,
+          price: 150000,
+          snapshot: { costPrice: 90000 },
+          vatRate: 15,
+          vatAmount: 45000,
+        },
       ],
       totalAmount: 600000,
     });
@@ -428,7 +449,7 @@ describe('Phase 3 — Order Fulfilled → COGS Entry', () => {
     expect(entry!.journalItems.length).toBe(2);
 
     const cogsAccountId = await getAccountId('5111');
-    const inventoryAccountId = await getAccountId('1165');
+    const inventoryAccountId = await getAccountId('1164');
 
     const debitItem = entry!.journalItems.find((i: any) => i.debit > 0);
     expect(debitItem.account.toString()).toBe(cogsAccountId);
@@ -441,12 +462,23 @@ describe('Phase 3 — Order Fulfilled → COGS Entry', () => {
     assertBalanced(entry);
   });
 
-  it('skips COGS when costPriceAtSale is 0 or missing', async () => {
+  it('still posts a zero-value COGS entry when cost is missing (Odoo-style audit trail)', async () => {
+    // Per `order-fulfilled.handler.ts`: when no `snapshot.costPrice` is
+    // resolvable, the handler emits a JE with zero amounts and stamps
+    // `metadata.costMissing: true`. The inventory move is the source of
+    // truth; the JE exists so the audit trail is complete and finance can
+    // backfill cost on the product, then re-trigger the post.
     const orderId = new mongoose.Types.ObjectId();
 
     await insertOrder(orderId, {
-      items: [
-        { product: new mongoose.Types.ObjectId(), name: 'Free Sample', quantity: 1, price: 0, costPriceAtSale: 0 },
+      lines: [
+        {
+          product: new mongoose.Types.ObjectId(),
+          name: 'Free Sample',
+          quantity: 1,
+          price: 0,
+          // no snapshot.costPrice → triggers costMissing path
+        },
       ],
       totalAmount: 0,
     });
@@ -454,8 +486,10 @@ describe('Phase 3 — Order Fulfilled → COGS Entry', () => {
     await publishAndWait('accounting:order.fulfilled', { orderId: orderId.toString() }, 2000);
 
     const entry = await findEntry(`cogs-${orderId.toString()}`);
-    // Should be null — no COGS for zero-cost items
-    expect(entry).toBeNull();
+    expect(entry).toBeTruthy();
+    expect(entry!.totalDebit).toBe(0);
+    expect(entry!.totalCredit).toBe(0);
+    expect((entry!.metadata as { costMissing?: boolean })?.costMissing).toBe(true);
   });
 });
 
@@ -464,7 +498,7 @@ describe('Phase 3 — Order Fulfilled → COGS Entry', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Phase 4 — Purchase → PURCHASES Entry', () => {
-  it('merchandise purchase on credit → debit 1165 (Inventory), credit 2111 (AP)', async () => {
+  it('merchandise purchase on credit → debit 1164 (Inventory), credit 2111 (AP)', async () => {
     const { purchaseToPosting } = await import(
       '../../../src/resources/accounting/posting/contracts/purchase.contract.js'
     );
@@ -484,7 +518,7 @@ describe('Phase 4 — Purchase → PURCHASES Entry', () => {
       isPaid: false,
     });
 
-    expect(posting.items[0].accountCode).toBe('1165'); // Merchandise Inventory
+    expect(posting.items[0].accountCode).toBe('1164'); // Merchandise Inventory
     expect(posting.items[1].accountCode).toBe('2111'); // Accounts Payable
 
     // Actually create in DB via posting service
@@ -517,7 +551,7 @@ describe('Phase 4 — Purchase → PURCHASES Entry', () => {
     });
 
     expect(posting.items[0].accountCode).toBe('1161'); // Raw Materials
-    expect(posting.items[1].accountCode).toBe('1112'); // Bank Account
+    expect(posting.items[1].accountCode).toBe('1113'); // Bank Account
 
     const result = await createPosting(ctx.orgId, posting);
     expect(result.journalEntryId).toBeTruthy();
@@ -614,7 +648,7 @@ describe('Phase 5 — Refund → SALES Reversal Entry', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Phase 6 — Stock Adjustment → INVENTORY Entry', () => {
-  it('inventory loss → debit 6703 (Write-down), credit 1165 (Inventory)', async () => {
+  it('inventory loss → debit 6711 (Write-down), credit 1164 (Inventory)', async () => {
     const { stockAdjustmentToPosting } = await import(
       '../../../src/resources/accounting/posting/contracts/inventory.contract.js'
     );
@@ -631,8 +665,8 @@ describe('Phase 6 — Stock Adjustment → INVENTORY Entry', () => {
       reason: 'Damaged in transit',
     });
 
-    expect(posting.items[0].accountCode).toBe('6703'); // Write-down
-    expect(posting.items[1].accountCode).toBe('1165'); // Inventory
+    expect(posting.items[0].accountCode).toBe('6711'); // Write-down
+    expect(posting.items[1].accountCode).toBe('1164'); // Inventory
 
     const result = await createPosting(ctx.orgId, posting);
     expect(result.journalEntryId).toBeTruthy();
@@ -641,7 +675,7 @@ describe('Phase 6 — Stock Adjustment → INVENTORY Entry', () => {
     assertBalanced(entry);
   });
 
-  it('inventory gain → debit 1165 (Inventory), credit 6703 (Correction)', async () => {
+  it('inventory gain → debit 1164 (Inventory), credit 4317 (Inventory Gain)', async () => {
     const { stockAdjustmentToPosting } = await import(
       '../../../src/resources/accounting/posting/contracts/inventory.contract.js'
     );
@@ -658,8 +692,8 @@ describe('Phase 6 — Stock Adjustment → INVENTORY Entry', () => {
       reason: 'Found during recount',
     });
 
-    expect(posting.items[0].accountCode).toBe('1165'); // Inventory
-    expect(posting.items[1].accountCode).toBe('6703'); // Write-down reversal
+    expect(posting.items[0].accountCode).toBe('1164'); // Inventory
+    expect(posting.items[1].accountCode).toBe('4317'); // Inventory gain (Other Income)
 
     const result = await createPosting(ctx.orgId, posting);
     expect(result.journalEntryId).toBeTruthy();
@@ -840,10 +874,8 @@ describe('Phase 8 — Trial Balance Verification', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = safeParseBody(res.body);
-    expect(body?.success).toBe(true);
+    const report = safeParseBody(res.body);
 
-    const report = body.data;
     expect(report).toBeTruthy();
     expect(report.totalDebit).toBe(report.totalCredit);
     // May be 0 if posting all entries via API doesn't work
@@ -859,7 +891,6 @@ describe('Phase 8 — Trial Balance Verification', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body?.success).toBe(true);
   });
 
   it('trial balance with branchId filter works', async () => {
@@ -871,8 +902,7 @@ describe('Phase 8 — Trial Balance Verification', () => {
 
     expect(res.statusCode).toBe(200);
     const body = safeParseBody(res.body);
-    expect(body?.success).toBe(true);
-    expect(body.data.totalDebit).toBe(body.data.totalCredit);
+    expect(body.totalDebit).toBe(body.totalCredit);
   });
 });
 

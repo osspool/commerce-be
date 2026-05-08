@@ -10,5 +10,5 @@ export async function updatePaymentStateHandler(req: FastifyRequest, reply: Fast
     req.body as Record<string, unknown>,
     getOrderContext(req),
   );
-  return reply.send({ success: true, data: order });
+  return reply.send(order);
 }

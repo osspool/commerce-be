@@ -34,11 +34,14 @@ describe('App Boot', () => {
 
   it('health check returns 200', async () => {
     expect(app).toBeDefined();
-    const res = await app!.inject({ method: 'GET', url: '/health' });
+    // Arc's healthPlugin auto-registers /_health/live and /_health/ready
+    // (no longer the legacy plain /health). Liveness is the lightweight
+    // probe — stays 200 even if downstream deps degrade.
+    const res = await app!.inject({ method: 'GET', url: '/_health/live' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.message).toBe('OK');
+    // Arc's healthPlugin returns `{ status: 'ok' }` on /_health/live.
+    expect(body.status).toBe('ok');
   });
 
   it('Arc registry has resources registered', async () => {

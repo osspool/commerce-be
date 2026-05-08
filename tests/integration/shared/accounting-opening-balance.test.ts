@@ -160,13 +160,12 @@ describe('Phase 3c — Partner Opening Balances', () => {
     if (r.statusCode >= 400) console.log('[OB FAIL]', r.statusCode, r.body);
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.success).toBe(true);
-    expect(body.data.journalEntryId).toBeTruthy();
+    expect(body.journalEntryId).toBeTruthy();
 
     // Verify the JE structure
     const je = await mongoose.connection
       .db!.collection('journalentries')
-      .findOne({ _id: new mongoose.Types.ObjectId(body.data.journalEntryId) });
+      .findOne({ _id: new mongoose.Types.ObjectId(body.journalEntryId) });
     expect(je!.state).toBe('posted');
     const apLine = (je!.journalItems as any[]).find((i: any) => i.credit === 750_000);
     expect(apLine.partnerId).toBe(SUPPLIER_ID.toString());
@@ -188,8 +187,8 @@ describe('Phase 3c — Partner Opening Balances', () => {
     });
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(200);
-    expect(parse(second.body).data.journalEntryId).toBe(
-      parse(first.body).data.journalEntryId,
+    expect(parse(second.body).journalEntryId).toBe(
+      parse(first.body).journalEntryId,
     );
   });
 
@@ -203,7 +202,7 @@ describe('Phase 3c — Partner Opening Balances', () => {
     expect(r.statusCode).toBe(200);
     const je = await mongoose.connection
       .db!.collection('journalentries')
-      .findOne({ _id: new mongoose.Types.ObjectId(parse(r.body).data.journalEntryId) });
+      .findOne({ _id: new mongoose.Types.ObjectId(parse(r.body).journalEntryId) });
     const arLine = (je!.journalItems as any[]).find((i: any) => i.debit === 500_000);
     expect(arLine.partnerId).toBe(CUSTOMER_ID.toString());
     expect(arLine.partnerType).toBe('customer');
@@ -216,6 +215,6 @@ describe('Phase 3c — Partner Opening Balances', () => {
       headers: h(),
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.grandTotal).toBeGreaterThanOrEqual(750_000);
+    expect(parse(r.body).grandTotal).toBeGreaterThanOrEqual(750_000);
   });
 });

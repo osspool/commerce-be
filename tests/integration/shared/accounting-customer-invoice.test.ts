@@ -146,8 +146,7 @@ describe('Phase 2 — Customer Invoices (A/R)', () => {
     if (res.statusCode >= 400) console.log('[POST INV FAIL]', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    invoiceJeId = body.data.journalEntryId;
+    invoiceJeId = body.journalEntryId;
 
     const JE = mongoose.connection.db!.collection('journalentries');
     const je = await JE.findOne({ _id: new mongoose.Types.ObjectId(invoiceJeId) });
@@ -164,7 +163,7 @@ describe('Phase 2 — Customer Invoices (A/R)', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body).data.grandTotal).toBeGreaterThan(0);
+    expect(parse(res.body).grandTotal).toBeGreaterThan(0);
   });
 
   it('POST /customer-invoices/:invJeId/receive records a partial payment and matches', async () => {
@@ -176,7 +175,6 @@ describe('Phase 2 — Customer Invoices (A/R)', () => {
     });
     if (res.statusCode >= 400) console.log('[RECEIVE FAIL]', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body).success).toBe(true);
   });
 
   it('partner-ledger returns the customer statement with invoice + receipt lines', async () => {
@@ -193,8 +191,7 @@ describe('Phase 2 — Customer Invoices (A/R)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.lines.length).toBeGreaterThanOrEqual(2);
+    expect(body.lines.length).toBeGreaterThanOrEqual(2);
   });
 
   // ─── Adapter routes (arc auto-CRUD, filtered to A/R) ──────────────────────
@@ -210,7 +207,7 @@ describe('Phase 2 — Customer Invoices (A/R)', () => {
       // Insert a JE whose journalItems carry no partnerId on the AR account
       // — this is the negative case the wrapper must filter out.
       const cashAcct = await mongoose.connection.db!.collection('accounts').findOne({
-        accountTypeCode: '1112',
+        accountTypeCode: '1113',
       });
       const expenseAcct = await mongoose.connection.db!.collection('accounts').findOne({
         accountTypeCode: '6411',
@@ -255,11 +252,9 @@ describe('Phase 2 — Customer Invoices (A/R)', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
       // Arc spreads the OffsetPaginationResult onto the root response
-      // (success, docs, page, limit, total, pages). docs may also live
-      // under body.data depending on adapter shape — accept both.
-      const docs: Array<{ _id: string }> = body.docs ?? body.data?.docs ?? body.data ?? [];
+      // (success, data, page, limit, total, pages).
+      const docs: Array<{ _id: string }> = body.data ?? [];
       expect(Array.isArray(docs)).toBe(true);
       // The seeded A/R invoice is in the list…
       expect(docs.some((d) => String(d._id) === invoiceJeId)).toBe(true);
@@ -275,8 +270,7 @@ describe('Phase 2 — Customer Invoices (A/R)', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
-      expect(String(body.data._id)).toBe(invoiceJeId);
+      expect(String(body._id)).toBe(invoiceJeId);
     });
 
     it('GET /accounting/customer-invoices/:id returns 404 for a non-A/R JE', async () => {
@@ -296,8 +290,7 @@ describe('Phase 2 — Customer Invoices (A/R)', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
-      expect(Array.isArray(body.data)).toBe(true);
+      expect(Array.isArray(body)).toBe(true);
     });
 
     it('POST /accounting/customer-invoices is disabled (405/404)', async () => {

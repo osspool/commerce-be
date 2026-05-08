@@ -56,13 +56,12 @@ class WaveController extends BaseController {
         ctx,
       );
       return {
-        success: true,
         data: wave as unknown as Record<string, unknown>,
         status: 201,
       };
     } catch (error) {
-      const err = error as Error & { statusCode?: number };
-      return { success: false, error: err.message, status: err.statusCode ?? 400 };
+      // arc 2.13 routes thrown errors via its error pipeline; rethrow.
+      throw error;
     }
   }
 }

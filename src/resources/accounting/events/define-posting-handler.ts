@@ -24,14 +24,8 @@
  * @see ./handlers/ — one file per posting handler
  */
 
-import {
-  type DomainEvent,
-  type EventDefinitionOutput,
-  type EventLogger,
-  type ValidationResult,
-  withRetry,
-  wrapWithSchema,
-} from '@classytic/arc/events';
+import { type EventDefinitionOutput, type ValidationResult, withRetry, wrapWithSchema } from '@classytic/arc/events';
+import type { DomainEvent, EventLogger } from '@classytic/primitives/events';
 import type { z } from 'zod';
 import { subscribe } from '#lib/events/arcEvents.js';
 import type logger from '#lib/utils/logger.js';

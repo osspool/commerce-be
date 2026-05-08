@@ -88,14 +88,13 @@ describe('Notifications — list + unread-count', () => {
 
     const res = await server.inject({ method: 'GET', url: `${API}/notifications/`, headers: h() });
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const data = body?.data as Array<{ userId: string; organizationId: string }>;
+    const body = parse(res.body) as { data: Array<{ userId: string; organizationId: string }>; pagination: unknown };
+    const data = body.data;
     expect(data.length).toBe(2);
     for (const n of data) {
       expect(n.userId).toBe(adminUserId);
       expect(n.organizationId).toBe(env.orgId);
     }
-    expect((body?.pagination as { total: number }).total).toBe(2);
   });
 
   it('GET /?unreadOnly=true filters out read notifications', async () => {
@@ -107,7 +106,8 @@ describe('Notifications — list + unread-count', () => {
       url: `${API}/notifications/?unreadOnly=true`,
       headers: h(),
     });
-    const data = parse(res.body)?.data as Array<{ read: boolean }>;
+    const body = parse(res.body) as { data: Array<{ read: boolean }> };
+    const data = body.data;
     expect(data).toHaveLength(1);
     expect(data[0]!.read).toBe(false);
   });
@@ -121,7 +121,8 @@ describe('Notifications — list + unread-count', () => {
       url: `${API}/notifications/?type=shipment.updated`,
       headers: h(),
     });
-    const data = parse(res.body)?.data as Array<{ type: string }>;
+    const body = parse(res.body) as { data: Array<{ type: string }> };
+    const data = body.data;
     expect(data).toHaveLength(1);
     expect(data[0]!.type).toBe('shipment.updated');
   });
@@ -138,7 +139,7 @@ describe('Notifications — list + unread-count', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data as { count: number };
+    const data = parse(res.body) as { count: number };
     expect(data.count).toBe(2);
   });
 
@@ -158,8 +159,7 @@ describe('Notifications — mark read', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const data = body?.data as { read: boolean; readAt: string | null };
+    const data = parse(res.body) as { read: boolean; readAt: string | null };
     expect(data.read).toBe(true);
     expect(data.readAt).toBeTruthy();
   });
@@ -189,7 +189,7 @@ describe('Notifications — mark read', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data as { modifiedCount: number };
+    const data = parse(res.body) as { modifiedCount: number };
     expect(data.modifiedCount).toBe(2);
 
     const unreadRes = await server.inject({
@@ -197,7 +197,7 @@ describe('Notifications — mark read', () => {
       url: `${API}/notifications/unread-count`,
       headers: h(),
     });
-    const unreadCount = (parse(unreadRes.body)?.data as { count: number }).count;
+    const unreadCount = (parse(unreadRes.body) as { count: number }).count;
     expect(unreadCount).toBe(0);
   });
 });

@@ -34,7 +34,7 @@ const costResource = defineResource({
         const ctx = flowCtxGuard.from(req);
         const { skuRef, locationId } = req.query as Record<string, string | undefined>;
         const result = await flow().services.costLayer.getValuation(skuRef ?? '', locationId ?? '', ctx);
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
     {
@@ -56,7 +56,7 @@ const costResource = defineResource({
           organizationId: ctx.organizationId,
           lean: true,
         });
-        return reply.send({ success: true, data: docs, total: docs.length });
+        return reply.send(docs);
       },
     },
   ],

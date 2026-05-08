@@ -13,7 +13,7 @@
  * wrapper to stay consistent with production.
  */
 
-import type { DomainEvent } from '@classytic/arc/events';
+import type { DomainEvent } from '@classytic/primitives/events';
 import { subscribe } from '#lib/events/arcEvents.js';
 
 export interface CapturedEvent<P = unknown> {

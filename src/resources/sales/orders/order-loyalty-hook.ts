@@ -28,7 +28,7 @@
 import type { OrderEngine } from '@classytic/order';
 import type { FastifyBaseLogger } from 'fastify';
 import platformRepository from '#resources/platform/platform.repository.js';
-import { getMemberForCustomer, syncCustomerMembership } from '#resources/sales/loyalty/loyalty.bridge.js';
+import { enrollCustomer, getMemberForCustomer, syncCustomerMembership } from '#resources/sales/loyalty/loyalty.bridge.js';
 import { getLoyaltyEngine } from '#resources/sales/loyalty/loyalty.plugin.js';
 
 interface OrderLineLite {
@@ -86,8 +86,27 @@ async function tryAwardPoints(
   const ctx = { actorId: context?.actorRef ?? 'order-loyalty-hook' };
 
   try {
-    const member = await getMemberForCustomer(customerId, ctx);
-    if (!member) return; // not enrolled — most orders fall here
+    // Find-or-enroll. Direct-to-consumer convention: every customer who
+    // places a paid order is auto-enrolled in loyalty so they earn points
+    // from order #1. Cashier-driven POS flow (Flow B) explicitly looks up
+    // members by card before checkout; if they hand over a card and the
+    // member already exists, this branch's `getMemberForCustomer` returns
+    // the existing record and we never re-enroll. Result: both flows
+    // converge on the same `evaluateOrder` call below.
+    let member = await getMemberForCustomer(customerId, ctx);
+    if (!member) {
+      try {
+        member = await enrollCustomer(customerId, ctx);
+      } catch (enrollErr) {
+        // Customer record missing or already enrolled in a race — both are
+        // "log + bail" so we never block the order, never crash the hook.
+        logger?.warn?.(
+          { err: (enrollErr as Error).message, orderId, customerId },
+          'order-loyalty auto-enroll failed (order persisted, no points)',
+        );
+        return;
+      }
+    }
 
     // Order totals are persisted in paisa (integer minor units). Earning
     // rules read more naturally in BDT major — admins enter "৳100" not
@@ -127,6 +146,34 @@ async function tryAwardPoints(
     if (result.totalPoints <= 0) return;
 
     await syncCustomerMembership(customerId);
+
+    // Write the earned-points snapshot onto the order's metadata so the
+    // admin / customer detail UI renders it without a second loyalty
+    // round-trip. Idempotent — `evaluateOrder` already de-dupes per rule
+    // via `${orderId}:${ruleId}`, so a re-fire writes the same value.
+    // Using the engine's Order model directly keeps this off the order
+    // FSM (no spurious FSM-related events), same pattern as
+    // `metadata.refundedAt` written by the refund handler.
+    try {
+      const engine = await (await import('./order.engine.js')).ensureOrderEngine();
+      await engine.models.Order.findOneAndUpdate(
+        { _id: order._id },
+        {
+          $set: {
+            'metadata.loyaltyPointsEarned': result.totalPoints,
+            'metadata.loyaltyMemberId': String(member._id),
+          },
+        },
+        { session: undefined },
+      );
+    } catch (writeErr) {
+      // Best-effort: points are already credited to the member; failure
+      // here only loses the admin's at-a-glance number.
+      logger?.warn?.(
+        { err: (writeErr as Error).message, orderId },
+        'order-loyalty stamp on metadata failed (points already credited)',
+      );
+    }
 
     logger?.info?.(
       {

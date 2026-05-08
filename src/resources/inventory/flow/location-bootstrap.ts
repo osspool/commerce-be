@@ -10,7 +10,13 @@
 
 import type { FlowEngine, LocationType } from '@classytic/flow';
 import type { Model } from 'mongoose';
-import { ADJUSTMENT_LOCATION, CUSTOMER_LOCATION, DEFAULT_LOCATION, VENDOR_LOCATION } from './context-helpers.js';
+import {
+  ADJUSTMENT_LOCATION,
+  CUSTOMER_LOCATION,
+  DEFAULT_LOCATION,
+  RETURN_HOLDING_LOCATION,
+  VENDOR_LOCATION,
+} from './context-helpers.js';
 import { getFlowEngine } from './flow-engine.js';
 
 interface LocationDef {
@@ -25,6 +31,10 @@ const LOCATION_DEFS: LocationDef[] = [
   { code: VENDOR_LOCATION, name: 'Vendor', type: 'vendor', allowNegativeStock: true },
   { code: CUSTOMER_LOCATION, name: 'Customer', type: 'customer', allowNegativeStock: true },
   { code: ADJUSTMENT_LOCATION, name: 'Adjustment', type: 'inventory_loss', allowNegativeStock: true },
+  // QC holding bay for goods between RMA confirm and inspect. Storage type so
+  // count reports surface units in inspection; allowNegativeStock=false keeps
+  // the bay honest (over-receive = audit signal).
+  { code: RETURN_HOLDING_LOCATION, name: 'Return Holding', type: 'storage', allowNegativeStock: false },
 ];
 
 /**

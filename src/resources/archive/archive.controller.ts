@@ -25,7 +25,7 @@ export class ArchiveController extends BaseController {
     const archive = await archiveRepository.runArchive(
       (request.body || {}) as Parameters<typeof archiveRepository.runArchive>[0],
     );
-    return reply.code(201).send({ success: true, data: archive });
+    return reply.code(201).send(archive);
   }
 
   async downloadArchive(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
@@ -64,7 +64,7 @@ export class ArchiveController extends BaseController {
 
     await fs.unlink(arch.filePath as string).catch(() => null);
 
-    return reply.send({ success: true, message: 'Archive purged' });
+    return reply.send(null);
   }
 }
 

@@ -6,7 +6,8 @@
  * `/slug/:slug` preset route was unused and is intentionally not registered.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import { events } from './events.js';

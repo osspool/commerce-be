@@ -16,7 +16,8 @@
  * See `packages/order/src/repositories/quotation.repository.ts` for the state machine.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit';
 import { repoOptionsFromCtx } from '@classytic/order';
@@ -27,6 +28,7 @@ import { ensureOrderEngine } from '#resources/sales/orders/order.engine.js';
 import { getContextFromReq } from '#shared/context.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { queryParser } from '#shared/query-parser.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 const rejectBody = z.object({ reason: z.string().optional() });
 const convertToOrderBody = z.object({
@@ -126,10 +128,7 @@ const quotationResource = defineResource({
         const body = (req.body ?? {}) as Record<string, unknown>;
         const lines = (body.lines as Array<Record<string, unknown>> | undefined) ?? [];
         if (lines.length === 0) {
-          return reply.status(400).send({
-            success: false,
-            error: 'Quotation must contain at least one line',
-          });
+          throw new ValidationError('Quotation must contain at least one line');
         }
         const quote = await orderEngine.repositories.quotation!.create(
           {
@@ -138,7 +137,7 @@ const quotationResource = defineResource({
           },
           repoOptionsFromCtx(ctx),
         );
-        reply.status(201).send({ success: true, data: quote });
+        reply.status(201).send(quote);
       },
     },
   ],

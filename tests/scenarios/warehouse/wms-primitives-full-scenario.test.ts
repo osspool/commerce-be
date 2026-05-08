@@ -172,7 +172,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
     const body = parse(res.body);
-    const data = (body?.data ?? body) as {
+    const data = body as {
       skuCount: number;
       tiers: { A: number; B: number; C: number };
     };
@@ -193,7 +193,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       },
     });
     expect(assignRes.statusCode, assignRes.body).toBeLessThan(400);
-    const assigned = (parse(assignRes.body)?.data ?? parse(assignRes.body)) as {
+    const assigned = parse(assignRes.body)! as {
       status: string;
       locationId: string;
     };
@@ -207,7 +207,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       payload: { skuRef: SKUS.fast, toLocationId: 'BIN-A00', tier: 'A' },
     });
     expect(reslotRes.statusCode, reslotRes.body).toBeLessThan(400);
-    const reslotted = (parse(reslotRes.body)?.data ?? parse(reslotRes.body)) as {
+    const reslotted = parse(reslotRes.body)! as {
       status: string;
       locationId: string;
     };
@@ -238,9 +238,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
     });
     expect(listRes.statusCode).toBeLessThan(400);
     const listBody = parse(listRes.body);
-    const docs = ((listBody?.data as { docs?: unknown[] })?.docs ??
-      (listBody as { docs?: unknown[] })?.docs ??
-      []) as Array<{ status: string }>;
+    const docs = ((listBody as { data?: unknown[] })?.data ?? []) as Array<{ status: string }>;
     const active = docs.filter((d) => d.status === 'active');
     expect(active.length).toBe(3);
   });
@@ -258,7 +256,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       });
       expect(res.statusCode, res.body).toBeLessThan(400);
       const body = parse(res.body);
-      return ((body?.data ?? body) as { _id: string })._id;
+      return (body as { _id: string })._id;
     };
 
     palletPackageId = await create('WMS-Pallet-1', 'reusable');
@@ -275,8 +273,8 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
         payload: { lpnCode: lpn, assignedBy: 'receiver-1' },
       });
       expect(res.statusCode, res.body).toBeLessThan(400);
-      const data = (parse(res.body)?.data ?? parse(res.body)) as { lpnCode: string };
-      expect(data.lpnCode).toBe(lpn);
+      const body = parse(res.body)! as { data: { lpnCode: string } };
+      expect(body.data.lpnCode).toBe(lpn);
     }
   });
 
@@ -296,8 +294,8 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       payload: { sealedBy: 'operator-1' },
     });
     expect(sealRes.statusCode, sealRes.body).toBeLessThan(400);
-    const data = (parse(sealRes.body)?.data ?? parse(sealRes.body)) as { sealed: boolean };
-    expect(data.sealed).toBe(true);
+    const body = parse(sealRes.body)! as { data: { sealed: boolean } };
+    expect(body.data.sealed).toBe(true);
 
     // Re-seal must fail on the repo layer (already-sealed guard).
     const dupRes = await env.server.inject({
@@ -324,7 +322,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
     const body = parse(res.body);
-    const data = (body?.data ?? body) as { _id: string; status: string };
+    const data = body as { _id: string; status: string };
     waveId = data._id;
     expect(waveId).toBeTruthy();
     expect(data.status).toBe('planned');
@@ -343,7 +341,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
         payload: { action, ...extra },
       });
       expect(res.statusCode, `${action} failed: ${res.body}`).toBeLessThan(400);
-      const data = (parse(res.body)?.data ?? parse(res.body)) as { status: string };
+      const data = parse(res.body)! as { status: string };
       expect(data.status).toBe(expectedStatus);
     }
 
@@ -370,7 +368,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
     });
     expect(clockInRes.statusCode, clockInRes.body).toBeLessThan(400);
     const sessionBody = parse(clockInRes.body);
-    workerSessionId = ((sessionBody?.data ?? sessionBody) as { _id: string })._id;
+    workerSessionId = (sessionBody as { _id: string })._id;
     expect(workerSessionId).toBeTruthy();
 
     const taskEvents = [
@@ -411,7 +409,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       payload: { action: 'clockOut' },
     });
     expect(clockOutRes.statusCode, clockOutRes.body).toBeLessThan(400);
-    const ended = (parse(clockOutRes.body)?.data ?? parse(clockOutRes.body)) as {
+    const ended = parse(clockOutRes.body)! as {
       status: string;
       netDurationMs: number;
     };
@@ -428,7 +426,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       headers: setActiveOrgHeader(warehouseBranchId),
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const kpis = (parse(res.body)?.data ?? parse(res.body)) as {
+    const kpis = parse(res.body)! as {
       sessionsCount: number;
       tasksCompleted: number;
       totalUnits: number;
@@ -468,7 +466,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       },
     });
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const transfer = (parse(createRes.body)?.data ?? parse(createRes.body)) as {
+    const transfer = parse(createRes.body)! as {
       _id: string;
       items: Array<{ _id: string }>;
     };
@@ -510,7 +508,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       },
     });
     expect(receiveRes.statusCode, receiveRes.body).toBeLessThan(400);
-    const received = (parse(receiveRes.body)?.data ?? parse(receiveRes.body)) as {
+    const received = parse(receiveRes.body)! as {
       status: string;
     };
     expect(received.status).toBe('received');
@@ -531,7 +529,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       },
     });
     expect(res.statusCode, res.body).toBeLessThan(400);
-    const data = (parse(res.body)?.data ?? parse(res.body)) as { status: string };
+    const data = parse(res.body)! as { status: string };
     expect(data.status).toBe('deactivated');
 
     // Active list now has 2 (fast + med).
@@ -541,9 +539,7 @@ describe('WMS Full Scenario — classify → slot → LPN → wave → labor →
       headers: setActiveOrgHeader(warehouseBranchId),
     });
     const listBody = parse(listRes.body);
-    const docs = ((listBody?.data as { docs?: unknown[] })?.docs ??
-      (listBody as { docs?: unknown[] })?.docs ??
-      []) as Array<{ status: string }>;
+    const docs = ((listBody as { data?: unknown[] })?.data ?? []) as Array<{ status: string }>;
     const active = docs.filter((d) => d.status === 'active');
     expect(active.length).toBe(2);
   });

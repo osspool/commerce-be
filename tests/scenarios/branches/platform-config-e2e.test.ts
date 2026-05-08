@@ -46,9 +46,7 @@ describe('GET /platform/config — read', () => {
       headers: env.auth.as('admin').headers,
     });
     expect(res.statusCode, res.body).toBe(200);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    const data = body?.data as Record<string, unknown>;
+    const data = parse(res.body) as Record<string, unknown>;
     expect(data).toBeTruthy();
     expect(data.isSingleton).toBe(true);
     // Seeded by the scenario harness.
@@ -62,7 +60,7 @@ describe('GET /platform/config — read', () => {
       headers: env.auth.as('admin').headers,
     });
     expect(res.statusCode, res.body).toBe(200);
-    const data = (parse(res.body)?.data ?? {}) as Record<string, unknown>;
+    const data = (parse(res.body) ?? {}) as Record<string, unknown>;
     // Heavy nested fields must be absent when select narrows the projection.
     const keys = Object.keys(data).filter((k) => k !== '_id' && k !== '__v');
     expect(keys).not.toContain('paymentMethods');
@@ -80,7 +78,7 @@ describe('PATCH /platform/config — deep merge', () => {
       payload: { platformName: 'BigBoss BD' },
     });
     expect(updateRes.statusCode, updateRes.body).toBe(200);
-    const updated = (parse(updateRes.body)?.data ?? {}) as Record<string, unknown>;
+    const updated = (parse(updateRes.body) ?? {}) as Record<string, unknown>;
     expect(updated.platformName).toBe('BigBoss BD');
 
     // Re-read from Mongo to confirm the write landed (not just the response).
@@ -172,7 +170,7 @@ describe('GET /platform/permissions/matrix — RBAC introspection', () => {
       headers: env.auth.as('admin').headers,
     });
     expect(res.statusCode, res.body).toBe(200);
-    const data = (parse(res.body)?.data ?? {}) as { roles?: string[]; modules?: Record<string, unknown> };
+    const data = (parse(res.body) ?? {}) as { roles?: string[]; modules?: Record<string, unknown> };
     expect(Array.isArray(data.roles)).toBe(true);
     expect((data.roles ?? []).length).toBeGreaterThan(0);
     expect(typeof data.modules).toBe('object');
@@ -183,11 +181,11 @@ describe('GET /platform/permissions/matrix — RBAC introspection', () => {
     const a = parse((await env.server.inject({
       method: 'GET', url: `${API}/platform/permissions/matrix`,
       headers: env.auth.as('admin').headers,
-    })).body)?.data;
+    })).body);
     const b = parse((await env.server.inject({
       method: 'GET', url: `${API}/platform/permissions/matrix`,
       headers: env.auth.as('admin').headers,
-    })).body)?.data;
+    })).body);
     // Stable structure across calls — module keys identical.
     expect(Object.keys((a as { modules: Record<string, unknown> }).modules).sort())
       .toEqual(Object.keys((b as { modules: Record<string, unknown> }).modules).sort());

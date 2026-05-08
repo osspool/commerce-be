@@ -17,7 +17,6 @@ type RequestWithUser = FastifyRequest & {
 
 interface ResponsePayload {
   data?: unknown;
-  docs?: unknown[];
   [key: string]: unknown;
 }
 
@@ -97,13 +96,9 @@ export function costPriceFilterMiddleware(
 
   reply.send = ((payload: ResponsePayload) => {
     if (payload && typeof payload === 'object') {
-      // Filter single data object
+      // Filter data field (handles both single objects and paginated arrays)
       if (payload.data) {
         payload.data = filterCostPriceByRole(payload.data, request.user);
-      }
-      // Filter docs array (paginated responses)
-      if (payload.docs && Array.isArray(payload.docs)) {
-        payload.docs = filterCostPriceByRole(payload.docs, request.user) as unknown[];
       }
     }
     return originalSend(payload);

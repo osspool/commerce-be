@@ -4,6 +4,7 @@ import { createFlowBridge } from '../bridges/flow.bridge.js';
 import { ensureOrderEngine } from '../order.engine.js';
 import { releaseOrderStock } from '../order-placement.js';
 import { getOrderContext } from './shared.js';
+import { NotFoundError, ValidationError, createDomainError } from '@classytic/arc/utils';
 
 /**
  * `ship` and `fulfill` are the dashboard-friendly verbs for "deliver this
@@ -38,7 +39,12 @@ export async function orderActionHandler(req: FastifyRequest, reply: FastifyRepl
     { throwOnNotFound: false },
   );
   if (!scoped) {
-    return reply.status(404).send({ success: false, error: 'Order not found' });
+    // NotFoundError(resource, identifier) formats as either
+    //   "<resource> with identifier '<id>' not found"  (when id is set)
+    //   "<resource> not found"                          (without id)
+    // Passing 'Order not found' as the resource would yield
+    // "Order not found not found" — see [arc/src/utils/errors.ts].
+    throw new NotFoundError('Order', id);
   }
 
   // ── Ship-shaped actions: create + transition a Fulfillment ─────────
@@ -51,19 +57,48 @@ export async function orderActionHandler(req: FastifyRequest, reply: FastifyRepl
   if (SHIP_ACTIONS.has(body.action)) {
     const orderDoc = scoped as {
       _id: unknown;
+      status?: string;
       orderNumber: string;
+      fulfillmentSummary?: { total?: number; shipped?: number; fulfilled?: number; delivered?: number };
       lines?: Array<{ lineId?: string; quantity?: number; snapshot?: { requiresShipping?: boolean } }>;
     };
+
+    // Guard against re-shipping an already-shipped/fulfilled order.
+    // Without this, hitting `POST /:id/action {action:'ship'}` repeatedly
+    // creates a new Fulfillment doc on each call (orders.fulfillmentSummary
+    // accumulates), which leads to operational drift (duplicate carrier
+    // shipments, duplicate label prints, downstream subscribers double-
+    // firing). Other illegal transitions (cancel-fulfilled, refund-canceled,
+    // ...) reject with 422 illegal_transition; ship should match.
+    const terminalStatuses = new Set([
+      'fulfilled',
+      'completed',
+      'canceled',
+      'refunded',
+      'shipped',
+    ]);
+    const summary = orderDoc.fulfillmentSummary;
+    const orderInTerminalStatus = orderDoc.status && terminalStatuses.has(orderDoc.status);
+    const allLinesShipped =
+      summary !== undefined &&
+      typeof summary.total === 'number' &&
+      summary.total > 0 &&
+      typeof summary.shipped === 'number' &&
+      summary.shipped >= summary.total;
+    if (orderInTerminalStatus || allLinesShipped) {
+      throw createDomainError(
+        'illegal_transition',
+        `Invalid transition for order ${id}: ${orderDoc.status ?? 'order'} → ${body.action}`,
+        422,
+      );
+    }
+
     const physicalLines = (orderDoc.lines ?? []).filter((line) => {
       const requiresShipping = line.snapshot?.requiresShipping;
       return requiresShipping !== false && line.lineId && (line.quantity ?? 0) > 0;
     });
     if (physicalLines.length === 0) {
-      return reply.status(400).send({
-        success: false,
-        error: 'Order has no shippable lines',
-        code: 'NO_SHIPPABLE_LINES',
-      });
+      throw createDomainError('NO_SHIPPABLE_LINES', 'Order has no shippable lines', 400);
     }
 
     const fulfillment = await engine.repositories.fulfillment.createForOrder(
@@ -99,7 +134,7 @@ export async function orderActionHandler(req: FastifyRequest, reply: FastifyRepl
         'Order FSM transition to fulfilled failed (fulfillment already shipped)',
       );
     }
-    return reply.send({ success: true, data: order });
+    return reply.send(order);
   }
 
   // ── Plain FSM transitions (confirm / cancel / refund / hold / ...) ──
@@ -132,8 +167,10 @@ export async function orderActionHandler(req: FastifyRequest, reply: FastifyRepl
       const tax = totals?.tax?.amount ?? 0;
       const promoDiscount = Number((meta as Record<string, unknown> | undefined)?.promoTotalDiscount ?? 0);
       if (grossAmount > 0) {
+        const customerId = (order as { customerId?: { toString(): string } | string | null }).customerId;
         await publish('accounting:cod.cancelled', {
           orderId: String((order as { _id: unknown })._id),
+          customerId: customerId ? String(customerId) : null,
           grossAmount,
           tax,
           promoDiscount,
@@ -145,5 +182,5 @@ export async function orderActionHandler(req: FastifyRequest, reply: FastifyRepl
     }
   }
 
-  return reply.send({ success: true, data: order });
+  return reply.send(order);
 }

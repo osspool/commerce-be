@@ -5,7 +5,8 @@
  * Standard CRUD operations + custom archival workflows.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import permissions from '#config/permissions.js';
 import { toArcSchemas } from '#shared/event-helpers.js';
 import { archiveActions, getResourcePermissions } from '#shared/permissions.js';

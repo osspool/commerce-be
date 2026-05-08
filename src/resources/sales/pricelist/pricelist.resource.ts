@@ -8,7 +8,8 @@
  * not exposed as an HTTP endpoint.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import permissions from '#config/permissions.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { queryParser } from '#shared/query-parser.js';

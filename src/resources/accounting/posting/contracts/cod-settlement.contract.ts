@@ -21,16 +21,20 @@
  */
 
 import type { PostingInput, PostingItem } from '../posting.service.js';
+import { BD } from '../bd-account-codes.js';
+import { displayRef } from './_label-helpers.js';
 
-const AR_TRADE_DEBTORS = '1141';
-const BANK_CURRENT = '1112';
-const CASH_IN_HAND = '1111';
-const COURIER_COD_COMMISSION = '6423';
-const BAD_DEBT_WRITTEN_OFF = '6702';
+const AR_TRADE_DEBTORS = BD.ar;
+const BANK_CURRENT = BD.cash; // Cash at Bank (Current Account) — never hardcode
+const CASH_IN_HAND = BD.pettyCash;
+const COURIER_COD_COMMISSION = BD.courierCommission;
+const BAD_DEBT_WRITTEN_OFF = BD.badDebt;
 
 export interface CodSettlementData {
   settlementId: string;
   orderId: string;
+  /** Human-readable order reference (e.g. `ORD-2026-04-1234`). */
+  orderReferenceNumber?: string;
   /** paisa — gross expected from the original COD placement (must equal the A/R debit) */
   grossAmount: number;
   /** paisa — what the merchant actually received from the courier */
@@ -39,8 +43,15 @@ export interface CodSettlementData {
   courierCommission: number;
   /** paisa — unrecoverable shortfall (partial collection, refused partial, etc.) */
   writeoff: number;
-  /** Destination account for the received money. Defaults to 1112 Bank; use 1111 for cash-in-hand settlements. */
-  cashAccount?: '1111' | '1112' | string;
+  /** Destination account for the received money. Defaults to `BD.cash` (Cash at Bank); pass `BD.pettyCash` for cash-in-hand settlements. */
+  cashAccount?: typeof BD.pettyCash | typeof BD.cash | string;
+  /**
+   * Customer ObjectId — must match the partnerId on the original COD
+   * placement entry so the A/R clear nets to zero in the subsidiary ledger.
+   * Omit for guest checkouts (placement also omits partnerId; both sides are
+   * "phantom" and cancel out by accountCode + amount).
+   */
+  customerId?: string | null;
   date: Date;
   notes?: string;
 }
@@ -50,6 +61,7 @@ export function codSettlementToPosting(
   options: { autoPost?: boolean } = {},
 ): PostingInput {
   const cashAccount = data.cashAccount || BANK_CURRENT;
+  const orderRef = displayRef(data.orderReferenceNumber, data.orderId);
   const items: PostingItem[] = [];
 
   if (data.actualReceived > 0) {
@@ -57,7 +69,7 @@ export function codSettlementToPosting(
       accountCode: cashAccount,
       debit: data.actualReceived,
       credit: 0,
-      label: `COD settlement received — order ${data.orderId}`,
+      label: `COD settlement received — order ${orderRef}`,
     });
   }
 
@@ -80,19 +92,20 @@ export function codSettlementToPosting(
   }
 
   // Clear the A/R receivable for this order. partnerId matches the
-  // placement entry so aging reports net to zero when settled.
+  // placement entry (customerId when present, falls back to orderId for
+  // guest checkouts) so aging reports net to zero when settled.
   items.push({
     accountCode: AR_TRADE_DEBTORS,
     debit: 0,
     credit: data.grossAmount,
-    label: `Clear COD A/R — order ${data.orderId}`,
-    partnerId: data.orderId,
-    partnerType: 'customer',
+    label: `Clear COD A/R — order ${orderRef}`,
+    partnerId: data.customerId ?? data.orderId,
+    partnerType: 'customer' as const,
   });
 
   return {
     journalType: 'ECOM_SALES_COD_SETTLEMENT',
-    label: data.notes || `COD settlement — order ${data.orderId}`,
+    label: data.notes || `COD settlement — order ${orderRef}`,
     date: data.date,
     items,
     idempotencyKey: `cod-settled-${data.settlementId}`,

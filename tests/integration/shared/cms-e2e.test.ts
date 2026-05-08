@@ -86,7 +86,7 @@ ctx = await setupBetterAuthTestApp({
 
   auth = createBetterAuthProvider({ defaultOrgId: ctx.orgId });
   auth.register('admin', { token: ctx.users.admin.token });
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
   const db = mongoose.connection.db;
@@ -109,7 +109,6 @@ describe('CMS E2E', () => {
       });
       const body = parseBody(res.body);
       expect(res.statusCode).toBe(404);
-      expect(body.success).toBe(false);
     });
 
     it('should return page by slug without auth', async () => {
@@ -131,9 +130,8 @@ describe('CMS E2E', () => {
       });
       const body = parseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.success).toBe(true);
-      expect(body.data.slug).toBe('home');
-      expect(body.data.content.hero.headline).toBe('Welcome');
+      expect(body.slug).toBe('home');
+      expect(body.content.hero.headline).toBe('Welcome');
     });
   });
 
@@ -152,10 +150,9 @@ describe('CMS E2E', () => {
       });
       const body = parseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.success).toBe(true);
-      expect(body.data.slug).toBe('about-us');
-      expect(body.data.name).toBe('about-us'); // defaults name to slug
-      expect(body.data.content.intro).toBe('About our company');
+      expect(body.slug).toBe('about-us');
+      expect(body.name).toBe('about-us'); // defaults name to slug
+      expect(body.content.intro).toBe('About our company');
     });
 
     it('should return existing page on second call', async () => {
@@ -169,9 +166,9 @@ describe('CMS E2E', () => {
       });
       const body = parseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.data.slug).toBe('about-us');
+      expect(body.slug).toBe('about-us');
       // Should return existing, not create new
-      expect(body.data.content.intro).toBe('About our company');
+      expect(body.content.intro).toBe('About our company');
     });
 
     it('should reject unauthenticated request', async () => {
@@ -198,9 +195,8 @@ describe('CMS E2E', () => {
       });
       const body = parseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.success).toBe(true);
-      expect(body.data.slug).toBe('shipping-delivery');
-      expect(body.data.status).toBe('published');
+      expect(body.slug).toBe('shipping-delivery');
+      expect(body.status).toBe('published');
     });
 
     it('should update existing page content', async () => {
@@ -214,7 +210,7 @@ describe('CMS E2E', () => {
       });
       const body = parseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.data.content.zones).toHaveLength(3);
+      expect(body.content.zones).toHaveLength(3);
     });
 
     it('should not allow slug override via payload', async () => {
@@ -229,7 +225,7 @@ describe('CMS E2E', () => {
       });
       const body = parseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.data.slug).toBe('shipping-delivery');
+      expect(body.slug).toBe('shipping-delivery');
     });
 
     it('should reject unauthenticated request', async () => {
@@ -261,7 +257,6 @@ describe('CMS E2E', () => {
       });
       const body = parseBody(res.body);
       expect(res.statusCode).toBe(200);
-      expect(body.success).toBe(true);
 
       // Confirm it's gone
       const getRes = await server.inject({

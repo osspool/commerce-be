@@ -47,13 +47,52 @@ async function seedPlatformConfig(): Promise<void> {
   }
 }
 
-/** Stripe-style action: POST /accounting/budgets/:id/action */
+/**
+ * Stripe-style action: POST /accounting/budgets/:id/action.
+ *
+ * Budget runs through the unified approval framework — `submit_for_approval`
+ * + `decide` (no legacy `submit/approve/reject` shortcuts). For tests, the
+ * helper translates the human-readable verbs into chain-shaped payloads so
+ * each test stays focused on lifecycle assertions, not chain plumbing. The
+ * literal chain is single-step / single-approver — the actor approves their
+ * own submission. Real deployments either configure an `ApprovalPolicy` and
+ * pass `useMatrix: true` or supply a multi-step chain explicitly.
+ */
+const APPROVAL_STEP_ID = 'review';
+
+function chainOneStep(approverId: string) {
+  return { order: 'sequential' as const, steps: [{ id: APPROVAL_STEP_ID, approvers: [{ id: approverId }] }] };
+}
+
 async function budgetAction(id: string, action: string, extra: Record<string, unknown> = {}) {
+  const approverId = ctx.users.admin.userId as string;
+
+  let payload: Record<string, unknown>;
+  switch (action) {
+    case 'submit':
+      payload = { action: 'submit_for_approval', chain: chainOneStep(approverId) };
+      break;
+    case 'approve':
+      payload = { action: 'decide', stepId: APPROVAL_STEP_ID, approverId, decision: 'approved' };
+      break;
+    case 'reject':
+      payload = {
+        action: 'decide',
+        stepId: APPROVAL_STEP_ID,
+        approverId,
+        decision: 'rejected',
+        ...(typeof extra.reason === 'string' ? { note: extra.reason } : {}),
+      };
+      break;
+    default:
+      payload = { action, ...extra };
+  }
+
   return server.inject({
     method: 'POST',
     url: `${API}/accounting/budgets/${id}/action`,
     headers: auth.as('admin').headers,
-    payload: { action, ...extra },
+    payload,
   });
 }
 
@@ -166,7 +205,7 @@ async function createBudgetViaApi(overrides: Record<string, unknown> = {}) {
   });
 
   const body = parse(res.body);
-  if (body?.data?._id) return body.data;
+  if (body?._id) return body;
 
   // If HTTP CRUD returns 403 (role mapping), create directly in DB
   const doc = await db().collection('budgets').insertOne({
@@ -242,8 +281,8 @@ describe('Arc CRUD', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      // Arc CRUD list returns { docs: [...] } not { data: [...] }
-      const items = body?.docs ?? body?.data;
+      // Arc CRUD list returns { data: [...] }
+      const items = body?.data ?? [];
       expect(items).toBeInstanceOf(Array);
       expect(items.length).toBeGreaterThan(0);
     }
@@ -255,7 +294,7 @@ describe('Arc CRUD', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?._id).toBe(budgetId);
+      expect(body?._id).toBe(budgetId);
     }
   });
 
@@ -303,14 +342,17 @@ describe('Approval Workflow — POST /:id/action', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?.status).toBe('submitted');
-      expect(body?.data?.submittedAt).toBeDefined();
+      expect(body?.status).toBe('submitted');
+      expect(body?.submittedAt).toBeDefined();
     }
   });
 
   it('submit again → rejected (already submitted)', async () => {
     const res = await budgetAction(wfId, 'submit');
-    expect([400, 403, 500]).toContain(res.statusCode);
+    // 422 (invalid state for the requested transition) is the canonical
+    // response from the unified approval framework; 400/403/500 retained
+    // for legacy code paths that haven't been routed through the framework.
+    expect([400, 403, 422, 500]).toContain(res.statusCode);
   });
 
   it('submitted → approve', async () => {
@@ -319,14 +361,17 @@ describe('Approval Workflow — POST /:id/action', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?.status).toBe('approved');
-      expect(body?.data?.approvedAt).toBeDefined();
+      expect(body?.status).toBe('approved');
+      expect(body?.approvedAt).toBeDefined();
     }
   });
 
   it('approve again → rejected (already approved)', async () => {
     const res = await budgetAction(wfId, 'approve');
-    expect([400, 403, 500]).toContain(res.statusCode);
+    // 422 (invalid state for the requested transition) is the canonical
+    // response from the unified approval framework; 400/403/500 retained
+    // for legacy code paths that haven't been routed through the framework.
+    expect([400, 403, 422, 500]).toContain(res.statusCode);
   });
 
   it('approved → close', async () => {
@@ -335,7 +380,7 @@ describe('Approval Workflow — POST /:id/action', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?.status).toBe('closed');
+      expect(body?.status).toBe('closed');
     }
   });
 
@@ -347,7 +392,6 @@ describe('Approval Workflow — POST /:id/action', () => {
     // 400 (invalid action enum) or other error codes — must NOT be 200
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
     const body = parse(res.body);
-    expect(body?.success).not.toBe(true);
   });
 });
 
@@ -373,9 +417,9 @@ describe('Rejection Workflow', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?.status).toBe('rejected');
-      expect(body?.data?.rejectionReason).toBe('Amount too high, reduce by 20%');
-      expect(body?.data?.rejectedAt).toBeDefined();
+      expect(body?.status).toBe('rejected');
+      expect(body?.rejectionReason).toBe('Amount too high, reduce by 20%');
+      expect(body?.rejectedAt).toBeDefined();
     }
   });
 
@@ -385,10 +429,10 @@ describe('Rejection Workflow', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?.status).toBe('submitted');
-      expect(body?.data?.rejectedBy).toBeNull();
-      expect(body?.data?.rejectedAt).toBeNull();
-      expect(body?.data?.rejectionReason).toBeNull();
+      expect(body?.status).toBe('submitted');
+      expect(body?.rejectedBy).toBeNull();
+      expect(body?.rejectedAt).toBeNull();
+      expect(body?.rejectionReason).toBeNull();
     }
   });
 
@@ -397,7 +441,7 @@ describe('Rejection Workflow', () => {
     expect([200, 403]).toContain(res.statusCode);
 
     if (res.statusCode === 200) {
-      expect(parse(res.body)?.data?.status).toBe('approved');
+      expect(parse(res.body)?.status).toBe('approved');
     }
   });
 });
@@ -419,17 +463,26 @@ describe('Status Transition Guards', () => {
 
   it('cannot approve draft (must submit first)', async () => {
     const res = await budgetAction(guardId, 'approve');
-    expect([400, 403, 500]).toContain(res.statusCode);
+    // 422 (invalid state for the requested transition) is the canonical
+    // response from the unified approval framework; 400/403/500 retained
+    // for legacy code paths that haven't been routed through the framework.
+    expect([400, 403, 422, 500]).toContain(res.statusCode);
   });
 
   it('cannot close draft', async () => {
     const res = await budgetAction(guardId, 'close');
-    expect([400, 403, 500]).toContain(res.statusCode);
+    // 422 (invalid state for the requested transition) is the canonical
+    // response from the unified approval framework; 400/403/500 retained
+    // for legacy code paths that haven't been routed through the framework.
+    expect([400, 403, 422, 500]).toContain(res.statusCode);
   });
 
   it('cannot reject draft', async () => {
     const res = await budgetAction(guardId, 'reject');
-    expect([400, 403, 500]).toContain(res.statusCode);
+    // 422 (invalid state for the requested transition) is the canonical
+    // response from the unified approval framework; 400/403/500 retained
+    // for legacy code paths that haven't been routed through the framework.
+    expect([400, 403, 422, 500]).toContain(res.statusCode);
   });
 });
 
@@ -465,7 +518,7 @@ describe('Bulk Create', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?.created).toBeGreaterThan(0);
+      expect(body?.created).toBeGreaterThan(0);
     }
   });
 
@@ -496,10 +549,10 @@ describe('Budget Summary', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?.totalBudget).toBeGreaterThanOrEqual(0);
-      expect(body?.data?.approvedBudget).toBeGreaterThanOrEqual(0);
-      expect(body?.data?.byStatus).toBeDefined();
-      expect(body?.data?.statusValues).toEqual(['draft', 'submitted', 'approved', 'rejected', 'closed']);
+      expect(body?.totalBudget).toBeGreaterThanOrEqual(0);
+      expect(body?.approvedBudget).toBeGreaterThanOrEqual(0);
+      expect(body?.byStatus).toBeDefined();
+      expect(body?.statusValues).toEqual(['draft', 'submitted', 'approved', 'rejected', 'closed']);
     }
   });
 });
@@ -518,12 +571,12 @@ describe('Budget vs Actual Report', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      expect(body?.data?.metadata).toBeDefined();
-      expect(body?.data?.rows).toBeInstanceOf(Array);
-      expect(body?.data?.summary).toHaveProperty('totalTheoreticalAmount');
-      expect(body?.data?.summary).toHaveProperty('avgBurnRate');
+      expect(body?.metadata).toBeDefined();
+      expect(body?.rows).toBeInstanceOf(Array);
+      expect(body?.summary).toHaveProperty('totalTheoreticalAmount');
+      expect(body?.summary).toHaveProperty('avgBurnRate');
 
-      for (const row of body.data.rows) {
+      for (const row of body.rows) {
         expect(row).toHaveProperty('theoreticalAmount');
         expect(row).toHaveProperty('burnRate');
         expect(row).toHaveProperty('variance');
@@ -544,6 +597,13 @@ describe('Full E2E Lifecycle', () => {
 
   beforeAll(async () => {
     cashAccountId = await getAccountId('1111');
+    // Earlier describe blocks leak budgets into the DB. The H2 lifecycle
+    // assertion (`budgetAmount === 1_000_000`) only holds in isolation —
+    // any leftover budget against account 1111 inflates the row's total.
+    // Clear them so the lifecycle owns its slice of the variance report.
+    if (mongoose.connection.db) {
+      await mongoose.connection.db.collection('budgets').deleteMany({}).catch(() => {});
+    }
   });
 
   it('Step 1: Create budget for Cash in Hand account (H2 2026)', async () => {
@@ -572,7 +632,7 @@ describe('Full E2E Lifecycle', () => {
     expect([200, 403]).toContain(approveRes.statusCode);
 
     if (approveRes.statusCode === 200) {
-      expect(parse(approveRes.body)?.data?.status).toBe('approved');
+      expect(parse(approveRes.body)?.status).toBe('approved');
     }
   });
 
@@ -623,7 +683,7 @@ describe('Full E2E Lifecycle', () => {
 
     if (res.statusCode === 200) {
       const body = parse(res.body);
-      const rows = body?.data?.rows || [];
+      const rows = body?.rows || [];
       const cashRow = rows.find((r: any) => r.accountCode === '1111');
 
       if (cashRow) {
@@ -631,7 +691,17 @@ describe('Full E2E Lifecycle', () => {
         expect(cashRow.budgetAmount).toBe(1000000);
         expect(cashRow.actualAmount).toBe(500000);
         expect(cashRow.variance).toBe(-500000); // under budget
-        expect(cashRow.theoreticalAmount).toBeGreaterThan(0);
+        // `theoreticalAmount` prorates the budget to elapsed days. The H2
+        // 2026 budget runs Aug 1 – Dec 31; if today is before Aug 1, no
+        // days have elapsed yet and the prorate is correctly 0. Only
+        // assert > 0 once we're inside the budget window.
+        const today = new Date();
+        const budgetStart = new Date('2026-08-01T00:00:00.000Z');
+        if (today >= budgetStart) {
+          expect(cashRow.theoreticalAmount).toBeGreaterThan(0);
+        } else {
+          expect(cashRow.theoreticalAmount).toBe(0);
+        }
       }
     }
   });
@@ -643,7 +713,7 @@ describe('Full E2E Lifecycle', () => {
     expect([200, 403]).toContain(res.statusCode);
 
     if (res.statusCode === 200) {
-      expect(parse(res.body)?.data?.status).toBe('closed');
+      expect(parse(res.body)?.status).toBe('closed');
     }
   });
 

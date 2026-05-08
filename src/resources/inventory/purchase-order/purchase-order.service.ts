@@ -7,7 +7,7 @@ import { payPurchase as payPurchaseAction } from './actions/pay-purchase-order.j
 import { receivePurchase as receivePurchaseAction } from './actions/receive-purchase-order.js';
 import type { CreatePurchaseData, PaymentData, UpdatePurchaseData } from './actions/shared.js';
 import { updateDraftPurchase as updateDraftPurchaseAction } from './actions/update-draft-purchase-order.js';
-import { PurchaseOrderStatus } from './models/purchase-order.model.js';
+import { PurchaseOrderStatus } from './purchase-order.constants.js';
 
 const purchaseState = createStateMachine('Purchase', {
   update: [PurchaseOrderStatus.DRAFT],

@@ -2,50 +2,46 @@
  * Budget Resource — Arc CRUD + Bulk/Summary + Stripe Actions
  *
  * Top-level defineResource — auto-discovered by loadResources().
- * Enterprise mode only — exports null in simple mode (loadResources skips it).
+ * Always registered. Hide in the FE for tenants who don't use budgets;
+ * permissions (`platformAdmin` for writes) handle access control here.
  *
  * CRUD auto-handled by defineResource + BaseController.
  * State transitions (submit/approve/reject/close) via declarative `actions` block.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { buildCrudSchemasFromModel, QueryParser } from '@classytic/mongokit';
-import mongoose from 'mongoose';
-import config from '#config/index.js';
 import { groups } from '#config/permissions/roles.js';
 import { requireAuth, requireRoles } from '#shared/permissions.js';
 import { orgScoped } from '#shared/presets/index.js';
 import { BUDGET_STATUS_VALUES, Budget, budgetRepository } from '../accounting.engine.js';
 import { bulkCreateSchema } from './budget.schemas.js';
 
-// Enterprise-only — `default` is null in simple mode so loadResources skips this file.
-let budgetResource: ReturnType<typeof defineResource> | null = null;
+const queryParser = new QueryParser({ maxLimit: 500 });
 
-if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
-  const queryParser = new QueryParser({ maxLimit: 500 });
+const budgetPermissions = {
+  list: requireAuth(),
+  get: requireAuth(),
+  create: requireRoles(groups.platformAdmin),
+  update: requireRoles(groups.platformAdmin),
+  delete: requireRoles(groups.platformAdmin),
+};
 
-  const budgetPermissions = {
-    list: requireAuth(),
-    get: requireAuth(),
-    create: requireRoles(groups.platformAdmin),
-    update: requireRoles(groups.platformAdmin),
-    delete: requireRoles(groups.platformAdmin),
-  };
+const omitWorkflowFields = [
+  'organizationId',
+  'status',
+  'revision',
+  'submittedBy',
+  'submittedAt',
+  'approvedBy',
+  'approvedAt',
+  'rejectedBy',
+  'rejectedAt',
+  'rejectionReason',
+];
 
-  const omitWorkflowFields = [
-    'organizationId',
-    'status',
-    'revision',
-    'submittedBy',
-    'submittedAt',
-    'approvedBy',
-    'approvedAt',
-    'rejectedBy',
-    'rejectedAt',
-    'rejectionReason',
-  ];
-
-  budgetResource = defineResource({
+const budgetResource = defineResource({
     name: 'budget',
     audit: true,
     displayName: 'Budgets',
@@ -103,7 +99,7 @@ if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
             }
           }
 
-          return reply.send({ success: true, data: results });
+          return reply.send(results);
         },
       },
 
@@ -118,10 +114,19 @@ if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
           const orgId = req.scope?.organizationId;
           if (!orgId) return reply.status(400).send({ error: 'Organization context required' });
 
-          const agg = await Budget.aggregate([
-            { $match: { organizationId: new mongoose.Types.ObjectId(orgId) } },
-            { $group: { _id: '$status', count: { $sum: 1 }, totalAmount: { $sum: '$amount' } } },
-          ]);
+          // `aggregatePipeline` (mongokit 3.13+) routes through the multi
+          // tenant plugin, which prepends the org `$match` from options.
+          // The local pipeline carries grouping only.
+          const agg = await budgetRepository.aggregatePipeline<{
+            _id: string;
+            count: number;
+            totalAmount: number;
+          }>(
+            [
+              { $group: { _id: '$status', count: { $sum: 1 }, totalAmount: { $sum: '$amount' } } },
+            ],
+            { organizationId: orgId },
+          );
 
           const byStatus: Record<string, { count: number; totalAmount: number }> = {};
           let totalBudget = 0;
@@ -133,14 +138,10 @@ if (config.accounting.mode !== 'simple' && Budget && budgetRepository) {
             if (g._id === 'approved') approvedBudget += g.totalAmount;
           }
 
-          return reply.send({
-            success: true,
-            data: { totalBudget, approvedBudget, byStatus, statusValues: BUDGET_STATUS_VALUES },
-          });
+          return reply.send({ totalBudget, approvedBudget, byStatus, statusValues: BUDGET_STATUS_VALUES });
         },
       },
     ],
-  });
-}
+});
 
 export default budgetResource;

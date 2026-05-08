@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { IBranch } from './branch.model.js';
 import branchRepository from './branch.repository.js';
 import { branchSchemaOptions } from './branch.schemas.js';
+import { NotFoundError } from '@classytic/arc/utils';
 
 /**
  * Branch Controller
@@ -39,15 +40,15 @@ class BranchController extends BaseController<IBranch & AnyRecord> {
     const result = await branchRepository.getByCode(code);
 
     if (!result) {
-      return reply.code(404).send({ success: false, message: 'Branch not found' });
+      throw new NotFoundError('Branch not found');
     }
 
-    return reply.send({ success: true, data: result });
+    return reply.send(result);
   }
 
   async getDefault(_req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const result = await branchRepository.getDefaultBranch();
-    return reply.send({ success: true, data: result });
+    return reply.send(result);
   }
 
   async setDefault(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
@@ -55,15 +56,15 @@ class BranchController extends BaseController<IBranch & AnyRecord> {
     const result = await branchRepository.setDefault(id);
 
     if (!result) {
-      return reply.code(404).send({ success: false, message: 'Branch not found' });
+      throw new NotFoundError('Branch not found');
     }
 
-    return reply.send({ success: true, data: result, message: 'Default branch updated' });
+    return reply.send(result);
   }
 
   async getActive(_req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const result = await branchRepository.getActiveBranches();
-    return reply.send({ success: true, data: result });
+    return reply.send(result);
   }
 }
 

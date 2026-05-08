@@ -103,7 +103,7 @@ describe('Transfer cancel — mid-flight', () => {
       },
     });
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const transfer = parse(createRes.body)?.data as { _id: string; status: string };
+    const transfer = parse(createRes.body) as { _id: string; status: string };
     expect(transfer.status).toBe('draft');
 
     const cancelRes = await env.server.inject({
@@ -113,7 +113,7 @@ describe('Transfer cancel — mid-flight', () => {
       payload: { action: 'cancel', reason: 'changed our mind' },
     });
     expect(cancelRes.statusCode, cancelRes.body).toBeLessThan(400);
-    const cancelled = parse(cancelRes.body)?.data as { status: string };
+    const cancelled = parse(cancelRes.body) as { status: string };
     expect(cancelled.status).toBe('cancelled');
 
     // Stock untouched — nothing was dispatched.

@@ -21,6 +21,7 @@ import { wireOrderLoyaltyHook } from './order-loyalty-hook.js';
 import { wireOrderRevenueHook } from './order-revenue-hook.js';
 import { wireOrderLifecycleHandlers } from './lifecycle/wire-handlers.js';
 import { wireOrderStockHook } from './order-stock-hook.js';
+import { shouldAutoIndex } from '#shared/db/auto-index.js';
 
 let engine: OrderEngine | null = null;
 let pending: Promise<OrderEngine> | null = null;
@@ -28,15 +29,34 @@ let pending: Promise<OrderEngine> | null = null;
 /**
  * Get or lazily create the order engine.
  *
- * Multi-tenant scoping is enforced at the Arc layer via the `orgScoped`
- * preset on each orders resource (see be-prod's AGENTS.md — Arc is the
- * canonical tenant boundary for every resource in this project). We
- * therefore opt OUT of `@classytic/order`'s repository-level auto-wired
- * `multiTenantPlugin` with `multiTenant: false` to avoid double-scoping
- * that would fight the preset: the mongokit plugin wants
- * `ctx.organizationId` on every call, while Arc's preset merges tenant
- * filters into `_policyFilters` instead of passing them down the call
- * chain. Arc's scope is the single source of truth.
+ * Branch scoping (multi-branch isolation in this single-business ERP, where
+ * `organizationId === branchId`) is enforced through TWO layers, both of
+ * which are required for full coverage:
+ *
+ *   1. **Arc preset (`orgScoped`)** — covers the CRUD path. The
+ *      `multiTenantPreset` middleware sets `req._tenantFields` so
+ *      `BaseCrudController.tenantRepoOptions(req)` forwards
+ *      `organizationId` to `repo.getAll(...)` / `repo.getById(...)` etc.
+ *      No mongokit plugin is required for CRUD because the controller
+ *      stamps the orgId into the call options directly.
+ *
+ *   2. **Mongokit's `multiTenantPlugin`** — covers the AGGREGATION path.
+ *      Arc 2.15.2+ explicitly delegates tenant-scope injection on
+ *      aggregations to the kit's plugin (see arc's
+ *      `core/aggregation/validate.ts` — type-coercion lives in the kit,
+ *      not the framework). Without the plugin, `repo.aggregate(req,
+ *      { organizationId })` reaches `executeAgg()` with NO tenant clause
+ *      and returns every branch's rows. That breaks per-branch sales
+ *      dashboards, which would otherwise show another branch's orders to
+ *      a sub-branch operator.
+ *
+ * Pre-arc-2.15.2 we ran with `multiTenant: false` to "avoid double-scoping
+ * that would fight the preset". That was correct for the CRUD path but
+ * silently broke aggregations once arc removed its inline tenant-filter
+ * injection. Re-enabled: `tenantFieldType: 'objectId'` matches Better
+ * Auth's storage type, so the plugin's auto-cast produces a
+ * filter-compatible `ObjectId` clause that the IR pipeline composes
+ * cleanly with arc's controller-level orgId option.
  *
  * Bridges: catalog required; revenue/flow wired later as needed.
  */
@@ -48,12 +68,37 @@ export async function ensureOrderEngine(): Promise<OrderEngine> {
       engine = await createOrder({
         connection: mongoose.connection,
         defaultCurrency: 'BDT',
-        multiTenant: false,
-        autoIndex: process.env.NODE_ENV !== 'production',
+        // Branch isolation on the AGGREGATION path requires this plugin —
+        // arc's CRUD path scopes via the orgScoped preset, but
+        // /aggregations/:name routes go through mongokit's
+        // `before:aggregate` hook and need the plugin installed to read
+        // `context.organizationId` and inject the `$match`.
+        //
+        // `required: false` is critical here because the SAME order repo
+        // backs TWO arc resources:
+        //   1. `order` resource (per-branch, `presets: [orgScoped]`,
+        //      `tenantField: 'organizationId'`) — arc forwards orgId via
+        //      `tenantRepoOptions`, plugin reads it, scope applied.
+        //   2. `salesOverview` admin resource (cross-branch HQ rollup,
+        //      `tenantField: false`) — arc deliberately does NOT forward
+        //      orgId. With `required: true` (default) the plugin would
+        //      throw "Missing organizationId in context"; `required: false`
+        //      lets the unscoped query pass through to roll up across
+        //      every branch.
+        // Per-branch leakage is still impossible because BaseCrudController
+        // unconditionally calls `tenantRepoOptions(req)` on every CRUD +
+        // aggregate call for the orgScoped resource — orgId is always
+        // forwarded for that resource. `required: false` only relaxes the
+        // hard-throw on truly cross-branch endpoints that opt out via
+        // `tenantField: false`.
+        multiTenant: { required: false },
+        autoIndex: shouldAutoIndex(),
+        forceRecreate: process.env.NODE_ENV === 'test',
 
         // Better Auth stores organization._id as ObjectId — match the schema so
         // $lookup, .populate('organizationId'), and QueryParser `?lookup=organizationId`
-        // work across the orders → organization boundary.
+        // work across the orders → organization boundary. Also drives the
+        // multiTenantPlugin's auto-cast on the aggregation path.
         tenantFieldType: 'objectId',
 
         bridges: {

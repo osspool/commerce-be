@@ -20,14 +20,14 @@ function actingUserId(req: FastifyRequest): string | undefined {
 
 export async function qualifyLead(id: string, data: Record<string, unknown>, req: FastifyRequest): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
   const note = typeof data.note === 'string' ? data.note : undefined;
   return services.leads.qualify(id, actingUserId(req), note);
 }
 
 export async function disqualifyLead(id: string, data: Record<string, unknown>, req: FastifyRequest): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
   const reason = typeof data.reason === 'string' ? data.reason : 'unspecified';
   return services.leads.disqualify(id, reason, actingUserId(req));
 }
@@ -38,14 +38,14 @@ export async function markLeadContacted(
   req: FastifyRequest,
 ): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
   const note = typeof data.note === 'string' ? data.note : undefined;
   return services.leads.markContacted(id, actingUserId(req), note);
 }
 
 export async function nurtureLead(id: string, _data: Record<string, unknown>, req: FastifyRequest): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
   return services.leads.nurture(id, actingUserId(req));
 }
 
@@ -58,7 +58,7 @@ interface ConvertPayload {
 
 export async function convertLead(id: string, data: Record<string, unknown>, req: FastifyRequest): Promise<unknown> {
   const services = resolveServices(req);
-  if (!services) throw new Error('CRM engine is not enabled (CRM_MODE=off)');
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
 
   const { pipelineId, opportunityName, amount, expectedCloseAt } = data as ConvertPayload;
   if (typeof pipelineId !== 'string' || !pipelineId) {

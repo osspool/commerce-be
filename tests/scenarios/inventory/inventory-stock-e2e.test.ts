@@ -124,8 +124,8 @@ describe('Inventory Stock Adjustment -> POS Re-Read', () => {
 
     const body = safeParseBody(res.body);
     expect(res.statusCode, `Adjustment failed: ${JSON.stringify(body)}`).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.data.newQuantity, `Adjustment response: ${JSON.stringify(body)}`).toBe(5);
+
+    expect(body.newQuantity, `Adjustment response: ${JSON.stringify(body)}`).toBe(5);
   });
 
   it('should return updated branchStock from POS products endpoint immediately after adjustment', async () => {
@@ -137,10 +137,9 @@ describe('Inventory Stock Adjustment -> POS Re-Read', () => {
 
     const body = safeParseBody(res.body);
     expect(res.statusCode, `POS products failed: ${JSON.stringify(body)}`).toBe(200);
-    expect(body.success).toBe(true);
 
-    const product = body.docs.find((d: any) => String(d._id) === testProductId);
-    expect(product, `Product not found in docs. docs count: ${body.docs?.length}, productId: ${testProductId}`).toBeTruthy();
+    const product = body.data.find((d: any) => String(d._id) === testProductId);
+    expect(product, `Product not found in data. data count: ${body.data?.length}, productId: ${testProductId}`).toBeTruthy();
     expect(product.branchStock).toBeTruthy();
 
     const variant = product.branchStock.variants?.find((v: any) => v.sku === VARIANT_SKU);
@@ -168,8 +167,8 @@ describe('Inventory Stock Adjustment -> POS Re-Read', () => {
 
     const body = safeParseBody(res.body);
     expect(res.statusCode, `Add adjustment failed: ${JSON.stringify(body)}`).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.data.newQuantity, `Add response: ${JSON.stringify(body)}`).toBe(8); // 5 + 3
+
+    expect(body.newQuantity, `Add response: ${JSON.stringify(body)}`).toBe(8); // 5 + 3
 
     const posRes = await server.inject({
       method: 'GET',
@@ -177,7 +176,7 @@ describe('Inventory Stock Adjustment -> POS Re-Read', () => {
       headers: h(),
     });
     const posBody = safeParseBody(posRes.body);
-    const product = posBody.docs.find((d: any) => String(d._id) === testProductId);
+    const product = posBody.data.find((d: any) => String(d._id) === testProductId);
     const variant = product?.branchStock?.variants?.find((v: any) => v.sku === VARIANT_SKU);
     expect(variant?.quantity, `POS after add: ${JSON.stringify(product?.branchStock)}`).toBe(8);
   });
@@ -199,8 +198,8 @@ describe('Inventory Stock Adjustment -> POS Re-Read', () => {
 
     const body = safeParseBody(res.body);
     expect(res.statusCode, `Remove adjustment failed: ${JSON.stringify(body)}`).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.data.newQuantity, `Remove response: ${JSON.stringify(body)}`).toBe(6); // 8 - 2
+
+    expect(body.newQuantity, `Remove response: ${JSON.stringify(body)}`).toBe(6); // 8 - 2
 
     const posRes = await server.inject({
       method: 'GET',
@@ -208,7 +207,7 @@ describe('Inventory Stock Adjustment -> POS Re-Read', () => {
       headers: h(),
     });
     const posBody = safeParseBody(posRes.body);
-    const product = posBody.docs.find((d: any) => String(d._id) === testProductId);
+    const product = posBody.data.find((d: any) => String(d._id) === testProductId);
     const variant = product?.branchStock?.variants?.find((v: any) => v.sku === VARIANT_SKU);
     expect(variant?.quantity, `POS after remove: ${JSON.stringify(product?.branchStock)}`).toBe(6);
   });

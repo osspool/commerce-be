@@ -29,17 +29,13 @@ export function createAccountRepositoryAdapter(ctx: CrmRequestContext): AccountR
 
   return {
     async findById(id) {
-      const doc = await (
-        repo as unknown as { Model: { findOne: (q: object) => Promise<IAccountDoc | null> } }
-      ).Model.findOne({ _id: id, ...scope });
-      return doc ? toAccount(doc) : null;
+      const doc = await repo.getByQuery({ _id: id, ...scope });
+      return doc ? toAccount(doc as unknown as IAccountDoc) : null;
     },
 
     async findByDomain(domain) {
-      const doc = await (
-        repo as unknown as { Model: { findOne: (q: object) => Promise<IAccountDoc | null> } }
-      ).Model.findOne({ domain: domain.toLowerCase().trim(), ...scope });
-      return doc ? toAccount(doc) : null;
+      const doc = await repo.getByQuery({ domain: domain.toLowerCase().trim(), ...scope });
+      return doc ? toAccount(doc as unknown as IAccountDoc) : null;
     },
 
     async list(filter: AccountFilter = {}) {
@@ -48,10 +44,8 @@ export function createAccountRepositoryAdapter(ctx: CrmRequestContext): AccountR
       if (filter.industry) query.industry = filter.industry;
       if (filter.domain) query.domain = filter.domain.toLowerCase().trim();
       if (filter.tags && filter.tags.length) query.tags = { $all: [...filter.tags] };
-      const docs = await (repo as unknown as { Model: { find: (q: object) => Promise<IAccountDoc[]> } }).Model.find(
-        query,
-      );
-      return docs.map(toAccount);
+      const docs = await repo.findAll(query);
+      return (docs as unknown as IAccountDoc[]).map(toAccount);
     },
 
     async create(input) {

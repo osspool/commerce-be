@@ -12,6 +12,7 @@ import permissions from '#config/permissions.js';
 import { isSystemLocationCode } from '../../flow/context-helpers.js';
 import { flow, flowCtxGuard } from '../shared/helpers.js';
 import { locationSchemas } from './location.schemas.js';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@classytic/arc/utils';
 
 const locationResource = defineResource({
   name: 'warehouse-location',
@@ -34,7 +35,7 @@ const locationResource = defineResource({
         const { nodeId, type, parentLocationId, status } = req.query as Record<string, string | undefined>;
 
         if (!nodeId) {
-          return reply.code(400).send({ success: false, error: 'nodeId query parameter is required' });
+          throw new ValidationError('nodeId query parameter is required');
         }
 
         let locations = await flow().repositories.location.findAll(
@@ -47,7 +48,7 @@ const locationResource = defineResource({
           locations = locations.filter((l) => String(l.parentLocationId ?? '') === parentLocationId);
         if (status) locations = locations.filter((l) => l.status === status);
 
-        return reply.send({ success: true, data: locations, total: locations.length });
+        return reply.send(locations);
       },
     },
     {
@@ -63,7 +64,7 @@ const locationResource = defineResource({
         const { nodeId } = req.query as { nodeId: string };
 
         if (!nodeId) {
-          return reply.code(400).send({ success: false, error: 'nodeId required' });
+          throw new ValidationError('nodeId required');
         }
 
         const locations = await flow().repositories.location.findAll(
@@ -98,7 +99,7 @@ const locationResource = defineResource({
           }))
           .sort((a, b) => a.zone.localeCompare(b.zone));
 
-        return reply.send({ success: true, data: { nodeId, zones: layout, totalLocations: locations.length } });
+        return reply.send({ nodeId, zones: layout, totalLocations: locations.length });
       },
     },
     {
@@ -114,8 +115,8 @@ const locationResource = defineResource({
           organizationId: ctx.organizationId,
           throwOnNotFound: false,
         });
-        if (!loc) return reply.code(404).send({ success: false, error: 'Location not found' });
-        return reply.send({ success: true, data: loc });
+        if (!loc) throw new NotFoundError('Location not found');
+        return reply.send(loc);
       },
     },
     {
@@ -129,7 +130,7 @@ const locationResource = defineResource({
         const { id } = req.params as { id: string };
         const ctx = flowCtxGuard.from(req);
         const avail = await flow().services.quant.getAvailability({ locationId: id }, ctx);
-        return reply.send({ success: true, data: avail });
+        return reply.send(avail);
       },
     },
     {
@@ -152,7 +153,7 @@ const locationResource = defineResource({
           { organizationId: ctx.organizationId },
         );
 
-        return reply.code(201).send({ success: true, data: loc });
+        return reply.code(201).send(loc);
       },
     },
     {
@@ -182,7 +183,7 @@ const locationResource = defineResource({
           created.push(result);
         }
 
-        return reply.code(201).send({ success: true, data: { created: created.length, locations: created } });
+        return reply.code(201).send({ created: created.length, locations: created });
       },
     },
     {
@@ -201,12 +202,12 @@ const locationResource = defineResource({
           organizationId: ctx.organizationId,
           throwOnNotFound: false,
         });
-        if (!existing) return reply.code(404).send({ success: false, error: 'Location not found' });
+        if (!existing) throw new NotFoundError('Location not found');
 
         const updated = await flow().repositories.location.update(id, body, {
           organizationId: ctx.organizationId,
         });
-        return reply.send({ success: true, data: updated });
+        return reply.send(updated);
       },
     },
     {
@@ -225,13 +226,10 @@ const locationResource = defineResource({
           organizationId: ctx.organizationId,
           throwOnNotFound: false,
         });
-        if (!existing) return reply.code(404).send({ success: false, error: 'Location not found' });
+        if (!existing) throw new NotFoundError('Location not found');
 
         if (isSystemLocationCode(existing.code)) {
-          return reply.code(403).send({
-            success: false,
-            error: 'System locations (stock, vendor, customer, adjustment) cannot be deleted',
-          });
+          throw new ForbiddenError('System locations (stock, vendor, customer, adjustment) cannot be deleted');
         }
 
         const quants = await flow().repositories.quant.findAll(
@@ -239,10 +237,7 @@ const locationResource = defineResource({
           { organizationId: ctx.organizationId, limit: 1, lean: true },
         );
         if (quants.length > 0) {
-          return reply.code(409).send({
-            success: false,
-            error: 'Location has stock quants. Transfer or adjust stock to zero before deleting.',
-          });
+          throw new ConflictError('Location has stock quants. Transfer or adjust stock to zero before deleting.');
         }
 
         const reservations = await flow().repositories.reservation.findAll(
@@ -250,10 +245,7 @@ const locationResource = defineResource({
           { organizationId: ctx.organizationId, limit: 1, lean: true },
         );
         if (reservations.length > 0) {
-          return reply.code(409).send({
-            success: false,
-            error: 'Location has active reservations. Release reservations before deleting.',
-          });
+          throw new ConflictError('Location has active reservations. Release reservations before deleting.');
         }
 
         const children = await flow().repositories.location.findAll(
@@ -261,14 +253,11 @@ const locationResource = defineResource({
           { organizationId: ctx.organizationId, limit: 1, lean: true },
         );
         if (children.length > 0) {
-          return reply.code(409).send({
-            success: false,
-            error: 'Location has child locations. Delete or reparent children first.',
-          });
+          throw new ConflictError('Location has child locations. Delete or reparent children first.');
         }
 
         await flow().repositories.location.delete(id, { organizationId: ctx.organizationId });
-        return reply.send({ success: true, data: { _id: id } });
+        return reply.send({ _id: id });
       },
     },
   ],

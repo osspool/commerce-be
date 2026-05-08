@@ -6,7 +6,8 @@
  */
 import { z } from 'zod';
 
-const successEnvelope = (dataSchema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: dataSchema });
+// Arc 2.13: flat wire shape — envelope helper is identity now.
+const successEnvelope = (dataSchema: z.ZodTypeAny) => dataSchema;
 
 const availabilityResult = z.object({
   quantityOnHand: z.number(),

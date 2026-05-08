@@ -1,4 +1,3 @@
-import config from '#config/index.js';
 import { type StockAdjustmentData, stockAdjustmentToPosting } from '../../posting/contracts/inventory.contract.js';
 import { definePostingHandler } from '../define-posting-handler.js';
 import { InventoryAdjustedEvent, inventoryAdjustedSchema } from '../event-definitions.js';
@@ -16,15 +15,17 @@ export const inventoryAdjustedHandler = definePostingHandler({
 
     const data: StockAdjustmentData = {
       adjustmentId: payload.adjustmentId,
+      referenceNumber: payload.referenceNumber,
       type: payload.type,
       amount: payload.amount,
       date: payload.date ? new Date(payload.date) : new Date(),
       reason: payload.reason,
+      ...(payload.source ? { sourceModel: payload.source.sourceModel, sourceId: payload.source.sourceId } : {}),
     };
 
     return {
       branchId: payload.branchId,
-      posting: stockAdjustmentToPosting(data, { autoPost: config.accounting.autoPost }),
+      posting: stockAdjustmentToPosting(data),
       logFields: { adjustmentId: payload.adjustmentId, type: payload.type },
       successMessage: 'Inventory adjustment journal entry created',
     };

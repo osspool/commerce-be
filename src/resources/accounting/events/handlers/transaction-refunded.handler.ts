@@ -1,4 +1,3 @@
-import config from '#config/index.js';
 import { getTransactionModel } from '#shared/revenue/engine.js';
 import { type RefundData, refundToPosting } from '../../posting/contracts/refund.contract.js';
 import { definePostingHandler } from '../define-posting-handler.js';
@@ -46,7 +45,7 @@ export const transactionRefundedHandler = definePostingHandler({
 
     return {
       branchId: txn.branch.toString(),
-      posting: refundToPosting(data, { autoPost: config.accounting.autoPost }),
+      posting: refundToPosting(data),
       logFields: { transactionId: payload.transactionId },
       successMessage: 'Refund reversal journal entry created',
     };

@@ -121,7 +121,6 @@ describe('Account Types (any authenticated)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
     expect(body.data.length).toBeGreaterThan(0);
   });
 });
@@ -152,8 +151,7 @@ describe('Chart of Accounts (company-wide)', () => {
     if (res.statusCode >= 400) console.log('[SEED FAIL]', res.statusCode, res.body);
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.created).toBeGreaterThan(0);
+    expect(body.created).toBeGreaterThan(0);
   });
 
   it('second seed is idempotent', async () => {
@@ -164,7 +162,7 @@ describe('Chart of Accounts (company-wide)', () => {
     });
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    expect(body.data.created).toBe(0);
+    expect(body.created).toBe(0);
   });
 
   it('accounts exist in DB and are company-wide', async () => {
@@ -243,7 +241,6 @@ describe('Chart of Accounts (company-wide)', () => {
     });
     expect(res.statusCode).toBe(400);
     const body = parse(res.body);
-    expect(body.success).toBe(false);
   });
 });
 
@@ -269,9 +266,9 @@ describe('Fiscal Periods (company-wide)', () => {
     });
     expect([200, 201]).toContain(res.statusCode);
     const body = parse(res.body);
-    periodId = body.data._id;
+    periodId = body._id;
     // Company-wide: no org field on fiscal period
-    expect(body.data).not.toHaveProperty('organizationId');
+    expect(body).not.toHaveProperty('organizationId');
   });
 
   it('fiscal period exists in DB and is company-wide', async () => {
@@ -338,7 +335,7 @@ describe('Journal Entries (branch-tagged)', () => {
     }
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.data.state).toBe('posted');
+    expect(body.state).toBe('posted');
   });
 
   it('reverse posted JE', async () => {
@@ -350,7 +347,6 @@ describe('Journal Entries (branch-tagged)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
   });
 
   it('double-entry validation still works (debit != credit rejects on post)', async () => {
@@ -379,7 +375,7 @@ describe('Journal Entries (branch-tagged)', () => {
       payload: { action: 'post' },
     });
     expect(post.statusCode).toBeGreaterThanOrEqual(400);
-    expect(parse(post.body).error).toMatch(/balance|debit|credit/i);
+    expect(parse(post.body).message).toMatch(/balance|debit|credit/i);
   });
 });
 
@@ -396,9 +392,8 @@ describe('Reports (company-wide)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
     // Report structure varies — just verify it returns data
-    expect(body.data).toBeTruthy();
+    expect(body).toBeTruthy();
   });
 
   it('balance sheet works', async () => {
@@ -408,7 +403,6 @@ describe('Reports (company-wide)', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body).success).toBe(true);
   });
 
   it('income statement works', async () => {
@@ -418,7 +412,6 @@ describe('Reports (company-wide)', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body).success).toBe(true);
   });
 
   it('general ledger works', async () => {
@@ -428,7 +421,6 @@ describe('Reports (company-wide)', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body).success).toBe(true);
   });
 
   it('cash flow works', async () => {
@@ -438,6 +430,5 @@ describe('Reports (company-wide)', () => {
       headers: h(),
     });
     expect(res.statusCode).toBe(200);
-    expect(parse(res.body).success).toBe(true);
   });
 });

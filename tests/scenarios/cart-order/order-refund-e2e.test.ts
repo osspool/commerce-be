@@ -288,7 +288,7 @@ describe('Admin quick refund — POST /orders/:id/refund', () => {
       idempotencyKey: `refund-full-${Date.now()}`,
     });
     expect(place.status).toBeLessThan(400);
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     // 1 entry from placement (Dr Cash | Cr Revenue)
@@ -296,7 +296,7 @@ describe('Admin quick refund — POST /orders/:id/refund', () => {
 
     const res = await refundOrder(order.orderNumber, { reason: 'customer-cancelled' });
     expect(res.status).toBeLessThan(400);
-    expect(res.body?.success).toBe(true);
+    expect(res.body?.refund).toBeDefined();
 
     await flush();
 
@@ -328,7 +328,7 @@ describe('Admin quick refund — POST /orders/:id/refund', () => {
       unitPrice: 100000,
       idempotencyKey: `refund-partial-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     // Refund 40% of the order.
@@ -363,7 +363,7 @@ describe('Admin quick refund — POST /orders/:id/refund', () => {
       unitPrice: 30000,
       idempotencyKey: `refund-double-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     const first = await refundOrder(order.orderNumber);
@@ -386,7 +386,7 @@ describe('Admin quick refund — POST /orders/:id/refund', () => {
       unitPrice: 25000,
       idempotencyKey: `refund-over-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
     const beforeCount = (await getJournalEntriesForOrder(order._id)).length;
 
@@ -405,7 +405,7 @@ describe('Admin quick refund — POST /orders/:id/refund', () => {
       unitPrice: 20000,
       idempotencyKey: `refund-zero-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     const zero = await refundOrder(order.orderNumber, { amount: 0 });
@@ -423,7 +423,7 @@ describe('Admin quick refund — POST /orders/:id/refund', () => {
       unitPrice: 70000,
       idempotencyKey: `refund-cod-unsettled-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     // Placement posted Dr 1141 A/R | Cr 4111 Revenue.
@@ -452,7 +452,7 @@ describe('Admin quick refund — POST /orders/:id/refund', () => {
       unitPrice: 50000,
       idempotencyKey: `refund-cod-settled-${Date.now()}`,
     });
-    const order = place.body?.data as { _id: string; orderNumber: string };
+    const order = place.body as { _id: string; orderNumber: string };
     await flush();
 
     // Settle the COD first.

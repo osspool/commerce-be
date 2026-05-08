@@ -44,17 +44,26 @@ export const purchaseReceivedHandler = definePostingHandler({
     const totalAmountPaisa = Math.round(Number(purchase.grandTotal ?? 0) * 100);
     const taxPaisa = Math.round(tax * 100);
 
-    const posting = vendorBillToPosting({
-      purchaseId: String(purchase._id),
-      supplierId: String(purchase.supplier),
-      totalAmount: totalAmountPaisa,
-      tax: taxPaisa,
-      vatRate: dominantTaxRate,
-      receivedAt: new Date((purchase.receivedAt as Date) ?? new Date()),
-      dueDate: purchase.dueDate ? new Date(purchase.dueDate as Date) : undefined,
-      creditDays: purchase.creditDays as number | undefined,
-      billNumber: purchase.invoiceNumber as string | undefined,
-    });
+    // Receipt is the operational signal that the bill is real and the A/P
+    // liability has accrued — the goods are physically in, the PO was already
+    // approved through procurement. Pass `autoPost: true` to skip draft state:
+    // there is nothing left to review at this point. (The contract's intrinsic
+    // default is draft for ad-hoc / manual bill creation; this event-driven
+    // accrual path is authoritative.)
+    const posting = vendorBillToPosting(
+      {
+        purchaseId: String(purchase._id),
+        supplierId: String(purchase.supplier),
+        totalAmount: totalAmountPaisa,
+        tax: taxPaisa,
+        vatRate: dominantTaxRate,
+        receivedAt: new Date((purchase.receivedAt as Date) ?? new Date()),
+        dueDate: purchase.dueDate ? new Date(purchase.dueDate as Date) : undefined,
+        creditDays: purchase.creditDays as number | undefined,
+        billNumber: purchase.invoiceNumber as string | undefined,
+      },
+      { autoPost: true },
+    );
 
     return {
       branchId,

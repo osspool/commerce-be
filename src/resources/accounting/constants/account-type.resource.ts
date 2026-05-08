@@ -10,6 +10,7 @@
 import { defineResource } from '@classytic/arc';
 import { requireAuth } from '@classytic/arc/permissions';
 import { BD_ACCOUNT_TYPES } from '@classytic/ledger-bd';
+import { NotFoundError } from '@classytic/arc/utils';
 
 function mapAccountType(at: any) {
   return {
@@ -60,7 +61,7 @@ const accountTypeResource = defineResource({
           accountTypes = accountTypes.filter((at) => at.category.endsWith(`-${mainType}`));
         }
 
-        return { success: true, results: accountTypes.length, data: accountTypes };
+        return { results: accountTypes.length, data: accountTypes };
       },
     },
 
@@ -74,12 +75,9 @@ const accountTypeResource = defineResource({
         const { code } = req.params;
         const accountType = (BD_ACCOUNT_TYPES as any[]).find((at) => at.code === code);
         if (!accountType) {
-          return reply.status(404).send({ success: false, error: `Account type '${code}' not found` });
+          throw new NotFoundError(`Account type '${code}' not found`);
         }
-        return {
-          success: true,
-          data: { ...mapAccountType(accountType), totalAccountTypes: accountType.totalAccountTypes ?? null },
-        };
+        return { ...mapAccountType(accountType), totalAccountTypes: accountType.totalAccountTypes ?? null };
       },
     },
   ],

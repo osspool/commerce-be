@@ -16,7 +16,7 @@
  * safe to call multiple times. No guard needed.
  */
 
-import type { DomainEvent } from '@classytic/arc/events';
+import type { DomainEvent } from '@classytic/primitives/events';
 import type { OrderContext } from '@classytic/order';
 import type { FastifyInstance } from 'fastify';
 import logger from '#lib/utils/logger.js';

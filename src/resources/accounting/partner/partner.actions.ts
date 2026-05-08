@@ -37,13 +37,19 @@ async function openBalanceAction(partnerId: string, data: Record<string, unknown
     amount: data.amount,
   });
 
-  const posting = openingBalanceToPosting({
-    side: side as PartnerSide,
-    partnerId,
-    amount: data.amount as number,
-    asOf: data.asOf ? new Date(data.asOf as string) : undefined,
-    reason: data.reason as string | undefined,
-  });
+  // User-initiated `open-balance` action → autoPost: true. Contract default
+  // is draft (for automated migrations or bulk imports where finance reviews
+  // before posting); the explicit admin call here posts immediately.
+  const posting = openingBalanceToPosting(
+    {
+      side: side as PartnerSide,
+      partnerId,
+      amount: data.amount as number,
+      asOf: data.asOf ? new Date(data.asOf as string) : undefined,
+      reason: data.reason as string | undefined,
+    },
+    { autoPost: true },
+  );
   return createPosting(orgId, { ...posting, actorId });
 }
 

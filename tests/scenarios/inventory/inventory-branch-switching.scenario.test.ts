@@ -87,9 +87,9 @@ describe('Branch switching — header swap mid-session', () => {
       headers: withOrgHeader(branchA),
     });
     expect(listFromA.statusCode, listFromA.body).toBe(200);
-    const aBody = parse(listFromA.body) as { docs?: Array<{ skuRef?: string }> };
-    expect(Array.isArray(aBody?.docs)).toBe(true);
-    expect((aBody?.docs ?? []).filter((r) => r.skuRef === skuRef).length).toBe(1);
+    const aBody = parse(listFromA.body) as { data?: Array<{ skuRef?: string }> };
+    expect(Array.isArray(aBody?.data)).toBe(true);
+    expect((aBody?.data ?? []).filter((r) => r.skuRef === skuRef).length).toBe(1);
 
     // 3. Flip to branch B header on the next request — same token,
     //    different org. The rule belongs to A, so B sees 0.
@@ -99,9 +99,9 @@ describe('Branch switching — header swap mid-session', () => {
       headers: withOrgHeader(branchB),
     });
     expect(listFromB.statusCode, listFromB.body).toBe(200);
-    const bBody = parse(listFromB.body) as { docs?: Array<unknown> };
-    expect(Array.isArray(bBody?.docs)).toBe(true);
-    expect(bBody?.docs?.length ?? 0).toBe(0);
+    const bBody = parse(listFromB.body) as { data?: Array<unknown> };
+    expect(Array.isArray(bBody?.data)).toBe(true);
+    expect(bBody?.data?.length ?? 0).toBe(0);
 
     // 4. Flip back to A — still sees the rule. No session-level caching
     //    that locks the token to whichever org was queried last.
@@ -111,7 +111,7 @@ describe('Branch switching — header swap mid-session', () => {
       headers: withOrgHeader(branchA),
     });
     expect(listFromAAgain.statusCode, listFromAAgain.body).toBe(200);
-    const aAgainBody = parse(listFromAAgain.body) as { docs?: Array<{ skuRef?: string }> };
-    expect((aAgainBody?.docs ?? []).filter((r) => r.skuRef === skuRef).length).toBe(1);
+    const aAgainBody = parse(listFromAAgain.body) as { data?: Array<{ skuRef?: string }> };
+    expect((aAgainBody?.data ?? []).filter((r) => r.skuRef === skuRef).length).toBe(1);
   }, 60_000);
 });

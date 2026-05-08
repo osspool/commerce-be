@@ -10,6 +10,7 @@
 import type { OperationContext } from '@classytic/cart';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getCartEngine } from './cart.engine.js';
+import { NotFoundError } from '@classytic/arc/utils';
 
 function buildCartContext(req: FastifyRequest, opts: { actorRef?: string } = {}): OperationContext {
   const user = (req as FastifyRequest & { user?: { _id?: string; id?: string } }).user;
@@ -36,7 +37,7 @@ const checkout = () => getCartEngine().repositories.checkout;
 async function requireActiveCart(ctx: OperationContext, reply: FastifyReply) {
   const active = await draft().findActiveByActor(ctx.actorRef, ctx);
   if (!active) {
-    reply.code(404).send({ success: false, message: 'Cart not found' });
+    throw new NotFoundError('Cart not found');
     return null;
   }
   return active;
@@ -47,7 +48,7 @@ async function requireActiveCart(ctx: OperationContext, reply: FastifyReply) {
 export async function getCart(req: FastifyRequest, reply: FastifyReply) {
   const ctx = buildCartContext(req);
   const cart = await draft().findActiveByActor(ctx.actorRef, ctx);
-  reply.send({ success: true, data: cart });
+  reply.send(cart);
 }
 
 export async function addItem(req: FastifyRequest, reply: FastifyReply) {
@@ -88,7 +89,7 @@ export async function addItem(req: FastifyRequest, reply: FastifyReply) {
   const item = normalizedDisplay ? { ...base, display: normalizedDisplay } : base;
 
   const result = await draft().addItem(item, buildCartContext(req));
-  reply.send({ success: true, data: result });
+  reply.send(result);
 }
 
 export async function updateItem(req: FastifyRequest, reply: FastifyReply) {
@@ -100,7 +101,7 @@ export async function updateItem(req: FastifyRequest, reply: FastifyReply) {
   if (!active) return;
 
   const result = await draft().updateItemQuantity({ draftPublicId: active.publicId, lineId: itemId, quantity }, ctx);
-  reply.send({ success: true, data: result });
+  reply.send(result);
 }
 
 export async function removeItem(req: FastifyRequest, reply: FastifyReply) {
@@ -111,7 +112,7 @@ export async function removeItem(req: FastifyRequest, reply: FastifyReply) {
   if (!active) return;
 
   const result = await draft().removeItem({ draftPublicId: active.publicId, lineId: itemId }, ctx);
-  reply.send({ success: true, data: result });
+  reply.send(result);
 }
 
 export async function clearCart(req: FastifyRequest, reply: FastifyReply) {
@@ -120,7 +121,7 @@ export async function clearCart(req: FastifyRequest, reply: FastifyReply) {
   if (!active) return;
 
   const result = await draft().clear(active.publicId, ctx);
-  reply.send({ success: true, data: result });
+  reply.send(result);
 }
 
 // ─── Checkout ────────────────────────────────────────────────────────────────
@@ -142,7 +143,7 @@ export async function startCheckout(req: FastifyRequest, reply: FastifyReply) {
     { draftPublicId: active.publicId, expectedPricingHash: normalizedHash },
     ctx,
   );
-  reply.send({ success: true, data: result });
+  reply.send(result);
 }
 
 export async function commitCheckout(req: FastifyRequest, reply: FastifyReply) {
@@ -150,7 +151,7 @@ export async function commitCheckout(req: FastifyRequest, reply: FastifyReply) {
   const { externalRef } = (req.body || {}) as { externalRef?: string };
 
   const result = await checkout().commit({ checkoutPublicId: checkoutId, externalRef }, buildCartContext(req));
-  reply.send({ success: true, data: result });
+  reply.send(result);
 }
 
 export async function cancelCheckout(req: FastifyRequest, reply: FastifyReply) {
@@ -161,7 +162,7 @@ export async function cancelCheckout(req: FastifyRequest, reply: FastifyReply) {
     { checkoutPublicId: checkoutId, reason: reason || 'user_canceled' },
     buildCartContext(req),
   );
-  reply.send({ success: true, data: result });
+  reply.send(result);
 }
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
@@ -181,7 +182,7 @@ export async function listAllCarts(req: FastifyRequest, reply: FastifyReply) {
     { filters: {}, pagination: { page: Number(page), limit: Number(limit) }, sort },
     buildCartContext(req),
   );
-  reply.send({ success: true, ...result });
+  reply.send(result);
 }
 
 export async function getAbandonedCarts(req: FastifyRequest, reply: FastifyReply) {
@@ -197,7 +198,7 @@ export async function getAbandonedCarts(req: FastifyRequest, reply: FastifyReply
     limit: Number(limit),
     ctx: buildCartContext(req),
   });
-  reply.send({ success: true, data, metadata: { daysOld } });
+  reply.send({ data, metadata: { daysOld: Number(daysOld), cutoff: cutoff.toISOString() } });
 }
 
 export async function getUserCart(req: FastifyRequest, reply: FastifyReply) {
@@ -206,8 +207,8 @@ export async function getUserCart(req: FastifyRequest, reply: FastifyReply) {
 
   const cart = await draft().findActiveByActor(userId, ctx);
   if (!cart) {
-    return reply.code(404).send({ success: false, message: 'Cart not found for this user' });
+    throw new NotFoundError('Cart not found for this user');
   }
 
-  reply.send({ success: true, data: cart });
+  reply.send(cart);
 }

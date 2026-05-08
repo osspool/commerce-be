@@ -319,7 +319,6 @@ describe('Scenario B — Oversell attempt (quantity > stock)', () => {
     expect(res.statusCode).toBe(409);
     const body = parse(res.body);
     expect(body?.code).toBe('INSUFFICIENT_STOCK');
-    expect(body?.success).toBe(false);
 
     // No reservation created.
     const stock = await getStock(testSku, orgId);
@@ -345,7 +344,7 @@ describe('Scenario C — place → ship consumes reservation', () => {
     // Place order
     const placeRes = await placeOrderRequest(2);
     expect(placeRes.statusCode).toBe(201);
-    const order = parse(placeRes.body)?.data as { orderNumber: string };
+    const order = parse(placeRes.body) as { orderNumber: string };
 
     // Stock: 5 on-hand, 2 reserved, 3 available
     let stock = await getStock(testSku, orgId);
@@ -372,7 +371,7 @@ describe('Scenario C — place → ship consumes reservation', () => {
       },
     });
     expect(fulRes.statusCode).toBeLessThan(400);
-    const fulfillment = parse(fulRes.body)?.data as { fulfillmentNumber: string };
+    const fulfillment = parse(fulRes.body) as { fulfillmentNumber: string };
 
     // Ship it — this should consume the reservation, not double-decrement.
     const shipRes = await server.inject({
@@ -383,7 +382,7 @@ describe('Scenario C — place → ship consumes reservation', () => {
     });
     // If ship FSM failed, the post-transition stock decrement never ran.
     expect(shipRes.statusCode).toBeLessThan(400);
-    const shipped = parse(shipRes.body)?.data as { status: string };
+    const shipped = parse(shipRes.body) as { status: string };
     expect(shipped.status).toBe('shipped');
 
     // Deliver it — confirms delivery status.
@@ -408,7 +407,7 @@ describe('Scenario D — place → cancel releases reservation', () => {
 
     const placeRes = await placeOrderRequest(3);
     expect(placeRes.statusCode).toBe(201);
-    const order = parse(placeRes.body)?.data as { orderNumber: string };
+    const order = parse(placeRes.body) as { orderNumber: string };
 
     let stock = await getStock(testSku, orgId);
     expect(stock.reserved).toBe(3);
@@ -433,7 +432,7 @@ describe('Scenario D — place → cancel releases reservation', () => {
     await seedStock(testSku, 5, orgId);
 
     const placeRes = await placeOrderRequest(2);
-    const order = parse(placeRes.body)?.data as { orderNumber: string };
+    const order = parse(placeRes.body) as { orderNumber: string };
 
     await server.inject({
       method: 'POST',
@@ -447,7 +446,7 @@ describe('Scenario D — place → cancel releases reservation', () => {
       headers: auth.as('admin').headers,
       payload: { fulfillmentType: 'physical', lines: [{ orderLineId: 'line_0', quantity: 2 }] },
     });
-    const fulfillment = parse(fulRes.body)?.data as { fulfillmentNumber: string };
+    const fulfillment = parse(fulRes.body) as { fulfillmentNumber: string };
     await server.inject({
       method: 'POST',
       url: `${API}/fulfillments/${fulfillment.fulfillmentNumber}/action`,
@@ -490,8 +489,7 @@ describe('Scenario F — POST /orders/validate-stock (dry-run, no side effects)'
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const data = body?.data as { ok: boolean; lines: Array<Record<string, unknown>> };
+    const data = parse(res.body) as { ok: boolean; lines: Array<Record<string, unknown>> };
     expect(data.ok).toBe(true);
     expect(data.lines).toHaveLength(1);
     expect(data.lines[0].ok).toBe(true);
@@ -517,7 +515,7 @@ describe('Scenario F — POST /orders/validate-stock (dry-run, no side effects)'
     });
 
     expect(res.statusCode).toBe(200);
-    const data = parse(res.body)?.data as { ok: boolean; lines: Array<Record<string, unknown>> };
+    const data = parse(res.body) as { ok: boolean; lines: Array<Record<string, unknown>> };
     expect(data.ok).toBe(false);
     expect(data.lines[0].ok).toBe(false);
     expect(data.lines[0].available).toBe(2);
@@ -549,7 +547,6 @@ describe('Scenario G — 409 response shape (for SDK InsufficientStockError)', (
     expect(res.statusCode).toBe(409);
     const body = parse(res.body);
     expect(body?.code).toBe('INSUFFICIENT_STOCK');
-    expect(body?.success).toBe(false);
 
     const details = body?.details as { skuRef: string; requested: number; available: number };
     expect(details).toBeTruthy();
@@ -567,9 +564,8 @@ describe('Scenario E — Happy path: single order, no concurrency', () => {
 
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
 
-    const order = body?.data as { orderNumber: string; metadata?: { reservationRefs?: unknown[] } };
+    const order = body as { orderNumber: string; metadata?: { reservationRefs?: unknown[] } };
     expect(order.orderNumber).toMatch(/^ORD-\d{4}-\d+$/);
     expect(order.metadata?.reservationRefs).toBeInstanceOf(Array);
     expect((order.metadata?.reservationRefs as unknown[]).length).toBe(1);

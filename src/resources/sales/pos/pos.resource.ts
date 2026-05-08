@@ -12,7 +12,7 @@ import { defineResource } from '@classytic/arc';
 import permissions from '#config/permissions.js';
 import inventoryController from '#resources/inventory/inventory.controller.js';
 import posController from './pos.controller.js';
-import { createOrderSchema, lookupSchema, posProductsSchema, receiptSchema } from './pos.schemas.js';
+import { createOrderSchema, lookupSchema, posProductsSchema } from './pos.schemas.js';
 
 const posResource = defineResource({
   name: 'pos',
@@ -54,15 +54,11 @@ const posResource = defineResource({
       schema: createOrderSchema,
       handler: posController.createOrder,
     },
-    {
-      method: 'GET',
-      path: '/orders/:orderId/receipt',
-      summary: 'Get receipt for a POS order',
-      permissions: permissions.pos.access,
-      raw: true,
-      schema: receiptSchema,
-      handler: posController.getReceipt,
-    },
+    // Receipt rendering is client-side: the FE transforms an Order doc via
+    // `transformOrderToReceipt(order, branchInfo)` (see fe-bigboss
+    // commerce/pos/utils/pos-helpers.ts). The previous /orders/:id/receipt
+    // endpoint was removed — it returned the wrong shape (raw order, not
+    // PosReceiptData) and added no value over reading the order doc directly.
   ],
 });
 

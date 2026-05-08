@@ -18,14 +18,51 @@
  *   - Absent from map → not audited
  */
 
-export type AuditOps = { create?: boolean; update?: boolean; delete?: boolean };
+export type AuditOps = {
+  create?: boolean;
+  update?: boolean;
+  delete?: boolean;
+  /**
+   * Retention override (days). When set, audit rows for this resource get
+   * `expiresAt = timestamp + retentionDays`, overriding the global
+   * `AUDIT_TTL_DAYS` default. Use for resources subject to a longer
+   * regulatory floor than ops audit needs (e.g. NBR books-of-account).
+   */
+  retentionDays?: number;
+};
 export type AuditPolicy = true | AuditOps;
 
 export interface AuditConfigSection {
   audit: {
+    /**
+     * Default audit-row retention in days. Resources without a per-policy
+     * `retentionDays` override fall back to this. Driven by env var
+     * `AUDIT_TTL_DAYS` (positive number); defaults to 90 in dev.
+     */
+    defaultRetentionDays: number;
     resources: Record<string, AuditPolicy>;
   };
 }
+
+/**
+ * Parse `AUDIT_TTL_DAYS` once at module load. Empty / non-numeric / non-positive
+ * values fall back to the 90d default — matching the behavior of
+ * `register-infra-plugins.ts` before this section owned the value.
+ */
+function parseDefaultRetentionDays(): number {
+  const FALLBACK = 90;
+  const raw = Number(process.env.AUDIT_TTL_DAYS);
+  return Number.isFinite(raw) && raw > 0 ? raw : FALLBACK;
+}
+
+/**
+ * BD VAT/Mushak Rule 18 + Income Tax Ordinance s.35 require
+ * books-of-account retention for 5 years from end of relevant fiscal year.
+ * Round to 1825 days for any resource whose audit row IS part of the
+ * statutory book trail (invoices, bills, journal entries, COA changes,
+ * fiscal-period close/reopen, budget approvals).
+ */
+const NBR_FINANCIAL_RETENTION_DAYS = 1825;
 
 const resources: Record<string, AuditPolicy> = {
   // ── Core business objects (state transitions affect money/inventory) ──
@@ -45,11 +82,12 @@ const resources: Record<string, AuditPolicy> = {
   partner: true,
 
   // ── Accounting (action-routed state transitions, not raw ledger) ──
-  'customer-invoice': true,
-  'vendor-bill': true,
-  budget: true,
-  account: { create: true, update: true, delete: false }, // chart of accounts rarely deleted
-  'fiscal-period': { update: true, delete: false }, // close/reopen is the critical op
+  // Financial resources are part of NBR's 5-year books retention floor.
+  'customer-invoice': { create: true, update: true, delete: true, retentionDays: NBR_FINANCIAL_RETENTION_DAYS },
+  'vendor-bill': { create: true, update: true, delete: true, retentionDays: NBR_FINANCIAL_RETENTION_DAYS },
+  budget: { create: true, update: true, delete: true, retentionDays: NBR_FINANCIAL_RETENTION_DAYS },
+  account: { create: true, update: true, delete: false, retentionDays: NBR_FINANCIAL_RETENTION_DAYS },
+  'fiscal-period': { update: true, delete: false, retentionDays: NBR_FINANCIAL_RETENTION_DAYS },
 
   // ── Content ──
   page: true,
@@ -57,7 +95,10 @@ const resources: Record<string, AuditPolicy> = {
 };
 
 const auditConfig: AuditConfigSection = {
-  audit: { resources },
+  audit: {
+    defaultRetentionDays: parseDefaultRetentionDays(),
+    resources,
+  },
 };
 
 export default auditConfig;
@@ -78,4 +119,35 @@ export function resolveAuditFlag(resourceName: string): boolean | { operations: 
   if (policy.update) ops.push('update');
   if (policy.delete) ops.push('delete');
   return ops.length > 0 ? { operations: ops } : false;
+}
+
+/**
+ * Per-resource retention in days. Falls back to the config section's
+ * `defaultRetentionDays` (driven by `AUDIT_TTL_DAYS` env) when the
+ * resource has no override.
+ *
+ * Called from the audit-model `pre('save')` hook — every new audit row
+ * is stamped with `timestamp + retentionDays(...) * 86_400_000` at insert,
+ * and a single TTL index on `expiresAt` purges accordingly.
+ */
+export function getRetentionDays(resourceName: string): number {
+  const policy = resources[resourceName];
+  if (!policy || policy === true) return auditConfig.audit.defaultRetentionDays;
+  return policy.retentionDays ?? auditConfig.audit.defaultRetentionDays;
+}
+
+/**
+ * Snapshot of all per-resource retention overrides as `{ resource, days }`
+ * pairs. Consumed by the legacy-row backfill in register-infra-plugins.ts
+ * to build a Mongo `$switch` that stamps each row with the correct TTL
+ * window based on its `resource` field — without round-tripping per row.
+ */
+export function getRetentionOverrides(): Array<{ resource: string; days: number }> {
+  const out: Array<{ resource: string; days: number }> = [];
+  for (const [resource, policy] of Object.entries(resources)) {
+    if (policy && policy !== true && typeof policy.retentionDays === 'number') {
+      out.push({ resource, days: policy.retentionDays });
+    }
+  }
+  return out;
 }

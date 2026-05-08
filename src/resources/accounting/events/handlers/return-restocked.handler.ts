@@ -1,4 +1,3 @@
-import config from '#config/index.js';
 import { type CogsReversalData, cogsReversalToPosting } from '../../posting/contracts/inventory.contract.js';
 import { definePostingHandler } from '../define-posting-handler.js';
 import { ReturnRestockedEvent, returnRestockedSchema } from '../event-definitions.js';
@@ -45,7 +44,7 @@ export const returnRestockedHandler = definePostingHandler({
 
     return {
       branchId: payload.branchId,
-      posting: cogsReversalToPosting(data, { autoPost: config.accounting.autoPost }),
+      posting: cogsReversalToPosting(data),
       logFields: {
         returnId: payload.returnId,
         orderId: payload.orderId,

@@ -12,6 +12,7 @@ export type OrderRepository = {
 export type ScopedOrder = {
   _id: { toString(): string };
   orderNumber?: string;
+  customerId?: { toString(): string } | string | null;
   status?: string;
   totals?: { grandTotal?: { amount: number; currency?: string }; tax?: { amount: number } };
   metadata?: Record<string, unknown>;

@@ -370,8 +370,8 @@ describe('Multi-Branch Isolation', () => {
 
     const org1Result = await repo().getAll({}, scope(ORG));
     const org2Result = await repo().getAll({}, scope(ORG2));
-    const org1 = (org1Result as { docs?: Invoice[] }).docs ?? (org1Result as unknown as Invoice[]);
-    const org2 = (org2Result as { docs?: Invoice[] }).docs ?? (org2Result as unknown as Invoice[]);
+    const org1 = (org1Result as { data?: Invoice[] }).data ?? (org1Result as unknown as Invoice[]);
+    const org2 = (org2Result as { data?: Invoice[] }).data ?? (org2Result as unknown as Invoice[]);
 
     expect(org1.length).toBeGreaterThanOrEqual(1);
     expect(org2.length).toBeGreaterThanOrEqual(1);
@@ -575,8 +575,9 @@ describe('Response Shape Compliance', () => {
 describe('Inherited Mongokit Methods', () => {
   it('getAll with pagination', async () => {
     const result = await repo().getAll({ page: 1, limit: 5 }, scope()) as any;
-    expect(result).toHaveProperty('docs');
-    expect(Array.isArray(result.docs)).toBe(true);
+    // repo-core 0.4 unified `docs` → `data` across pagination shapes.
+    expect(result).toHaveProperty('data');
+    expect(Array.isArray(result.data)).toBe(true);
   });
 
   it('getById returns single doc or null', async () => {

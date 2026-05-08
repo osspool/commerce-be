@@ -111,7 +111,7 @@ describe('Streamline × Arc integration', () => {
       workflows: [testWorkflow],
       auth: false,
       bridgeEvents: true,
-      bridgeStepEvents: true,
+      bridgeBusEvents: true,
       enableStreaming: false,
     });
 
@@ -182,8 +182,7 @@ describe('Streamline × Arc integration', () => {
     const res = await app.inject({ method: 'GET', url: '/workflows' });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body) as { success: boolean; data: Array<{ id: string }> };
-    expect(body.success).toBe(true);
-    const ids = body.data.map((w) => w.id);
+    const ids = body.map((w) => w.id);
     expect(ids).toContain('integration-test');
   });
 
@@ -232,7 +231,7 @@ describe('Streamline × Arc integration', () => {
     });
     expect(res.statusCode).toBe(201);
     const body = parse(res.body) as { data: { _id: string } };
-    const runId = body.data._id;
+    const runId = body._id;
 
     await testWorkflow.waitFor(runId, { timeout: 10_000 });
     await new Promise((r) => setTimeout(r, 50));
@@ -281,9 +280,8 @@ describe('Streamline × Arc integration', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body) as { success: boolean; data: { _id: string; status: string } };
-    expect(body.success).toBe(true);
-    expect(body.data._id).toBe(run._id);
-    expect(body.data.status).toBe('done');
+    expect(body._id).toBe(run._id);
+    expect(body.status).toBe('done');
   }, 15_000);
 });
 

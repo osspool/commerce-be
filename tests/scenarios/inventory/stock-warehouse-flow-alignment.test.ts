@@ -136,8 +136,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
     it('availability query reflects the adjustment', async () => {
       const res = await hoInject('GET', `/inventory/availability?productId=${productId}`);
       if (res.statusCode === 200) {
-        const body = parse(res.body);
-        const avail = body.data;
+        const avail = parse(res.body);
         if (avail?.quantityOnHand !== undefined) {
           expect(avail.quantityOnHand).toBe(100);
         }
@@ -148,8 +147,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
     it('sub-branch starts with zero stock (branch isolation)', async () => {
       const res = await subInject('GET', `/inventory/availability?productId=${productId}`);
       if (res.statusCode === 200) {
-        const body = parse(res.body);
-        const avail = body.data;
+        const avail = parse(res.body);
         if (avail?.quantityOnHand !== undefined) {
           expect(avail.quantityOnHand).toBe(0);
         }
@@ -176,7 +174,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
       const res = await hoInject('GET', '/inventory/low-stock');
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      const items = body.data?.docs || body.data || [];
+      const items = body.data || body.data || [];
       const found = items.find?.((i: { productId?: string; skuRef?: string }) =>
         i.productId === productId || i.skuRef === productId,
       );
@@ -193,7 +191,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
         items: [{ productId, quantity: 20 }],
       });
       expect(res.statusCode).toBe(201);
-      transferId = parse(res.body).data._id;
+      transferId = parse(res.body)._id;
     });
 
     it('approves transfer', async () => {
@@ -201,7 +199,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
         action: 'approve',
       });
       expect(res.statusCode).toBe(200);
-      expect(parse(res.body).data.status).toBe('approved');
+      expect(parse(res.body).status).toBe('approved');
     });
 
     it('dispatches transfer (HO stock decrements by 20)', async () => {
@@ -209,7 +207,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
         action: 'dispatch',
       });
       expect(res.statusCode).toBe(200);
-      expect(parse(res.body).data.status).toBe('dispatched');
+      expect(parse(res.body).status).toBe('dispatched');
     });
 
     it('receives transfer at sub-branch (sub stock increments by 20)', async () => {
@@ -218,14 +216,14 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
         items: [{ productId, quantityReceived: 20 }],
       });
       expect(res.statusCode).toBe(200);
-      const data = parse(res.body).data;
+      const data = parse(res.body);
       expect(['received', 'partial_received']).toContain(data.status);
     });
 
     it('HO stock = 80 after dispatching 20 of 100', async () => {
       const res = await hoInject('GET', `/inventory/availability?productId=${productId}`);
       if (res.statusCode === 200) {
-        const avail = parse(res.body).data;
+        const avail = parse(res.body);
         if (avail?.quantityOnHand !== undefined) {
           expect(avail.quantityOnHand).toBe(80);
         }
@@ -236,7 +234,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
     it('sub-branch stock = 20 after receiving transfer', async () => {
       const res = await subInject('GET', `/inventory/availability?productId=${productId}`);
       if (res.statusCode === 200) {
-        const avail = parse(res.body).data;
+        const avail = parse(res.body);
         if (avail?.quantityOnHand !== undefined) {
           expect(avail.quantityOnHand).toBe(20);
         }
@@ -257,7 +255,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
     it('HO stock = 75 after removing 5 damaged', async () => {
       const res = await hoInject('GET', `/inventory/availability?productId=${productId}`);
       if (res.statusCode === 200) {
-        const avail = parse(res.body).data;
+        const avail = parse(res.body);
         if (avail?.quantityOnHand !== undefined) {
           expect(avail.quantityOnHand).toBe(75);
         }
@@ -271,7 +269,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
       const res = await hoInject('GET', '/inventory/movements?page=1&limit=50');
       expect(res.statusCode).toBe(200);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
+
     });
   });
 
@@ -285,7 +283,7 @@ describe('Stock ↔ Warehouse ↔ Flow Alignment', () => {
 
       const res = await hoInject('GET', `/inventory/availability?productId=${zeroProduct.insertedId}`);
       if (res.statusCode === 200) {
-        const avail = parse(res.body).data;
+        const avail = parse(res.body);
         if (avail?.quantityOnHand !== undefined) {
           expect(avail.quantityOnHand).toBe(0);
           expect(avail.quantityAvailable).toBe(0);

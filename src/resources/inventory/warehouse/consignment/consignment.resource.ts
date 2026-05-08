@@ -32,7 +32,7 @@ const consignmentResource = defineResource({
         const { moveId } = req.params as { moveId: string };
         const ctx = flowCtxGuard.from(req);
         const result = await flow().services.consignment.settleMove(moveId, ctx);
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
     {
@@ -62,10 +62,7 @@ const consignmentResource = defineResource({
           outstandingValue: (q.unitCost ?? 0) * q.quantityOnHand,
         }));
         const totalOutstanding = summary.reduce((sum, r) => sum + r.outstandingValue, 0);
-        return reply.send({
-          success: true,
-          data: { rows: summary, totalOutstanding, rowCount: summary.length },
-        });
+        return reply.send({ rows: summary, totalOutstanding, rowCount: summary.length });
       },
     },
   ],

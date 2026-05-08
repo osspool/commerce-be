@@ -22,6 +22,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
 import { flow, flowCtxFromArcReq, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 interface SetStandardCostBody {
   skuRef: string;
@@ -45,7 +46,7 @@ class StandardCostController extends BaseController {
       },
       ctx,
     );
-    return { success: true, data: result as unknown as Record<string, unknown>, status: 201 };
+    return { data: result as unknown as Record<string, unknown>, status: 201 };
   }
 }
 
@@ -100,10 +101,10 @@ export function createStandardCostResource() {
           const ctx = flowCtxGuard.from(req);
           const { skuRef } = req.query as { skuRef?: string };
           if (!skuRef) {
-            return reply.code(400).send({ success: false, error: 'skuRef query parameter is required' });
+            throw new ValidationError('skuRef query parameter is required');
           }
           const doc = await flow().services.standardCost.getActive(skuRef, ctx);
-          return reply.send({ success: true, data: doc });
+          return reply.send({ data: doc });
         },
       },
       {
@@ -134,7 +135,7 @@ export function createStandardCostResource() {
             },
             ctx,
           );
-          return reply.send({ success: true, data: result });
+          return reply.send({ data: result });
         },
       },
     ],

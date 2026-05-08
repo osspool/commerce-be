@@ -33,12 +33,20 @@ export function createCatalogBridgeForInvoice(): CatalogBridge {
       const pricing = monetization?.pricing as Record<string, unknown> | undefined;
       const basePrice = pricing?.basePrice as { amount: number } | undefined;
       const compliance = p.compliance as Record<string, unknown> | undefined;
+      const exportControl = compliance?.exportControl as Record<string, unknown> | undefined;
+      // Canonical path is `compliance.exportControl.hsCode` per the
+      // ComplianceMetadata shape from @classytic/catalog. Accept the legacy
+      // flat `compliance.hsCode` as a fallback so any host data written before
+      // the compliance module was enabled still resolves.
+      const hsCode =
+        (exportControl?.hsCode as string | undefined) ??
+        (compliance?.hsCode as string | undefined);
 
       return {
         productId: String(product._id),
         name: (p.name as string) ?? 'Unknown',
         skuRef: (custom?.sku as string) ?? String(product._id),
-        hsCode: (compliance?.hsCode as string) ?? undefined,
+        hsCode,
         uom: (p.uom as string) ?? 'pcs',
         defaultPrice: basePrice?.amount,
       };

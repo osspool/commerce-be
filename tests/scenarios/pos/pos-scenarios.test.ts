@@ -203,8 +203,8 @@ describe('POS Scenarios', () => {
     if (res.statusCode !== 201) console.log('Purchase create response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    purchaseId = body.data._id;
+
+    purchaseId = body._id;
     expect(purchaseId).toBeTruthy();
   });
 
@@ -219,8 +219,8 @@ describe('POS Scenarios', () => {
     if (res.statusCode !== 200) console.log('Purchase receive response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('received');
+
+    expect(body.status).toBe('received');
   });
 
   // --- Step: Open shift (required — POS controller rejects orders otherwise)
@@ -251,9 +251,8 @@ describe('POS Scenarios', () => {
     if (res.statusCode !== 200) console.log('pos/products response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
-    const docs = (body.docs ?? []) as Array<{
+    const docs = (body.data ?? []) as Array<{
       _id: string;
       branchStock?: { quantity?: number; inStock?: boolean; variants?: Array<{ sku: string; quantity: number }> };
       variants?: Array<{ sku: string }>;
@@ -296,8 +295,8 @@ describe('POS Scenarios', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    const data = body.data as {
+
+    const data = body as {
       quantityOnHand?: number;
       quantityReserved?: number;
       quantityAvailable?: number;
@@ -337,9 +336,8 @@ describe('POS Scenarios', () => {
     if (res.statusCode !== 200) console.log('availability/check body:', res.statusCode, res.body);
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
-    const data = body.data as {
+    const data = body as {
       allFulfilled: boolean;
       items: Array<{ skuRef: string; requested: number; available: number; fulfilled: boolean }>;
     };
@@ -368,7 +366,6 @@ describe('POS Scenarios', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
     const items = (body.data ?? []) as Array<{ skuRef: string; quantity: number; threshold: number; deficit: number }>;
     const skus = items.map((i) => i.skuRef);
@@ -426,7 +423,7 @@ describe('POS Scenarios', () => {
     });
     expect(listRes.statusCode).toBe(200);
     const body = parse(listRes.body);
-    const docs = (body.docs ?? []) as Array<{
+    const docs = (body.data ?? []) as Array<{
       _id: string;
       branchStock?: { quantity?: number; variants?: Array<{ sku: string; quantity: number }> };
     }>;
@@ -459,12 +456,12 @@ describe('POS Scenarios', () => {
     if (res.statusCode !== 201) console.log('Scenario 1 response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    scenario1OrderId = body.data._id;
+
+    scenario1OrderId = body._id;
     expect(scenario1OrderId).toBeTruthy();
 
     // Verify order has 2 lines (one per variant SKU)
-    const lines = body.data.lines ?? body.data.items ?? [];
+    const lines = body.lines ?? body.items ?? [];
     expect(lines.length).toBe(2);
 
   });
@@ -494,11 +491,11 @@ describe('POS Scenarios', () => {
     if (res.statusCode !== 201) console.log('Scenario 2 response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data._id).toBeTruthy();
+
+    expect(body._id).toBeTruthy();
 
     // Verify payment data reflects split
-    const paymentData = body.data.payment?.paymentData ?? body.data.payment ?? {};
+    const paymentData = body.payment?.paymentData ?? body.payment ?? {};
     if (paymentData.payments) {
       expect(paymentData.payments).toHaveLength(2);
     }
@@ -528,53 +525,18 @@ describe('POS Scenarios', () => {
     if (res.statusCode !== 201) console.log('Scenario 3 response:', res.statusCode, res.body);
     expect(res.statusCode).toBe(201);
     const body = parse(res.body);
-    expect(body.success).toBe(true);
 
     // Verify discount is recorded in metadata
-    const metadata = body.data.metadata ?? {};
+    const metadata = body.metadata ?? {};
     if (metadata.discount !== undefined) {
       expect(metadata.discount).toBe(discount);
     }
   });
 
-  // --- Scenario 4: POS receipt lookup ---------------------------------------
-
-  it('Scenario 4 — POS receipt lookup', async () => {
-    // First create an order to look up
-    const createRes = await server.inject({
-      method: 'POST',
-      url: `${API}/pos/orders`,
-      headers: auth.as('admin').headers,
-      payload: {
-        items: [
-          { productId: tshirtProductId, variantSku: TSHIRT_SKU, quantity: 1, price: TSHIRT_PRICE },
-        ],
-        payments: [
-          { method: 'cash', amount: TSHIRT_PRICE },
-        ],
-      },
-    });
-
-    expect(createRes.statusCode).toBe(201);
-    const created = parse(createRes.body);
-    const orderId = created.data._id;
-    const orderNumber = created.data.orderNumber ?? created.data.publicId;
-
-    // Use orderNumber for receipt lookup (getReceipt queries by orderNumber)
-    const lookupId = orderNumber ?? orderId;
-
-    const receiptRes = await server.inject({
-      method: 'GET',
-      url: `${API}/pos/orders/${lookupId}/receipt`,
-      headers: auth.as('admin').headers,
-    });
-
-    if (receiptRes.statusCode !== 200) console.log('Scenario 4 response:', receiptRes.statusCode, receiptRes.body);
-    expect(receiptRes.statusCode).toBe(200);
-    const receiptBody = parse(receiptRes.body);
-    expect(receiptBody.success).toBe(true);
-    expect(receiptBody.data).toBeTruthy();
-  });
+  // --- Scenario 4 retired: receipt rendering moved to client-side ---------
+  // The previous /pos/orders/:id/receipt endpoint was removed; receipts are
+  // now built from the Order doc via fe-bigboss `transformOrderToReceipt`.
+  // No backend endpoint to test.
 
   // --- Scenario 5: POS idempotency ------------------------------------------
 
@@ -600,7 +562,6 @@ describe('POS Scenarios', () => {
     });
     expect(res1.statusCode).toBe(201);
     const first = parse(res1.body);
-    expect(first.success).toBe(true);
 
     // Second call with same idempotencyKey
     const res2 = await server.inject({
@@ -619,7 +580,7 @@ describe('POS Scenarios', () => {
     });
 
     const listBody = parse(listRes.body);
-    if (listBody?.success && Array.isArray(listBody.data)) {
+    if (Array.isArray(listBody.data)) {
       const matchingOrders = listBody.data.filter(
         (o: Record<string, unknown>) => o.idempotencyKey === idempotencyKey,
       );
@@ -650,12 +611,12 @@ describe('POS Scenarios', () => {
     if (res.statusCode >= 400) {
       // Stock validation at HTTP level — order rejected
       expect(res.statusCode).toBeGreaterThanOrEqual(400);
-      expect(body.success).toBe(false);
+      expect(res.statusCode).toBeGreaterThanOrEqual(400);
     } else {
       // Stock validation deferred to fulfillment time — order accepted
       // This is valid: POS creates the order, stock check happens on deliver
       expect(res.statusCode).toBe(201);
-      expect(body.success).toBe(true);
+
       // Note: stock validation is at fulfillment time, not order creation
     }
   });
@@ -677,6 +638,6 @@ describe('POS Scenarios', () => {
 
     expect(res.statusCode).toBe(400);
     const body = parse(res.body);
-    expect(body.success).toBe(false);
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
   });
 });

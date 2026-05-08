@@ -102,7 +102,7 @@ async function createDraftInvoice(overrides: {
     throw new Error(`createDraftInvoice failed: ${res.statusCode} ${res.body.slice(0, 300)}`);
   }
   const body = parse(res.body);
-  return (body?.data ?? body) as Record<string, unknown>;
+  return body as Record<string, unknown>;
 }
 
 async function act(
@@ -125,7 +125,7 @@ async function getInvoice(id: string): Promise<Record<string, unknown> | null> {
     headers: h(),
   });
   const body = parse(res.body);
-  return (body?.data ?? body) as Record<string, unknown> | null;
+  return body as Record<string, unknown> | null;
 }
 
 beforeAll(async () => {
@@ -200,7 +200,7 @@ describe('Invoice action — post', () => {
 
     const { statusCode, body } = await act(draft._id as string, { action: 'post' });
     expect(statusCode).toBeLessThan(300);
-    const posted = body?.data as Record<string, unknown>;
+    const posted = body as Record<string, unknown>;
     expect(posted.status).toBe('posted');
     expect(posted.number).toBeTruthy();
     expect(String(posted.number)).toMatch(/^INV/);
@@ -235,7 +235,7 @@ describe('Invoice action — cancel', () => {
       reason: 'customer withdrew request',
     });
     expect(statusCode, `cancel body=${JSON.stringify(body).slice(0, 400)}`).toBeLessThan(300);
-    const cancelled = body?.data as Record<string, unknown>;
+    const cancelled = body as Record<string, unknown>;
     expect(cancelled.status).toBe('cancelled');
     expect(cancelled.cancelledAt).toBeTruthy();
   });
@@ -265,7 +265,7 @@ describe('Invoice action — void', () => {
       reason: 'duplicate of INV-0001',
     });
     expect(statusCode).toBeLessThan(300);
-    const voided = body?.data as Record<string, unknown>;
+    const voided = body as Record<string, unknown>;
     expect(voided.status).toBe('voided');
     expect(voided.voidedAt).toBeTruthy();
   });

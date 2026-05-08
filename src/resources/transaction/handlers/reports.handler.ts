@@ -7,6 +7,7 @@
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getCashFlowTrend, getCategoryBreakdown, getFinancialReport } from '../workflows/financial-reports.workflow.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 interface ProfitLossQuery {
   startDate?: string;
@@ -40,17 +41,11 @@ export async function getProfitLossReport(
       endDate: endDate ? new Date(endDate) : undefined,
     });
 
-    return reply.send({
-      success: true,
-      data: report,
-    });
+    return reply.send(report);
   } catch (error) {
     const err = error as Error;
     request.log.error({ err }, 'Get P&L report error');
-    return reply.code(400).send({
-      success: false,
-      message: err.message || 'Failed to generate report',
-    });
+    throw new ValidationError(err.message || 'Failed to generate report');
   }
 }
 
@@ -72,17 +67,11 @@ export async function getCategoriesReport(
       limit: limit ? parseInt(limit, 10) : undefined,
     });
 
-    return reply.send({
-      success: true,
-      data: breakdown,
-    });
+    return reply.send(breakdown);
   } catch (error) {
     const err = error as Error;
     request.log.error({ err }, 'Get category breakdown error');
-    return reply.code(400).send({
-      success: false,
-      message: err.message || 'Failed to generate breakdown',
-    });
+    throw new ValidationError(err.message || 'Failed to generate breakdown');
   }
 }
 
@@ -101,17 +90,11 @@ export async function getCashFlowReport(
       months: months ? parseInt(months, 10) : undefined,
     });
 
-    return reply.send({
-      success: true,
-      data: trend,
-    });
+    return reply.send(trend);
   } catch (error) {
     const err = error as Error;
     request.log.error({ err }, 'Get cash flow trend error');
-    return reply.code(400).send({
-      success: false,
-      message: err.message || 'Failed to generate cash flow trend',
-    });
+    throw new ValidationError(err.message || 'Failed to generate cash flow trend');
   }
 }
 

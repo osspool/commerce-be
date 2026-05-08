@@ -47,13 +47,15 @@ import { createBetterAuthProvider, type TestAuthProvider } from '@classytic/arc/
 import type { FastifyInstance } from 'fastify';
 import {
   PaymentProvider,
+  TRANSACTION_STATUS,
+} from '@classytic/revenue';
+import type {
   PaymentIntent,
   PaymentResult,
   RefundResult,
   WebhookEvent,
-  TRANSACTION_STATUS,
-  type CreateIntentParams,
-} from '@classytic/revenue';
+  CreateIntentParams,
+} from '@classytic/primitives/payment-gateway';
 
 const API = '/api/v1';
 
@@ -82,40 +84,40 @@ class DeferredTestProvider extends PaymentProvider {
 
   async createIntent(params: CreateIntentParams): Promise<PaymentIntent> {
     const id = `deferred_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    this.pending.set(id, { amount: params.amount, currency: params.currency ?? 'BDT', state: 'pending' });
-    return new PaymentIntent({
+    this.pending.set(id, { amount: params.amount.amount, currency: params.amount.currency ?? 'BDT', state: 'pending' });
+    // Return a plain object matching the PaymentIntent interface.
+    // PaymentIntent is an interface in @classytic/primitives/payment-gateway,
+    // not a class — do NOT use `new PaymentIntent(...)`.
+    return {
       id,
       sessionId: id,
       paymentIntentId: id,
       provider: 'deferred_test',
       status: 'pending',
-      amount: params.amount,
-      currency: params.currency ?? 'BDT',
+      amount: { amount: params.amount.amount, currency: params.amount.currency ?? 'BDT' },
       metadata: params.metadata ?? {},
       paymentUrl: `https://example.test/checkout/${id}`,
       clientSecret: `cs_${id}`,
-      raw: params,
-    });
+    };
   }
 
   async verifyPayment(intentId: string): Promise<PaymentResult> {
     const row = this.pending.get(intentId);
-    if (!row) return new PaymentResult({ id: intentId, provider: 'deferred_test', status: 'failed', metadata: {} });
-    return new PaymentResult({
+    if (!row) return { id: intentId, provider: 'deferred_test', status: 'failed', metadata: {} };
+    return {
       id: intentId,
       provider: 'deferred_test',
       status: row.state,
-      amount: row.amount,
-      currency: row.currency,
+      amount: { amount: row.amount, currency: row.currency },
       paidAt: row.state === 'succeeded' ? new Date() : undefined,
       metadata: {},
-    });
+    };
   }
   async getStatus(id: string) { return this.verifyPayment(id); }
-  async refund(paymentId: string, amount?: number | null) {
-    return new RefundResult({ id: `ref_${paymentId}`, provider: 'deferred_test', status: 'succeeded', amount: amount ?? 0, refundedAt: new Date(), metadata: {} });
+  async refund(paymentId: string, amount?: number | null): Promise<RefundResult> {
+    return { id: `ref_${paymentId}`, provider: 'deferred_test', status: 'succeeded', amount: { amount: amount ?? 0, currency: 'BDT' }, refundedAt: new Date(), metadata: {} };
   }
-  async handleWebhook(payload: unknown) { const p = payload as { type?: string }; return new WebhookEvent({ id: `wh_${Date.now()}`, provider: 'deferred_test', type: p?.type ?? 'payment.succeeded', data: (p ?? {}) as Record<string, unknown>, createdAt: new Date() }); }
+  async handleWebhook(payload: unknown): Promise<WebhookEvent> { const p = payload as { type?: string }; return { id: `wh_${Date.now()}`, provider: 'deferred_test', type: p?.type ?? 'payment.succeeded', data: (p ?? {}) as Record<string, unknown>, createdAt: new Date() }; }
   override getCapabilities() { return { supportsWebhooks: true, supportsRefunds: true, supportsPartialRefunds: true, requiresManualVerification: false }; }
 }
 
@@ -124,10 +126,10 @@ class FailingTestProvider extends PaymentProvider {
   public override readonly name = 'failing_test';
   constructor() { super({}); }
   async createIntent(): Promise<PaymentIntent> { throw new Error('simulated provider outage'); }
-  async verifyPayment(id: string): Promise<PaymentResult> { return new PaymentResult({ id, provider: 'failing_test', status: 'failed', metadata: {} }); }
+  async verifyPayment(id: string): Promise<PaymentResult> { return { id, provider: 'failing_test', status: 'failed', metadata: {} }; }
   async getStatus(id: string) { return this.verifyPayment(id); }
-  async refund(id: string) { return new RefundResult({ id: `ref_${id}`, provider: 'failing_test', status: 'succeeded', amount: 0, refundedAt: new Date(), metadata: {} }); }
-  async handleWebhook() { return new WebhookEvent({ id: 'wh_never', provider: 'failing_test', type: 'never', data: {}, createdAt: new Date() }); }
+  async refund(id: string): Promise<RefundResult> { return { id: `ref_${id}`, provider: 'failing_test', status: 'succeeded', amount: { amount: 0, currency: 'BDT' }, refundedAt: new Date(), metadata: {} }; }
+  async handleWebhook(): Promise<WebhookEvent> { return { id: 'wh_never', provider: 'failing_test', type: 'never', data: {}, createdAt: new Date() }; }
   override getCapabilities() { return { supportsWebhooks: false, supportsRefunds: false, supportsPartialRefunds: false, requiresManualVerification: false }; }
 }
 
@@ -309,7 +311,7 @@ async function getRevenueTxnsForOrder(orderId: string): Promise<Record<string, u
   });
   return Array.isArray(result)
     ? (result as Record<string, unknown>[])
-    : ((result as { docs?: Record<string, unknown>[] }).docs ?? []);
+    : ((result as { data?: Record<string, unknown>[] }).data ?? []);
 }
 
 async function getOrder(orderId: string): Promise<Record<string, unknown> | null> {
@@ -328,8 +330,7 @@ describe('Revenue ↔ Order — immediate payment (POS / cash / bank_transfer)',
     });
 
     expect(status).toBeLessThan(400);
-    expect(body?.success).toBe(true);
-    const order = body?.data as { _id: string; orderNumber: string };
+    const order = body as { _id: string; orderNumber: string };
     const payment = body?.payment as { kind: string; status: string; transactionId?: string };
     expect(payment.kind).toBe('immediate');
     expect(payment.status).toBe('verified');
@@ -359,7 +360,7 @@ describe('Revenue ↔ Order — immediate payment (POS / cash / bank_transfer)',
       productId: simpleProductId, sku: simpleSku, quantity: 1, unitPrice: 50000,
       gateway: 'bank_transfer', reference: 'REF-BANK-123', idempotencyKey: key,
     });
-    const txns = await getRevenueTxnsForOrder((body?.data as { _id: string })._id);
+    const txns = await getRevenueTxnsForOrder((body as { _id: string })._id);
     expect(txns.length).toBe(1);
     expect((txns[0] as { method: string }).method).toBe('bank_transfer');
     expect((txns[0] as { status: string }).status).toBe(TRANSACTION_STATUS.PENDING);
@@ -376,7 +377,7 @@ describe('Revenue ↔ Order — immediate payment (POS / cash / bank_transfer)',
       productId: variantProductId, sku: variantSku, quantity: 2, unitPrice: 30000,
       gateway: 'cash', idempotencyKey: key,
     });
-    const order = body?.data as { _id: string; totals?: { grandTotal?: { amount: number; currency: string } } };
+    const order = body as { _id: string; totals?: { grandTotal?: { amount: number; currency: string } } };
     const txns = await getRevenueTxnsForOrder(order._id);
     expect(txns.length).toBe(1);
     const txn = txns[0] as { amount: number; currency: string; status: string };
@@ -399,7 +400,7 @@ describe('Revenue ↔ Order — deferred payment (web redirect gateway)', () => 
     expect(payment.paymentUrl).toMatch(/^https:\/\/example\.test\/checkout\//);
     expect(payment.transactionId).toBeTruthy();
 
-    const order = body?.data as { _id: string };
+    const order = body as { _id: string };
     const txns = await getRevenueTxnsForOrder(order._id);
     expect(txns.length).toBe(1);
     expect((txns[0] as { status: string }).status).toBe(TRANSACTION_STATUS.PENDING);
@@ -416,7 +417,7 @@ describe('Revenue ↔ Order — deferred payment (web redirect gateway)', () => 
       productId: simpleProductId, sku: simpleSku, quantity: 1, unitPrice: 50000,
       gateway: 'deferred_test', idempotencyKey: key,
     });
-    const order = body?.data as { _id: string };
+    const order = body as { _id: string };
     const txns = await getRevenueTxnsForOrder(order._id);
     const txn = txns[0] as { _id: unknown; gateway?: { sessionId?: string } };
     const sessionId = txn.gateway?.sessionId;
@@ -439,7 +440,7 @@ describe('Revenue ↔ Order — deferred payment (web redirect gateway)', () => 
       productId: simpleProductId, sku: simpleSku, quantity: 1, unitPrice: 50000,
       gateway: 'deferred_test', idempotencyKey: key,
     });
-    const order = body?.data as { _id: string };
+    const order = body as { _id: string };
     const txns = await getRevenueTxnsForOrder(order._id);
     const sessionId = (txns[0] as { gateway?: { sessionId?: string } }).gateway?.sessionId!;
 
@@ -463,7 +464,7 @@ describe('Revenue ↔ Order — refunds', () => {
       productId: simpleProductId, sku: simpleSku, quantity: 1, unitPrice: 50000,
       gateway, idempotencyKey: key,
     });
-    const order = body?.data as { _id: string };
+    const order = body as { _id: string };
     const txns = await getRevenueTxnsForOrder(order._id);
     return { orderId: order._id, transactionId: String((txns[0] as { _id: unknown })._id), amount: (txns[0] as { amount: number }).amount };
   }
@@ -512,7 +513,7 @@ describe('Revenue ↔ Order — idempotency & concurrency', () => {
       productId: simpleProductId, sku: simpleSku, quantity: 1, unitPrice: 50000,
       gateway: 'cash', idempotencyKey: key,
     });
-    const firstOrderId = (first.body?.data as { _id: string })._id;
+    const firstOrderId = (first.body as { _id: string })._id;
     const firstTxn = (await getRevenueTxnsForOrder(firstOrderId))[0] as { _id: unknown };
 
     // Same idempotency key replayed — order package dedups the order,
@@ -524,7 +525,7 @@ describe('Revenue ↔ Order — idempotency & concurrency', () => {
     });
     expect(replay.status).toBeLessThan(500);
 
-    const orderId = (replay.body?.data as { _id: string })._id;
+    const orderId = (replay.body as { _id: string })._id;
     const txns = await getRevenueTxnsForOrder(orderId);
     // Either same order (idempotent) or new order (no order-level dedup);
     // crucial invariant: the bridge itself created at most one txn per order.
@@ -548,7 +549,7 @@ describe('Revenue ↔ Order — idempotency & concurrency', () => {
     const fulfilled = results.filter((r) => r.status === 'fulfilled') as PromiseFulfilledResult<{ status: number; body: Record<string, unknown> | null }>[];
     expect(fulfilled.length).toBe(parallel);
 
-    const orderIds = fulfilled.map((r) => (r.value.body?.data as { _id: string })._id);
+    const orderIds = fulfilled.map((r) => (r.value.body as { _id: string })._id);
     expect(new Set(orderIds).size).toBe(parallel); // all distinct orders
 
     const txnIds = new Set<string>();
@@ -611,7 +612,7 @@ describe('Revenue ↔ Order — storefront cart-shaped /place payload', () => {
     });
     expect(res.statusCode).toBeLessThan(400);
     const body = parse(res.body);
-    const order = body?.data as { _id: string; orderNumber: string };
+    const order = body as { _id: string; orderNumber: string };
     expect(order?.orderNumber).toMatch(/^ORD-/);
 
     // Envelope fields the FE relies on for the redirect / skipped paths.
@@ -637,7 +638,7 @@ describe('Revenue ↔ Order — storefront cart-shaped /place payload', () => {
 
     // The pending txn's metadata must carry the reference + senderPhone
     // so the admin verification UI has something to show.
-    const order = body?.data as { _id: string };
+    const order = body as { _id: string };
     const txns = await getRevenueTxnsForOrder(order._id);
     expect(txns.length).toBe(1);
     const txn = txns[0] as { metadata?: Record<string, unknown>; status: string };
@@ -649,8 +650,8 @@ describe('Revenue ↔ Order — storefront cart-shaped /place payload', () => {
     const key = `cart-idem-${Date.now()}`;
     const first = await placeStorefrontOrder({ gateway: 'cash', idempotencyKey: key });
     const replay = await placeStorefrontOrder({ gateway: 'cash', idempotencyKey: key });
-    const firstId = (parse(first.body)?.data as { _id: string })._id;
-    const replayId = (parse(replay.body)?.data as { _id: string })._id;
+    const firstId = (parse(first.body) as { _id: string })._id;
+    const replayId = (parse(replay.body) as { _id: string })._id;
     expect(replayId).toBe(firstId); // same order returned, no double-create
   });
 });
@@ -668,7 +669,7 @@ describe('Revenue ↔ Order — graceful degradation', () => {
     expect(payment.error).toMatch(/simulated provider outage/i);
 
     // Order is persisted and reservations are still held — user retries payment.
-    const order = body?.data as { _id: string; status: string };
+    const order = body as { _id: string; status: string };
     expect(order._id).toBeTruthy();
     expect(order.status).toBe('pending');
 

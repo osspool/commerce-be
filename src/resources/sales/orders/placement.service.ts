@@ -60,31 +60,35 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
 
   const rawLines = (body.lines as OrderLineInput[] | undefined) ?? [];
   if (rawLines.length === 0) {
-    return { status: 400, body: { success: false, error: 'Order must contain at least one line' } };
+    return {
+      status: 400,
+      body: { code: 'arc.validation', status: 400, message: 'Order must contain at least one line' },
+    };
   }
 
-  // Idempotency short-circuit
+  // Idempotency lookup + pricelist resolution are independent reads — run
+  // them in parallel. On the common path (no idempotency key OR fresh key)
+  // both queries are needed, so the cost is one round-trip instead of two.
+  // On the rare retry path (idempotency hit) we waste the pricelist call,
+  // but retries are infrequent enough that the tradeoff favors the hot path.
   const idempotencyKey = (body.idempotencyKey as string | undefined) ?? undefined;
-  if (idempotencyKey) {
-    const existing = await engine.models.Order.findOne({
-      organizationId: ctx.organizationId,
-      'metadata.idempotencyKey': idempotencyKey,
-    }).lean();
-    if (existing) {
-      return { status: 201, body: { success: true, data: existing, idempotent: true } };
-    }
+  const customerForPricelist = body.customer as { _id?: string; email?: string } | undefined;
+
+  const [existingByIdempotency, pricelistResolution] = await Promise.all([
+    idempotencyKey
+      ? engine.models.Order.findOne({
+          organizationId: ctx.organizationId,
+          'metadata.idempotencyKey': idempotencyKey,
+        }).lean()
+      : Promise.resolve(null),
+    resolveCustomerPriceList(customerForPricelist, ctx.organizationId),
+  ]);
+
+  if (existingByIdempotency) {
+    const plain = (existingByIdempotency as unknown) as Record<string, unknown>;
+    return { status: 201, body: { ...plain, idempotent: true } };
   }
 
-  // Resolve the customer's pricelist BEFORE snapshot resolution so the
-  // catalog bridge can apply pricelist rules against the base price during
-  // line resolution. Failure modes (no customer, no pricelist on customer,
-  // engine not ready) all fall through to base price — same behavior as
-  // before pricelist was wired.
-  const customerForPricelist = body.customer as { _id?: string; email?: string } | undefined;
-  const pricelistResolution = await resolveCustomerPriceList(
-    customerForPricelist,
-    ctx.organizationId,
-  );
   if (pricelistResolution) {
     logger.debug?.(
       { customerId: pricelistResolution.customerId, priceListId: pricelistResolution.priceListId },
@@ -98,7 +102,10 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
     priceListId: pricelistResolution?.priceListId,
   });
   if (!resolvedLines) {
-    return { status: 400, body: { success: false, error: 'Failed to resolve one or more line SKUs' } };
+    return {
+      status: 400,
+      body: { code: 'arc.validation', status: 400, message: 'Failed to resolve one or more line SKUs' },
+    };
   }
 
   // Atomic reservation (protects against oversell)
@@ -111,10 +118,9 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
       return {
         status: 409,
         body: {
-          success: false,
-          error: 'Insufficient stock for one or more items',
           code: 'INSUFFICIENT_STOCK',
-          message: (err as Error).message,
+          status: 409,
+          message: (err as Error).message || 'Insufficient stock for one or more items',
           details: extractStockShortage(err),
         },
       };
@@ -185,11 +191,12 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
         ...(promoDiscount ? { discount: promoDiscount } : {}),
         ...(promoShipping ? { shipping: promoShipping } : {}),
         customer: body.customer as Record<string, unknown>,
-        // NOTE: `shippingAddress` is NOT persisted on the Order doc — the
-        // @classytic/order model has no address field (see order.model.ts).
-        // It's accepted on the input schema but dropped by `create()`.
-        // Addresses live on `Fulfillment` — we create one below with the
-        // same address payload.
+        // Snapshot the checkout-time addresses on the Order doc (kernel
+        // 0.1.3+). Per-fulfillment overrides still live on
+        // `Fulfillment.shippingAddress` for split-shipment cases; this is
+        // the default a customer sees on /profile/my-orders.
+        ...(body.shippingAddress ? { shippingAddress: body.shippingAddress as Record<string, unknown> } : {}),
+        ...(body.billingAddress ? { billingAddress: body.billingAddress as Record<string, unknown> } : {}),
         payment: body.payment as Record<string, unknown> | undefined,
         sellerId: body.sellerId as string | undefined,
         typeData: body.typeData as Record<string, unknown> | undefined,
@@ -224,7 +231,7 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
         'metadata.idempotencyKey': idempotencyKey,
       }).lean();
       if (winner) {
-        return { status: 201, body: { success: true, data: winner, idempotent: true } };
+        return { status: 201, body: { ...(winner as unknown as Record<string, unknown>), idempotent: true } };
       }
     }
 
@@ -269,5 +276,12 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
   // `engine.repositories.fulfillment.createForOrder` callers under
   // `resources/logistics/`.
 
-  return { status: 201, body: { success: true, data: order, promoCommit, payment: paymentResult } };
+  // Spread the order doc + extras into a plain payload so the wire shape is
+  // flat (Arc 2.13). Mongoose docs don't spread their public fields, so
+  // call `.toObject()` first when available.
+  const orderPlain =
+    typeof (order as { toObject?: () => unknown }).toObject === 'function'
+      ? ((order as { toObject: () => Record<string, unknown> }).toObject() as Record<string, unknown>)
+      : (order as Record<string, unknown>);
+  return { status: 201, body: { ...orderPlain, promoCommit, payment: paymentResult } };
 }

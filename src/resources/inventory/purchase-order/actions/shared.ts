@@ -2,8 +2,8 @@ import branchRepository from '#resources/commerce/branch/branch.repository.js';
 import { createStatusError } from '#resources/inventory/shared/status-errors.js';
 import type { ISupplier } from '#resources/inventory/supplier/models/supplier.model.js';
 import supplierRepository from '#resources/inventory/supplier/supplier.repository.js';
-import type { IPurchaseOrder } from '../models/purchase-order.model.js';
-import { PurchaseOrderPaymentTerms } from '../models/purchase-order.model.js';
+import type { IPurchaseOrder } from '../purchase-order.constants.js';
+import { PurchaseOrderPaymentTerms } from '../purchase-order.constants.js';
 import { normalizeNumber } from '../purchase-order.utils.js';
 
 export interface PaymentData {
@@ -97,7 +97,11 @@ export async function resolveHeadOfficeBranch(branchId?: string): Promise<Branch
     branch = (await branchRepository.getHeadOffice()) as BranchDocument | null;
   }
 
-  if (!branch || branch.role !== 'head_office') {
+  // Branch docs store the role under `role` (model field) OR `branchRole`
+  // (denormalised from BA org metadata) — accept either, per AGENTS.md.
+  const role = (branch as { role?: string; branchRole?: string } | null)?.role
+    ?? (branch as { role?: string; branchRole?: string } | null)?.branchRole;
+  if (!branch || role !== 'head_office') {
     throw createStatusError('Purchases can only be recorded at head office', 403);
   }
 

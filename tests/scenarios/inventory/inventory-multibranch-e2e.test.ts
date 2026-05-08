@@ -135,14 +135,14 @@ async function getPosProducts(branch: Branch) {
 }
 
 function getVariantStock(posBody: any, sku: string): number {
-  const product = posBody?.docs?.find((d: any) => String(d._id) === productId);
+  const product = posBody?.data?.find((d: any) => String(d._id) === productId);
   if (!product?.branchStock?.variants) return -1;
   const variant = product.branchStock.variants.find((v: any) => v.sku === sku);
   return variant?.quantity ?? -1;
 }
 
 function getTotalStock(posBody: any): number {
-  const product = posBody?.docs?.find((d: any) => String(d._id) === productId);
+  const product = posBody?.data?.find((d: any) => String(d._id) === productId);
   return product?.branchStock?.quantity ?? -1;
 }
 
@@ -160,13 +160,13 @@ describe('Branch Stock Isolation', () => {
   it('Branch A: set RED-M to 20 units', async () => {
     const { status, body } = await adjustStock(branchA, SKU_RED_M, 20);
     expect(status).toBe(200);
-    expect(body.data.newQuantity).toBe(20);
+    expect(body.newQuantity).toBe(20);
   });
 
   it('Branch B: set RED-M to 5 units', async () => {
     const { status, body } = await adjustStock(branchB, SKU_RED_M, 5);
     expect(status).toBe(200);
-    expect(body.data.newQuantity).toBe(5);
+    expect(body.newQuantity).toBe(5);
   });
 
   it('Branch A reads 20, Branch B reads 5 — completely isolated', async () => {
@@ -255,7 +255,7 @@ describe('Adjustment Modes (set / add / remove)', () => {
     await adjustStock(branchA, SKU_BLUE_M, 0, 'set');
 
     const pos = await getPosProducts(branchA);
-    const product = pos?.docs?.find((d: any) => String(d._id) === productId);
+    const product = pos?.data?.find((d: any) => String(d._id) === productId);
 
     expect(getTotalStock(pos)).toBe(0);
     expect(product?.branchStock?.inStock).toBe(false);
@@ -275,8 +275,8 @@ describe('Concurrent Branch Operations', () => {
 
     expect(resA.status).toBe(200);
     expect(resB.status).toBe(200);
-    expect(resA.body.data.newQuantity).toBe(200);
-    expect(resB.body.data.newQuantity).toBe(77);
+    expect(resA.body.newQuantity).toBe(200);
+    expect(resB.body.newQuantity).toBe(77);
 
     const posA = await getPosProducts(branchA);
     const posB = await getPosProducts(branchB);
@@ -291,7 +291,7 @@ describe('Edge Cases', () => {
   it('adjusting a non-existent variant SKU still creates quant', async () => {
     const { status, body } = await adjustStock(branchA, 'NON-EXISTENT-SKU', 10, 'set');
     expect(status).toBe(200);
-    expect(body.data.newQuantity).toBe(10);
+    expect(body.newQuantity).toBe(10);
   });
 
   it('set quantity to same value is a no-op (delta 0)', async () => {
@@ -299,7 +299,7 @@ describe('Edge Cases', () => {
     const { status, body } = await adjustStock(branchA, SKU_BLUE_M, 42, 'set');
 
     expect(status).toBe(200);
-    expect(body.data.newQuantity).toBe(42);
+    expect(body.newQuantity).toBe(42);
 
     const pos = await getPosProducts(branchA);
     expect(getVariantStock(pos, SKU_BLUE_M)).toBe(42);
@@ -308,7 +308,7 @@ describe('Edge Cases', () => {
   it('large quantity adjustment works', async () => {
     const { status, body } = await adjustStock(branchA, SKU_RED_M, 99999, 'set');
     expect(status).toBe(200);
-    expect(body.data.newQuantity).toBe(99999);
+    expect(body.newQuantity).toBe(99999);
   });
 });
 
@@ -330,11 +330,9 @@ describe('Per-Branch Barcode Isolation', () => {
       headers: branch.auth.as('admin').headers,
     });
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    expect(Array.isArray(body?.data)).toBe(true);
-    const defaultNode = (body.data as Array<{ _id: string; code: string; isDefault?: boolean }>)
-      .find((n) => n.isDefault === true || n.code === 'DEFAULT');
+    const body = parse(res.body) as Array<{ _id: string; code: string; isDefault?: boolean }>;
+    expect(Array.isArray(body)).toBe(true);
+    const defaultNode = body.find((n) => n.isDefault === true || n.code === 'DEFAULT');
     expect(defaultNode, 'bootstrap did not create a default node for this branch').toBeDefined();
     return defaultNode!._id;
   }
@@ -359,8 +357,8 @@ describe('Per-Branch Barcode Isolation', () => {
     expect(locA.statusCode).toBe(201);
     expect(locB.statusCode).toBe(201);
 
-    const a = parse(locA.body).data;
-    const b = parse(locB.body).data;
+    const a = parse(locA.body);
+    const b = parse(locB.body);
     expect(a.barcode).toBe(shared);
     expect(b.barcode).toBe(shared);
     expect(String(a.organizationId)).not.toBe(String(b.organizationId));
@@ -374,7 +372,7 @@ describe('Per-Branch Barcode Isolation', () => {
     const bc = `BC-SAME-BRANCH-${Date.now().toString(36).toUpperCase()}`;
     const first = await createLoc(branchA, nodeA, `LOC-SB-1-${Date.now()}`, bc);
     expect(first.statusCode).toBe(201);
-    expect(parse(first.body).data.barcode).toBe(bc);
+    expect(parse(first.body).barcode).toBe(bc);
 
     const second = await createLoc(branchA, nodeA, `LOC-SB-2-${Date.now()}`, bc);
     expect([400, 409, 500]).toContain(second.statusCode);

@@ -9,7 +9,8 @@
  * Reports are read-only custom routes using the model directly.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import permissions from '#config/permissions.js';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';

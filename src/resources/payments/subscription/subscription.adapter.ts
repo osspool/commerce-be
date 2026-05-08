@@ -1,4 +1,4 @@
-import { createMongooseAdapter } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { buildCrudSchemasFromModel } from '@classytic/mongokit';
 import { subscriptionModel, subscriptionRepository } from './subscription.engine.js';
 

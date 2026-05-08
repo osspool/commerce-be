@@ -88,13 +88,74 @@ export const returnRestockedSchema = z.object({
   affectedLines: z.array(affectedLineSchema).optional(),
 });
 
+/**
+ * Fired by the budget-enforcement plugin when a JE post would push period
+ * actuals over a Budget's `thresholdPercent` AND the budget's
+ * `actionIfExceeded === 'warn'`. The JE still posts; this is a notify.
+ *
+ * Auditors / finance dashboards subscribe to this to surface "soft breach"
+ * alerts. For 'stop' the plugin throws synchronously and no event fires —
+ * the post fails outright, no audit trail to backfill.
+ */
+export const budgetThresholdExceededSchema = z.object({
+  budgetId: z.string(),
+  organizationId: z.string(),
+  account: z.string(),
+  entryId: z.string(),
+  /** Sum of posted debits to this account in the budget period (excluding the new entry). */
+  periodActual: z.number(),
+  /** Debits this entry would add to the account. */
+  newDebit: z.number(),
+  /** periodActual + newDebit. */
+  projected: z.number(),
+  /** budget.amount * thresholdPercent / 100 (paisa). */
+  threshold: z.number(),
+  budgetAmount: z.number(),
+  thresholdPercent: z.number(),
+  date: z.string(),
+});
+
+export const rmaRestockingFeeCollectedSchema = z.object({
+  /** Idempotency anchor + label source — `CHG-YYYY-NNNN`. */
+  changeNumber: z.string(),
+  /** Order this RMA is scoped to. */
+  orderId: z.string(),
+  /** Fee amount in paisa. Posted at face value (no tax split). */
+  amount: z.number().positive(),
+  /** Original order's payment method — drives cash-side account selection. */
+  paymentMethod: z.string().optional(),
+  branchId: z.string(),
+  date: z.string().optional(),
+  reason: z.string().optional(),
+});
+
 export const inventoryAdjustedSchema = z.object({
   adjustmentId: z.string(),
+  /**
+   * Human-readable label fragment for the JE (e.g. `RED-M`, `ADJ-2026-04-001`).
+   * Goes onto the journal entry as `Inventory loss — {referenceNumber}`.
+   * When omitted, the JE label is just the type (`Inventory loss`) with no
+   * raw ObjectId / timestamp leakage.
+   */
+  referenceNumber: z.string().optional(),
   type: z.enum(['loss', 'gain', 'correction']),
   amount: z.number(),
   date: z.string().optional(),
   reason: z.string().optional(),
   branchId: z.string().optional(),
+  /**
+   * Optional sourceRef override. When the loss is part of a higher-level
+   * operation (RMA write-off, production scrap, transfer shrinkage) the
+   * caller can re-anchor the JE's `sourceRef` so a single audit query
+   * returns every JE for the parent operation. Defaults to the generic
+   * `StockAdjustment` model and `adjustmentId` when omitted.
+   */
+  source: z
+    .object({
+      sourceModel: z.string(),
+      sourceId: z.string(),
+    })
+    .optional(),
 });
 
 export const purchasePaidSchema = z.object({
@@ -131,6 +192,12 @@ export const codSettledSchema = z.object({
 
 export const codCancelledSchema = z.object({
   orderId: z.string(),
+  // Customer reference for the A/R partner stamp. When present, the
+  // contract uses this as `partnerId` on the 1141 line so the resolver
+  // can render a customer name and Aging reports group by customer (not
+  // per-order). Optional because guest / walk-in orders may have no
+  // customer record — the contract falls back to orderId in that case.
+  customerId: z.string().nullable().optional(),
   grossAmount: z.number(),
   tax: z.number(),
   promoDiscount: z.number().optional(),
@@ -169,6 +236,18 @@ export const InventoryAdjustedEvent: EventDefinitionOutput<z.infer<typeof invent
   name: 'accounting:inventory.adjusted',
   description: 'Stock adjustment posted — inventory entry.',
   schema: toJsonSchema(inventoryAdjustedSchema),
+});
+
+export const BudgetThresholdExceededEvent: EventDefinitionOutput<z.infer<typeof budgetThresholdExceededSchema>> = defineEvent({
+  name: 'accounting:budget.threshold.exceeded',
+  description: 'A JE post pushed period actuals over a Budget threshold (warn mode). No GL action — surface in finance alerts.',
+  schema: toJsonSchema(budgetThresholdExceededSchema),
+});
+
+export const RmaRestockingFeeCollectedEvent: EventDefinitionOutput<z.infer<typeof rmaRestockingFeeCollectedSchema>> = defineEvent({
+  name: 'accounting:rma.restocking_fee_collected',
+  description: 'Restocking fee retained on a confirmed RMA — Other Income entry.',
+  schema: toJsonSchema(rmaRestockingFeeCollectedSchema),
 });
 
 export const PurchasePaidEvent: EventDefinitionOutput<z.infer<typeof purchasePaidSchema>> = defineEvent({

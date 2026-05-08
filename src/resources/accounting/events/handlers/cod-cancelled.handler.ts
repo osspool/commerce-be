@@ -1,8 +1,8 @@
-import config from '#config/index.js';
 import {
   type CodCancellationData,
   codCancellationToPosting,
 } from '../../posting/contracts/cod-cancellation.contract.js';
+import { getOrderReferenceNumber } from '../../_shared/order-ref.service.js';
 import { definePostingHandler } from '../define-posting-handler.js';
 import { CodCancelledEvent, codCancelledSchema } from '../event-definitions.js';
 
@@ -22,8 +22,12 @@ export const codCancelledHandler = definePostingHandler({
     if (!payload.orderId || !payload.branchId) return null;
     if (payload.grossAmount <= 0) return null;
 
+    const orderReferenceNumber = await getOrderReferenceNumber(payload.orderId);
+
     const data: CodCancellationData = {
       orderId: payload.orderId,
+      orderReferenceNumber,
+      customerId: payload.customerId ?? null,
       grossAmount: payload.grossAmount,
       tax: payload.tax,
       promoDiscount: payload.promoDiscount,
@@ -33,7 +37,7 @@ export const codCancelledHandler = definePostingHandler({
 
     return {
       branchId: payload.branchId,
-      posting: codCancellationToPosting(data, { autoPost: config.accounting.autoPost }),
+      posting: codCancellationToPosting(data),
       logFields: { orderId: payload.orderId, reason: payload.reason },
       successMessage: 'COD cancellation journal entry created (A/R reversed)',
     };

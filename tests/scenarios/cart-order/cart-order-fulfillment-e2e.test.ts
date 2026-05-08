@@ -243,7 +243,6 @@ describe('Phase 1 — Cart operations', () => {
     // Cart resource may return 200 or 201 on add
     expect(res.statusCode).toBeLessThan(500);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
   });
 
   it('adds a digital product to the same cart', async () => {
@@ -269,8 +268,8 @@ describe('Phase 1 — Cart operations', () => {
 
     expect(res.statusCode).toBeLessThan(500);
     const body = parse(res.body);
-    if (res.statusCode === 200 && body?.success) {
-      const data = body?.data as Record<string, unknown> | undefined;
+    if (res.statusCode === 200) {
+      const data = body as Record<string, unknown> | undefined;
       if (data?.lines) {
         const lines = data.lines as unknown[];
         expect(lines.length).toBeGreaterThanOrEqual(1);
@@ -294,9 +293,7 @@ describe('Phase 2 — Checkout', () => {
 
     // May be 200 or 201
     expect(res.statusCode).toBeLessThan(400);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-    const data = body?.data as Record<string, unknown> | undefined;
+    const data = parse(res.body) as Record<string, unknown> | undefined;
     if (data?.publicId) {
       checkoutId = data.publicId as string;
     } else if (data?._id) {
@@ -351,10 +348,7 @@ describe('Phase 3 — Order placement', () => {
     });
 
     expect(res.statusCode).toBeLessThan(400);
-    const body = parse(res.body);
-    expect(body?.success).toBe(true);
-
-    const order = body?.data as Record<string, unknown>;
+    const order = parse(res.body) as Record<string, unknown>;
     expect(order.orderNumber).toMatch(/^ORD-\d{4}-\d+$/);
     expect(order.status).toBe('pending');
     expect(order.organizationId).toBe(orgId);
@@ -369,8 +363,7 @@ describe('Phase 3 — Order placement', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const data = body?.data as Record<string, unknown>;
+    const data = parse(res.body) as Record<string, unknown>;
     expect(data.orderNumber).toBe(orderNumber);
     expect(data.organizationId).toBe(orgId);
 
@@ -387,8 +380,8 @@ describe('Phase 3 — Order placement', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const docs = (body?.docs as Array<Record<string, unknown>>) ?? [];
+    const body = parse(res.body) as { data?: Array<Record<string, unknown>> } | null;
+    const docs = body?.data ?? [];
     const found = docs.find(d => d.orderNumber === orderNumber);
     expect(found).toBeTruthy();
   });
@@ -433,7 +426,7 @@ describe('Phase 4 — Payment & confirmation', () => {
 
     expect(res.statusCode).toBeLessThan(400);
     const body = parse(res.body);
-    expect((body?.data as Record<string, unknown>)?.status).toBe('confirmed');
+    expect((body as Record<string, unknown>)?.status).toBe('confirmed');
   });
 });
 
@@ -454,8 +447,7 @@ describe('Phase 5 — Fulfillment', () => {
     });
 
     expect(res.statusCode).toBeLessThan(400);
-    const body = parse(res.body);
-    const ful = body?.data as Record<string, unknown>;
+    const ful = parse(res.body) as Record<string, unknown>;
     expect(ful.fulfillmentNumber).toMatch(/^FUL-\d{4}-\d+$/);
     expect(ful.organizationId).toBe(orgId);
     physicalFulNumber = ful.fulfillmentNumber as string;
@@ -507,9 +499,8 @@ describe('Phase 5 — Fulfillment', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const result = body?.data as Record<string, unknown>;
-    const docs = (result?.docs as Array<Record<string, unknown>>) ?? [];
+    const body = parse(res.body) as { data?: Array<Record<string, unknown>> } | null;
+    const docs = body?.data ?? [];
     expect(docs.length).toBeGreaterThanOrEqual(1);
     expect(docs.every(d => d.orderNumber === orderNumber)).toBe(true);
   });
@@ -526,8 +517,7 @@ describe('Phase 6 — Order completion', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const order = body?.data as Record<string, unknown>;
+    const order = parse(res.body) as Record<string, unknown>;
 
     // Payment should reflect bKash capture
     const ps = order.paymentState as Record<string, unknown>;
@@ -562,8 +552,7 @@ describe('Phase 7 — Post-purchase: return request', () => {
     });
 
     expect(res.statusCode).toBeLessThan(400);
-    const body = parse(res.body);
-    const change = body?.data as Record<string, unknown>;
+    const change = parse(res.body) as Record<string, unknown>;
     expect(change.changeNumber).toMatch(/^CHG-\d{4}-\d+$/);
     expect(change.organizationId).toBe(orgId);
   });
@@ -576,9 +565,8 @@ describe('Phase 7 — Post-purchase: return request', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = parse(res.body);
-    const result = body?.data as Record<string, unknown>;
-    const docs = (result?.docs as Array<Record<string, unknown>>) ?? [];
+    const body = parse(res.body) as Record<string, unknown>;
+    const docs = (body?.data as Array<Record<string, unknown>>) ?? [];
     expect(docs.length).toBeGreaterThanOrEqual(1);
     expect(docs[0].changeType).toBe('return');
   });
@@ -633,8 +621,7 @@ describe('Phase 9 — Cross-package integration verification', () => {
       headers: auth.as('admin').headers,
     });
 
-    const body = parse(res.body);
-    const order = body?.data as Record<string, unknown>;
+    const order = parse(res.body) as Record<string, unknown>;
     const lines = order.lines as Array<Record<string, unknown>>;
 
     // Line snapshots should have been resolved by the OrderCatalogBridge

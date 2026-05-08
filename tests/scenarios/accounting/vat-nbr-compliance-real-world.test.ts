@@ -247,8 +247,8 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
       if (res.statusCode !== 200) console.log('[purchase create]', res.statusCode, res.body);
       expect([200, 201]).toContain(res.statusCode);
       const body = parse(res.body);
-      expect(body.success).toBe(true);
-      purchaseId = body.data._id;
+
+      purchaseId = body._id;
       expect(purchaseId).toBeTruthy();
     });
 
@@ -275,7 +275,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
         return;
       }
       expect([200, 201]).toContain(res.statusCode);
-      expect(parse(res.body).success).toBe(true);
+
 
       // Wait for async posting event
       await new Promise((r) => setTimeout(r, 500));
@@ -360,8 +360,8 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
       if (posRes.statusCode !== 201) console.log('[pos order]', posRes.statusCode, posRes.body);
       expect(posRes.statusCode).toBe(201);
       const posBody = parse(posRes.body);
-      orderId = posBody.data._id;
-      orderNumber = posBody.data.orderNumber ?? posBody.data.publicId;
+      orderId = posBody._id;
+      orderNumber = posBody.orderNumber ?? posBody.publicId;
       expect(orderId).toBeTruthy();
 
       // Try fulfill + deliver — if routes not wired, log and continue
@@ -371,7 +371,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
           url: `${API}/orders/${orderId}`,
           headers: auth.as('admin').headers,
         });
-        const lines = parse(orderRes.body)?.data?.lines ?? [];
+        const lines = parse(orderRes.body)?.lines ?? [];
 
         const ffRes = await server.inject({
           method: 'POST',
@@ -385,7 +385,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
           },
         });
         if (ffRes.statusCode === 201) {
-          fulfillmentId = parse(ffRes.body)?.data?._id;
+          fulfillmentId = parse(ffRes.body)?._id;
           await server.inject({
             method: 'POST',
             url: `${API}/fulfillments/${fulfillmentId}/action`,
@@ -445,7 +445,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
 
       const res = await getMonthlyReturn(currentPeriod());
       expect(res.statusCode).toBe(200);
-      const data = parse(res.body)?.data;
+      const data = parse(res.body);
       expect(data).toBeDefined();
       expect(data.return).toBeDefined();
 
@@ -499,7 +499,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
         console.log('[inclusive generate]', res.statusCode, res.body);
       }
       expect([200, 201]).toContain(res.statusCode);
-      const data = parse(res.body)?.data;
+      const data = parse(res.body);
       expect(data).toBeDefined();
       const line = (data.lines ?? [])[0];
       expect(line).toBeDefined();
@@ -579,7 +579,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
         ],
       });
       expect([200, 201]).toContain(res.statusCode);
-      const data = parse(res.body)?.data;
+      const data = parse(res.body);
       expect(data).toBeDefined();
       sdInvoiceId = data._id;
 
@@ -620,7 +620,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
 
       const res = await getMonthlyReturn(currentPeriod());
       expect(res.statusCode).toBe(200);
-      const data = parse(res.body)?.data;
+      const data = parse(res.body);
       expect(data).toBeDefined();
 
       // sdCollected may surface on return.sdCollected OR via aggregateTax bucket OR via aggregates
@@ -670,7 +670,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
         console.log('[zero generate]', res.statusCode, res.body);
       }
       expect([200, 201]).toContain(res.statusCode);
-      const data = parse(res.body)?.data;
+      const data = parse(res.body);
       expect(data).toBeDefined();
 
       const line = (data.lines ?? [])[0];
@@ -702,7 +702,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
         console.log('[exempt generate]', res.statusCode, res.body);
       }
       expect([200, 201]).toContain(res.statusCode);
-      const data = parse(res.body)?.data;
+      const data = parse(res.body);
       expect(data).toBeDefined();
 
       const line = (data.lines ?? [])[0];
@@ -729,7 +729,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
         },
       });
       expect([200, 201]).toContain(createRes.statusCode);
-      const exemptPurchaseId = parse(createRes.body)?.data?._id;
+      const exemptPurchaseId = parse(createRes.body)?._id;
       expect(exemptPurchaseId).toBeTruthy();
 
       const receiveRes = await server.inject({
@@ -789,7 +789,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
         headers: auth.as('admin').headers,
       });
       expect(res.statusCode).toBe(200);
-      const data = parse(res.body)?.data;
+      const data = parse(res.body);
       expect(data).toBeDefined();
       expect(data.isValid).toBe(true);
     });
@@ -813,9 +813,9 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
       expect([200, 201]).toContain(r2.statusCode);
       expect([200, 201]).toContain(r3.statusCode);
 
-      const d1 = parse(r1.body)?.data;
-      const d2 = parse(r2.body)?.data;
-      const d3 = parse(r3.body)?.data;
+      const d1 = parse(r1.body);
+      const d2 = parse(r2.body);
+      const d3 = parse(r3.body);
 
       expect(d1.mushakSerial).toBeTruthy();
       expect(d2.mushakSerial).toBeTruthy();
@@ -841,21 +841,21 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
         ],
       });
       expect([200, 201]).toContain(gen.statusCode);
-      const inv = parse(gen.body)?.data;
+      const inv = parse(gen.body);
       const invVat = inv.totalVat as number;
       expect(invVat).toBeGreaterThan(0);
 
       const period = currentPeriod();
-      const before = parse((await getMonthlyReturn(period)).body)?.data;
+      const before = parse((await getMonthlyReturn(period)).body);
       const beforeAggStd = (before?.aggregates ?? []).find((a: any) => Number(a._id) === 15);
       const beforeVat = beforeAggStd?.vatAmount ?? 0;
 
       // Cancel the invoice
       const cancelRes = await cancelMusok(inv._id, 'Excluded test');
       expect(cancelRes.statusCode).toBe(200);
-      expect(parse(cancelRes.body)?.data?.status).toBe('cancelled');
+      expect(parse(cancelRes.body)?.status).toBe('cancelled');
 
-      const after = parse((await getMonthlyReturn(period)).body)?.data;
+      const after = parse((await getMonthlyReturn(period)).body);
       const afterAggStd = (after?.aggregates ?? []).find((a: any) => Number(a._id) === 15);
       const afterVat = afterAggStd?.vatAmount ?? 0;
 
@@ -867,7 +867,7 @@ describe('VAT NBR Compliance — Real-World Scenarios', () => {
     it('15. date clamping works for future period with no data', async () => {
       const res = await getMonthlyReturn('2099-12');
       expect(res.statusCode).toBe(200);
-      const data = parse(res.body)?.data;
+      const data = parse(res.body);
       expect(data).toBeDefined();
       expect(data.return).toBeDefined();
       expect(data.return.period).toBe('2099-12');

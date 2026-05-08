@@ -10,6 +10,7 @@
 import { defineResource } from '@classytic/arc';
 import { requireAuth } from '@classytic/arc/permissions';
 import { getCustomJournalTypes, getJournalType, JOURNAL_TYPES } from '@classytic/ledger';
+import { NotFoundError } from '@classytic/arc/utils';
 
 const journalTypeResource = defineResource({
   name: 'journal-type',
@@ -32,7 +33,6 @@ const journalTypeResource = defineResource({
         const custom = getCustomJournalTypes();
         const all = [...builtIn, ...custom];
         return {
-          success: true,
           results: all.length,
           data: all.map((jt) => ({
             code: jt.code,
@@ -53,12 +53,9 @@ const journalTypeResource = defineResource({
         const { code } = req.params;
         const journalType = getJournalType(code);
         if (!journalType) {
-          return reply.status(404).send({ success: false, error: `Journal type '${code}' not found` });
+          throw new NotFoundError(`Journal type '${code}' not found`);
         }
-        return {
-          success: true,
-          data: { code: journalType.code, name: journalType.name, description: journalType.description ?? null },
-        };
+        return { code: journalType.code, name: journalType.name, description: journalType.description ?? null };
       },
     },
   ],

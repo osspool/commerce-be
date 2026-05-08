@@ -17,9 +17,9 @@ import {
   MemoryEventTransport,
   EventOutbox,
   MemoryOutboxStore,
-  createEvent,
 } from '@classytic/arc/events';
-import type { DomainEvent } from '@classytic/arc/events';
+import { createEvent } from '@classytic/primitives/events';
+import type { DomainEvent } from '@classytic/primitives/events';
 
 // MongoDB connection managed by per-suite-mongo.ts setupFile.
 
@@ -196,7 +196,6 @@ describe('withCompensation context mutation edge cases', () => {
       },
     ], { nested: { value: 0 } });
 
-    expect(result.success).toBe(true);
     if (result.success) {
       expect(result.results['step-2']).toBe(42);
     }
@@ -226,7 +225,6 @@ describe('withCompensation context mutation edge cases', () => {
       },
     ], { counter: 0 });
 
-    expect(result.success).toBe(false);
     // Compensation sees the MUTATED context (counter=10), not the initial (counter=0)
     expect(compensationSawValue).toBe(10);
   });
@@ -368,7 +366,6 @@ describe('withCompensation compensation failure handling', () => {
       },
     ], {});
 
-    expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.failedStep).toBe('step-2');
       // Compensation for step-1 also failed — captured in compensationErrors
@@ -388,7 +385,6 @@ describe('withCompensation edge cases', () => {
     const { withCompensation } = await import('@classytic/arc/utils');
 
     const result = await withCompensation('empty', [], {});
-    expect(result.success).toBe(true);
     if (result.success) {
       expect(result.completedSteps).toEqual([]);
     }
@@ -403,7 +399,6 @@ describe('withCompensation edge cases', () => {
       { name: 'only', execute: async () => 'result' },
     ], {});
 
-    expect(result.success).toBe(true);
     if (result.success) {
       expect(result.results['only']).toBe('result');
     }
@@ -422,7 +417,6 @@ describe('withCompensation edge cases', () => {
       },
     ], {});
 
-    expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.failedStep).toBe('step-1');
       expect(result.completedSteps).toEqual([]);

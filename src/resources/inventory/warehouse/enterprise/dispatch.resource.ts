@@ -10,6 +10,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import config from '#config/index.js';
 import permissions from '#config/permissions.js';
 import { enterpriseModeGuard, flow, flowCtxGuard } from '../shared/helpers.js';
+import { ServiceUnavailableError } from '@classytic/arc/utils';
 
 const enterpriseGuards = [enterpriseModeGuard.preHandler, flowCtxGuard.preHandler];
 
@@ -42,7 +43,7 @@ const dispatchResource = config.inventory.dispatchEnabled
               {},
               { organizationId: ctx.organizationId, sort: { createdAt: -1 } },
             );
-            return reply.send({ success: true, data: manifests });
+            return reply.send(manifests);
           },
         },
         {
@@ -55,7 +56,7 @@ const dispatchResource = config.inventory.dispatchEnabled
             const ctx = flowCtxGuard.from(req);
             const repos = flow().repositories;
             const docks = await repos.dockDoor.findAll({}, { organizationId: ctx.organizationId, sort: { code: 1 } });
-            return reply.send({ success: true, data: docks });
+            return reply.send(docks);
           },
         },
         {
@@ -71,7 +72,7 @@ const dispatchResource = config.inventory.dispatchEnabled
               {},
               { organizationId: ctx.organizationId, sort: { scheduledStart: 1 } },
             );
-            return reply.send({ success: true, data: appointments });
+            return reply.send(appointments);
           },
         },
         {
@@ -83,9 +84,9 @@ const dispatchResource = config.inventory.dispatchEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.dispatch;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Dispatch service not available' });
+            if (!svc) throw new ServiceUnavailableError('Dispatch service not available');
             const manifest = await svc.createManifest(req.body as any, ctx);
-            return reply.code(201).send({ success: true, data: manifest });
+            return reply.code(201).send(manifest);
           },
         },
         {
@@ -99,9 +100,9 @@ const dispatchResource = config.inventory.dispatchEnabled
             const { id } = req.params as { id: string };
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.dispatch;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Dispatch service not available' });
+            if (!svc) throw new ServiceUnavailableError('Dispatch service not available');
             const manifest = await svc.dispatch(id, ctx);
-            return reply.send({ success: true, data: manifest });
+            return reply.send(manifest);
           },
         },
         {
@@ -113,13 +114,13 @@ const dispatchResource = config.inventory.dispatchEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.dispatch;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Dispatch service not available' });
+            if (!svc) throw new ServiceUnavailableError('Dispatch service not available');
             const body = req.body as Record<string, unknown>;
             const door = await flow().repositories.dockDoor.create({
               ...body,
               organizationId: ctx.organizationId,
             } as any);
-            return reply.code(201).send({ success: true, data: door });
+            return reply.code(201).send(door);
           },
         },
         {
@@ -131,9 +132,9 @@ const dispatchResource = config.inventory.dispatchEnabled
           handler: async (req: FastifyRequest, reply: FastifyReply) => {
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.dispatch;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Dispatch service not available' });
+            if (!svc) throw new ServiceUnavailableError('Dispatch service not available');
             const appointment = await svc.scheduleAppointment(req.body as any, ctx);
-            return reply.code(201).send({ success: true, data: appointment });
+            return reply.code(201).send(appointment);
           },
         },
         {
@@ -146,9 +147,9 @@ const dispatchResource = config.inventory.dispatchEnabled
             const { id } = req.params as { id: string };
             const ctx = flowCtxGuard.from(req);
             const svc = flow().services.dispatch;
-            if (!svc) return reply.code(503).send({ success: false, error: 'Dispatch service not available' });
+            if (!svc) throw new ServiceUnavailableError('Dispatch service not available');
             const appointment = await svc.checkIn(id, ctx);
-            return reply.send({ success: true, data: appointment });
+            return reply.send(appointment);
           },
         },
       ],

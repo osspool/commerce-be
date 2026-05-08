@@ -202,8 +202,8 @@ describe('Point Earning', () => {
       limit: 10,
       sort: { createdAt: -1 },
     });
-    expect(history.docs.length).toBe(1);
-    expect(history.docs[0].type).toBe('earn');
+    expect(history.data.length).toBe(1);
+    expect(history.data[0].type).toBe('earn');
   });
 
   it('idempotent earn — same key twice → only one transaction', async () => {
@@ -532,7 +532,7 @@ describe('Transaction History', () => {
       sort: { createdAt: -1 },
     });
 
-    const types = history.docs.map((d: any) => d.type);
+    const types = history.data.map((d: any) => d.type);
     expect(types).toContain('earn');
     expect(types).toContain('adjust');
     expect(types).toContain('redeem');
@@ -561,7 +561,7 @@ describe('Transaction History', () => {
       limit: 3,
       sort: { createdAt: -1 },
     });
-    expect(page1.docs.length).toBe(3);
+    expect(page1.data.length).toBe(3);
     expect(page1.total).toBe(5);
     expect(page1.page < page1.pages).toBe(true);
 
@@ -571,7 +571,7 @@ describe('Transaction History', () => {
       limit: 3,
       sort: { createdAt: -1 },
     });
-    expect(page2.docs.length).toBe(2);
+    expect(page2.data.length).toBe(2);
     expect(page2.page < page2.pages).toBe(false);
   });
 });
@@ -679,6 +679,6 @@ describe('Full POS Integration Flow', () => {
       limit: 50,
       sort: { createdAt: -1 },
     });
-    expect(history.docs.length).toBeGreaterThanOrEqual(4); // 3 earns + 1 redeem
+    expect(history.data.length).toBeGreaterThanOrEqual(4); // 3 earns + 1 redeem
   });
 });

@@ -8,7 +8,7 @@
  */
 
 import { mongodbAdapter } from '@better-auth/mongo-adapter';
-import { registerBetterAuthMongooseModels } from '@classytic/arc/auth/mongoose';
+import { registerBetterAuthStubs } from '@classytic/mongokit/better-auth';
 import type { BetterAuthOptions } from 'better-auth';
 import { betterAuth } from 'better-auth';
 import { admin as adminPlugin } from 'better-auth/plugins/admin';
@@ -28,6 +28,7 @@ import {
   stock_requester,
   viewer,
 } from './access-control.js';
+import { ensureBranchBootstrapped } from '#resources/inventory/inventory-management.plugin.js';
 import { linkCustomerOnRegistration } from './auth.workflow.js';
 
 const log = pino({ name: 'auth' });
@@ -141,6 +142,37 @@ export function getAuth() {
           creatorRole: 'branch_manager',
           membershipLimit: 100,
           ac,
+          // Branches in BigBoss === BA organizations. The moment a new
+          // branch is born (admin POSTs to /api/auth/organization/create
+          // or the seed pipeline runs), provision its WMS scaffolding
+          // once and only once: 1 Flow warehouse node + 4 default
+          // locations (stock / vendor / customer / adjustment).
+          // Idempotent — `ensureBranchBootstrapped` short-circuits via
+          // `bootstrappedOrgs` cache.
+          //
+          // This replaces the legacy `onRequest` hook in
+          // inventory-management.plugin.ts that fired the same call
+          // lazily on every HTTP request. Combined with the onReady
+          // backfill in that plugin (catches branches that existed
+          // before this hook shipped), branches are now bootstrapped
+          // exactly once, at birth, on the canonical "branch created"
+          // event — no per-request Set lookup, no architectural smell.
+          organizationHooks: {
+            afterCreateOrganization: async ({ organization: org }) => {
+              try {
+                log.info(
+                  { orgId: org.id, name: org.name },
+                  'New branch created — bootstrapping WMS scaffolding',
+                );
+                await ensureBranchBootstrapped(org.id);
+              } catch (err) {
+                log.error(
+                  { err, orgId: org.id },
+                  'Failed to bootstrap warehouse for new branch',
+                );
+              }
+            },
+          },
           roles: {
             branch_manager,
             inventory_staff,
@@ -256,8 +288,9 @@ export function getAuth() {
 
     // Register stub Mongoose models for Better Auth's collections so that
     // .populate('userId') / ref: 'User' etc. resolve against BA-owned docs.
-    // Uses arc 2.7.3's helper — idempotent, strict:false, plugin-aware.
-    registerBetterAuthMongooseModels(mongoose, {
+    // arc 2.13+ — kit-owned helper from @classytic/mongokit/better-auth
+    // (idempotent, strict:false, plugin-aware).
+    registerBetterAuthStubs(mongoose, {
       plugins: ['organization'],
       // 'Branch' alias → organization collection for ref: 'Branch' in
       // inventory, order, transfer models.

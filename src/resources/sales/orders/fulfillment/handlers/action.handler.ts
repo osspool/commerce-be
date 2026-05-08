@@ -34,6 +34,11 @@ const statusMap: Record<string, string> = {
   prepare: 'preparing',
   assign: 'assigned',
   start: 'in_progress',
+  // Manual handler — own-driver / no-courier delivery. The pending →
+  // out_for_delivery transition is the manual analog of `ship` (goods
+  // leave our possession), so the kernel's coverage-commit fix bumps
+  // `line.fulfilledQuantity` here too.
+  send_out: 'out_for_delivery',
 };
 
 export async function fulfillmentActionHandler(req: FastifyRequest, reply: FastifyReply) {
@@ -44,5 +49,5 @@ export async function fulfillmentActionHandler(req: FastifyRequest, reply: Fasti
   const targetState = statusMap[action] ?? action;
   const fulfillment = (await engine.repositories.fulfillment.transition(id, targetState, ctx)) as FulfillmentLike;
 
-  return reply.send({ success: true, data: fulfillment });
+  return reply.send(fulfillment);
 }

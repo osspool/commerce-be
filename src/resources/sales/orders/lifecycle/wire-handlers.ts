@@ -18,6 +18,13 @@ import type { FastifyBaseLogger } from 'fastify';
 import { publish, subscribe } from '#lib/events/arcEvents.js';
 import { getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';
 import type { HandlerDeps, TransitionContext, TransitionHandler } from './handler.js';
+import { cancelRefundPrepaidHandler } from './handlers/cancel-refund-prepaid.js';
+import { changeConfirmedExchangeReplacementHandler } from './handlers/change-confirmed-exchange-replacement.js';
+import { changeConfirmedLedgerRestockBridgeHandler } from './handlers/change-confirmed-ledger-restock-bridge.js';
+import { changeConfirmedRefundHandler } from './handlers/change-confirmed-refund.js';
+import { changeConfirmedRestockingFeeHandler } from './handlers/change-confirmed-restocking-fee.js';
+import { changeConfirmedStockReturnHandler } from './handlers/change-confirmed-stock-return.js';
+import { fulfillmentDeliveredHandler } from './handlers/fulfillment-delivered.js';
 import { ledgerCogsBridgeHandler } from './handlers/ledger-cogs-bridge.js';
 import { ledgerRestockBridgeHandler } from './handlers/ledger-restock-bridge.js';
 import { stockCommitHandler } from './handlers/stock-commit.js';
@@ -35,6 +42,38 @@ import { stockReturnHandler } from './handlers/stock-return.js';
 const HANDLERS: ReadonlyArray<TransitionHandler> = [
   stockCommitHandler,
   ledgerCogsBridgeHandler,
+  // Promote the fulfillment-level `delivered` transition to a durable
+  // ORDER-subject event so /orders/:id/events shows it in the timeline
+  // and notification / settlement-import subscribers can react to a
+  // canonical signal. See [handlers/fulfillment-delivered.ts] for the
+  // rationale (COD reconciliation, dashboard delivered timestamp,
+  // customer "your order is delivered" emails).
+  fulfillmentDeliveredHandler,
+  // Money-movement: cancel of a prepaid order issues a gateway refund and
+  // stamps the order. order:refunded then triggers the stock + ledger
+  // chain via stockReturnHandler / ledgerRestockBridgeHandler when goods
+  // had already shipped.
+  cancelRefundPrepaidHandler,
+  // RMA confirm path: customer self-service return / exchange / claim.
+  // Goods movement, COGS reversal, and money movement are decoupled here so
+  // partial RMAs and COD orders all land correctly:
+  //   • `changeConfirmedStockReturnHandler` restocks the returned units in
+  //     Flow regardless of payment gateway (Odoo / Shopify pattern —
+  //     physical inventory is independent of credit-note settlement).
+  //   • `changeConfirmedLedgerRestockBridgeHandler` posts the partial COGS
+  //     reversal JE for the cost basis of the returned quantity. Same
+  //     decoupling: independent of payment gateway, per-line precision.
+  //   • `changeConfirmedRefundHandler` issues the gateway refund (skipped
+  //     for COD; ops settle that manually) and, if the cumulative refund
+  //     covers the full order, transitions the order to `refunded` so
+  //     `stockReturnHandler` + `ledgerRestockBridgeHandler` fan out.
+  //     Those two have RMA-aware guards so they don't double-act on partial
+  //     RMA → full refund paths.
+  changeConfirmedStockReturnHandler,
+  changeConfirmedLedgerRestockBridgeHandler,
+  changeConfirmedRestockingFeeHandler,
+  changeConfirmedExchangeReplacementHandler,
+  changeConfirmedRefundHandler,
   stockReturnHandler,
   ledgerRestockBridgeHandler,
 ];
@@ -56,7 +95,9 @@ export function wireOrderLifecycleHandlers(
       withRetry(
         async (event: unknown) => {
           const ctx = extractTransitionContext(event);
-          if (!ctx.orderNumber) return;
+          // change.* events carry only `changeNumber`; the rest of the
+          // events carry `orderNumber`. Skip only when both are missing.
+          if (!ctx.orderNumber && !ctx.changeNumber) return;
           const deps: HandlerDeps = {
             engine,
             flow: getFlowEngineOrNull(),
@@ -110,6 +151,7 @@ function extractTransitionContext(event: unknown): TransitionContext {
     toStatus: payload.toStatus as string | undefined,
     reason: payload.reason as string | undefined,
     fulfillmentNumber: payload.fulfillmentNumber as string | undefined,
+    changeNumber: payload.changeNumber as string | undefined,
   };
 }
 

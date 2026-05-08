@@ -99,7 +99,7 @@ describe('Purchase receive — all-or-nothing', () => {
       },
     });
     expect(createRes.statusCode, createRes.body).toBeLessThan(400);
-    const purchase = parse(createRes.body)?.data as { _id: string; status: string };
+    const purchase = parse(createRes.body) as { _id: string; status: string };
     expect(purchase.status).toBe('draft');
 
     // Pre-receive: both SKUs at zero stock. The skuRef Flow uses for a
@@ -115,7 +115,7 @@ describe('Purchase receive — all-or-nothing', () => {
       payload: { action: 'receive' },
     });
     expect(receiveRes.statusCode, receiveRes.body).toBeLessThan(400);
-    const received = parse(receiveRes.body)?.data as { status: string };
+    const received = parse(receiveRes.body) as { status: string };
     expect(received.status).toBe('received');
 
     // Both lines posted to stock — proves all-or-nothing semantics.

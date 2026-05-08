@@ -121,7 +121,7 @@ async function getRevenueTxnsForOrder(orderId: string): Promise<Record<string, u
   });
   return Array.isArray(result)
     ? (result as Record<string, unknown>[])
-    : ((result as { docs?: Record<string, unknown>[] }).docs ?? []);
+    : ((result as { data?: Record<string, unknown>[] }).data ?? []);
 }
 
 async function getAccountIdByCode(code: string): Promise<string | null> {
@@ -217,7 +217,7 @@ describe('Order → Revenue → Ledger — full classytic-commerce chain', () =>
     // are missing, every order placement after this would post draft-only
     // journal entries (or fail entirely) — fail FAST here instead.
     expect(await getAccountIdByCode('1111')).toBeTruthy(); // Cash in Hand
-    expect(await getAccountIdByCode('1122')).toBeTruthy(); // Mobile Banking (bKash/Nagad/Rocket)
+    expect(await getAccountIdByCode('1126')).toBeTruthy(); // Mobile Banking (bKash/Nagad/Rocket)
     expect(await getAccountIdByCode('4111')).toBeTruthy(); // Sales — Domestic
     expect(await getAccountIdByCode('2132')).toBeTruthy(); // VAT Output Payable
   });
@@ -228,7 +228,7 @@ describe('Order → Revenue → Ledger — full classytic-commerce chain', () =>
       idempotencyKey: `orl-cash-${Date.now()}`,
     });
     expect(status).toBeLessThan(400);
-    const order = body?.data as { _id: string; orderNumber: string };
+    const order = body as { _id: string; orderNumber: string };
     const payment = body?.payment as { kind: string; status: string };
     expect(payment.kind).toBe('immediate');
     expect(payment.status).toBe('verified');
@@ -255,7 +255,7 @@ describe('Order → Revenue → Ledger — full classytic-commerce chain', () =>
       gateway: 'bkash', quantity: 1, unitPrice: 50000,
       idempotencyKey: `orl-bkash-${Date.now()}`,
     });
-    const order = body?.data as { _id: string };
+    const order = body as { _id: string };
 
     // Step 1 — at placement: PENDING, no journal entry yet.
     await drainOutbox();
@@ -278,7 +278,7 @@ describe('Order → Revenue → Ledger — full classytic-commerce chain', () =>
     const sales = entries[0];
     assertBalanced(sales);
 
-    const mobileBankingId = await getAccountIdByCode('1122');
+    const mobileBankingId = await getAccountIdByCode('1126');
     const items = (sales.journalItems ?? sales.items) as Array<{ account?: { toString(): string }; debit?: number }>;
     const debitItem = items.find((i) => (i.debit ?? 0) > 0);
     expect(debitItem?.account?.toString()).toBe(mobileBankingId);
@@ -292,8 +292,8 @@ describe('Order → Revenue → Ledger — full classytic-commerce chain', () =>
     await drainOutbox();
     await new Promise((r) => setTimeout(r, 250));
 
-    const o1 = (r1.body?.data as { _id: string })._id;
-    const o2 = (r2.body?.data as { _id: string })._id;
+    const o1 = (r1.body as { _id: string })._id;
+    const o2 = (r2.body as { _id: string })._id;
     const e1 = await getJournalEntriesForOrder(o1);
     const e2 = await getJournalEntriesForOrder(o2);
     expect(e1.length).toBeGreaterThanOrEqual(1);
@@ -335,7 +335,7 @@ describe('Order → Revenue → Ledger — full classytic-commerce chain', () =>
       gateway: 'cash', quantity: 1, unitPrice: 40000,
       idempotencyKey: `orl-refund-${Date.now()}`,
     });
-    const orderId = (body?.data as { _id: string })._id;
+    const orderId = (body as { _id: string })._id;
     await drainOutbox();
     await new Promise((r) => setTimeout(r, 150));
     const entriesBefore = await getJournalEntriesForOrder(orderId);
@@ -347,7 +347,7 @@ describe('Order → Revenue → Ledger — full classytic-commerce chain', () =>
     const txns = await getRevenueEngine().repositories.transaction.getAll({
       filters: { sourceId: orderId, sourceModel: 'Order', flow: 'inflow' }, noPagination: true,
     });
-    const list = (Array.isArray(txns) ? txns : (txns as { docs?: unknown[] }).docs ?? []) as Array<{ _id: { toString(): string } }>;
+    const list = (Array.isArray(txns) ? txns : (txns as { data?: unknown[] }).data ?? []) as Array<{ _id: { toString(): string } }>;
     expect(list.length).toBeGreaterThanOrEqual(1);
     await getRevenueEngine().repositories.transaction.refund(list[0]._id.toString(), null, { reason: 'e2e-test' });
 

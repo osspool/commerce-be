@@ -7,13 +7,14 @@
  */
 import { defineResource } from '@classytic/arc';
 import { requireAuth } from '@classytic/arc/permissions';
-import config from '#config/index.js';
+import { getClearingAging } from './clearing-aging.report.js';
 import {
   getApAging,
   getArAging,
   getBalanceSheet,
   getBudgetVsActual,
   getCashFlow,
+  getDaybook,
   getGeneralLedger,
   getIncomeStatement,
   getPartnerLedger,
@@ -103,19 +104,33 @@ const routes: any[] = [
     raw: true,
     handler: getPartnerLedger,
   },
-];
-
-if (config.accounting.mode !== 'simple') {
-  routes.push({
+  {
     method: 'GET',
-    path: '/budget-vs-actual',
-    summary: 'Budget vs Actual report (enterprise)',
+    path: '/daybook',
+    summary: 'Daybook (flat journal-item listing for a date range — auditor view)',
     permissions: authenticated,
     raw: true,
-    schema: { querystring: budgetVsActualQuerySchema },
-    handler: getBudgetVsActual,
-  });
-}
+    handler: getDaybook,
+  },
+  {
+    method: 'GET',
+    path: '/clearing-aging',
+    summary: 'Clearing-account aging — open balances per clearing (1125/1126/1127) bucketed by age',
+    permissions: authenticated,
+    raw: true,
+    handler: getClearingAging,
+  },
+];
+
+routes.push({
+  method: 'GET',
+  path: '/budget-vs-actual',
+  summary: 'Budget vs Actual report',
+  permissions: authenticated,
+  raw: true,
+  schema: { querystring: budgetVsActualQuerySchema },
+  handler: getBudgetVsActual,
+});
 
 const reportsResource = defineResource({
   name: 'accounting-reports',

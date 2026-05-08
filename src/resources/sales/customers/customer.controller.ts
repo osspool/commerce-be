@@ -13,6 +13,58 @@ interface AuthenticatedUser {
 }
 
 /**
+ * Self-service field allowlist for `GET /customers/me`.
+ *
+ * Allowlist not denylist — when admin-only fields get added later (a new
+ * compliance flag, an internal score, a CRM projection extension), they
+ * stay invisible to the customer until someone explicitly permissions them.
+ *
+ * Hidden from self-service:
+ *   - `notes`                          — internal admin notes
+ *   - `creditLimit`, `creditDays`      — internal credit policy
+ *   - `tags`                           — admin-side classification
+ *   - `priceListId`                    — internal pricing assignment
+ *   - `stats`                          — internal aggregates / scoring
+ *   - `crm`                            — sales pipeline (stage, owner, score)
+ *   - BD VAT/NBR fiscal flags          — `fiscalPositionCode`, `sroReference`,
+ *                                        `vdsPayerCategory`, `countryCode`,
+ *                                        `isDiplomatic`, `isExemptNgo`,
+ *                                        `isSezUnit`, `isRmgFactory`
+ *   - `revenueTier`                    — internal classification virtual
+ */
+const SELF_SERVICE_FIELDS = [
+  '_id',
+  'userId',
+  'name',
+  'contact',
+  'gender',
+  'dateOfBirth',
+  'addresses',
+  'isActive',
+  'membership',
+  'customerType',
+  'creditEnabled',
+  'createdAt',
+  'updatedAt',
+  'fullName',
+  'displayName',
+  'defaultAddress',
+] as const;
+
+function projectSelfService(customer: unknown): Record<string, unknown> {
+  const obj =
+    customer && typeof customer === 'object' && 'toObject' in customer && typeof customer.toObject === 'function'
+      ? (customer.toObject as (opts: { virtuals: boolean }) => Record<string, unknown>)({ virtuals: true })
+      : (customer as Record<string, unknown>);
+
+  const out: Record<string, unknown> = {};
+  for (const key of SELF_SERVICE_FIELDS) {
+    if (key in obj) out[key] = obj[key];
+  }
+  return out;
+}
+
+/**
  * Customer Controller
  * Handles customer CRUD operations
  *
@@ -52,7 +104,7 @@ export class CustomerController extends BaseController {
       throw new NotFoundError('Customer not found');
     }
 
-    return reply.send({ success: true, data: customer });
+    return reply.send(projectSelfService(customer));
   }
 }
 

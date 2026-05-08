@@ -19,6 +19,7 @@ import { createPosEngine, type PosEngine } from '@classytic/pos';
 import mongoose from 'mongoose';
 import { publish } from '#lib/events/arcEvents.js';
 import logger from '#lib/utils/logger.js';
+import { shouldAutoIndex } from '#shared/db/auto-index.js';
 import { shiftLedgerBridge } from '../../accounting/posting/contracts/shift.contract.js';
 import { resolveShiftPolicy } from './shift-policy.resolver.js';
 import { DEFAULT_SHIFT_POLICY } from './shift.constants.js';
@@ -45,12 +46,12 @@ export const posEngine: PosEngine = createPosEngine({
   // the rest of be-prod's per-branch scoping.
   tenantFieldType: 'objectId',
 
-  // Enable Mongoose autoIndex so the partial-unique-active-shift constraint
-  // and orphan-lookup indexes are pushed to MongoDB on first model use. The
-  // alternative is to call `posEngine.models.Shift.syncIndexes()` at boot;
-  // until the boot pipeline grows that hook, autoIndex keeps the unique
-  // guard live in dev/test/prod uniformly.
-  autoIndex: true,
+  // Mongoose autoIndex — centralised in `#shared/db/auto-index`, defaults
+  // OFF and opts in via `MONGOOSE_AUTO_INDEX=true`. Run
+  // `posEngine.models.Shift.syncIndexes()` once during deploy / migration
+  // to materialize the partial-unique-active-shift + orphan-lookup indexes
+  // before flipping NODE_ENV=production traffic.
+  autoIndex: shouldAutoIndex(),
 });
 
 // ─── Event bridge: package events → be-prod's arcEvents outbox ─────────────

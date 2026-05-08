@@ -149,9 +149,11 @@ describe('Phase 3a — Vendor Credit Notes', () => {
       status: 'received',
       receivedAt: new Date(),
       creditDays: 30,
-      grandTotal: 500_000,
+      // Purchase totals persist as BDT-major; the vendor-bill action *100s them
+      // to paisa. 5000 BDT → 500_000 paisa A/P credit on the JE.
+      grandTotal: 5000,
       paidAmount: 0,
-      dueAmount: 500_000,
+      dueAmount: 5000,
       paymentStatus: 'unpaid',
       items: [],
       createdAt: new Date(),
@@ -164,7 +166,7 @@ describe('Phase 3a — Vendor Credit Notes', () => {
       payload: { action: 'post' },
     });
     expect(r.statusCode).toBe(200);
-    billJeId = parse(r.body).data.journalEntryId;
+    billJeId = parse(r.body).journalEntryId;
   });
 
   it('rejects a credit note with amount <= 0', async () => {
@@ -218,10 +220,9 @@ describe('Phase 3a — Vendor Credit Notes', () => {
     if (r.statusCode >= 400) console.log('[CN FAIL]', r.statusCode, r.body);
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.success).toBe(true);
-    expect(body.data.journalEntryId).toBeTruthy();
+    expect(body.journalEntryId).toBeTruthy();
     // Partial settlement: group still has an open balance, so no match yet.
-    expect(body.data.matched).toBe(false);
+    expect(body.matched).toBe(false);
 
     // Original bill must be untouched (immutability)
     const bill = await mongoose.connection
@@ -254,8 +255,8 @@ describe('Phase 3a — Vendor Credit Notes', () => {
       payload,
     });
     expect(second.statusCode).toBe(200);
-    expect(parse(second.body).data.journalEntryId).toBe(
-      parse(first.body).data.journalEntryId,
+    expect(parse(second.body).journalEntryId).toBe(
+      parse(first.body).journalEntryId,
     );
   });
 
@@ -266,7 +267,7 @@ describe('Phase 3a — Vendor Credit Notes', () => {
       headers: h(),
     });
     expect(r.statusCode).toBe(200);
-    const openItems = parse(r.body).data as Array<{ debit: number; credit: number }>;
+    const openItems = parse(r.body) as Array<{ debit: number; credit: number }>;
     // Remaining open = 500k (bill credit) - 200k (CN debit) - 50k (CN debit) = 250k net credit
     const netOpen = openItems.reduce((s, i) => s + (i.credit - i.debit), 0);
     expect(netOpen).toBe(250_000);
@@ -298,7 +299,7 @@ describe('Phase 3b — Customer Debit Notes', () => {
       payload: { action: 'post', creditDays: 30 },
     });
     expect(r.statusCode).toBe(200);
-    invoiceJeId = parse(r.body).data.journalEntryId;
+    invoiceJeId = parse(r.body).journalEntryId;
   });
 
   it('rejects amount exceeding open invoice balance', async () => {
@@ -321,8 +322,8 @@ describe('Phase 3b — Customer Debit Notes', () => {
     if (r.statusCode >= 400) console.log('[DN FAIL]', r.statusCode, r.body);
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.data.journalEntryId).toBeTruthy();
-    expect(body.data.matched).toBe(false);
+    expect(body.journalEntryId).toBeTruthy();
+    expect(body.matched).toBe(false);
   });
 
   it('idempotent — same debit note returns same JE id', async () => {
@@ -346,7 +347,7 @@ describe('Phase 3b — Customer Debit Notes', () => {
     });
     expect(a.statusCode).toBe(200);
     expect(b.statusCode).toBe(200);
-    expect(parse(a.body).data.journalEntryId).toBe(parse(b.body).data.journalEntryId);
+    expect(parse(a.body).journalEntryId).toBe(parse(b.body).journalEntryId);
   });
 
   it('open A/R reflects 400k - 100k - 25k = 275k remaining for the customer', async () => {
@@ -356,7 +357,7 @@ describe('Phase 3b — Customer Debit Notes', () => {
       headers: h(),
     });
     expect(r.statusCode).toBe(200);
-    const items = parse(r.body).data as Array<{ debit: number; credit: number }>;
+    const items = parse(r.body) as Array<{ debit: number; credit: number }>;
     const net = items.reduce((s, i) => s + (i.debit - i.credit), 0);
     expect(net).toBe(275_000);
   });

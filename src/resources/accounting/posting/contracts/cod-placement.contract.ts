@@ -22,15 +22,24 @@
 
 import { VAT_ACCOUNTS } from '../../tax/tax.accounts.js';
 import type { PostingInput, PostingItem } from '../posting.service.js';
+import { BD } from '../bd-account-codes.js';
+import { displayRef } from './_label-helpers.js';
 
-const AR_TRADE_DEBTORS = '1141';
-const SALES_REVENUE = '4111';
+const AR_TRADE_DEBTORS = BD.ar;
+const SALES_REVENUE = BD.revenue;
 const SALES_DISCOUNT = '4115';
 const VAT_PAYABLE = VAT_ACCOUNTS.OUTPUT;
 
 export interface CodPlacementData {
   transactionId: string;
   orderId: string;
+  /** Human-readable order reference (e.g. `ORD-2026-04-1234`). Used for
+   *  the JE label and the per-line A/R label. */
+  orderReferenceNumber?: string;
+  /** Customer ObjectId — used as `partnerId` on the A/R line so Aging
+   *  reports + the PartnerResolver can render a real customer name.
+   *  Falls back to `orderId` for guest / walk-in checkouts. */
+  customerId?: string | null;
   /** paisa — total customer owes (includes VAT) */
   amount: number;
   /** paisa — VAT portion of amount */
@@ -54,14 +63,19 @@ export function codPlacementToPosting(
   const maturityDate = new Date(data.date);
   maturityDate.setDate(maturityDate.getDate() + (data.expectedRemittanceDays ?? 14));
 
+  const orderRef = displayRef(data.orderReferenceNumber, data.orderId);
   const items: PostingItem[] = [
     {
       accountCode: AR_TRADE_DEBTORS,
       debit: data.amount,
       credit: 0,
-      label: `COD receivable — order ${data.orderId}`,
-      partnerId: data.orderId,
-      partnerType: 'customer',
+      label: `COD receivable — order ${orderRef}`,
+      // partnerId tags the A/R line for aging + subsidiary-ledger
+      // attribution. Prefer the real customerId; fall back to orderId so
+      // guest / walk-in checkouts still carry a stable per-line partner
+      // (matches the JSDoc on `customerId`).
+      partnerId: data.customerId ?? data.orderId,
+      partnerType: 'customer' as const,
       maturityDate,
     },
   ];
@@ -93,7 +107,7 @@ export function codPlacementToPosting(
 
   return {
     journalType: 'ECOM_SALES_COD',
-    label: data.description || `COD sale #${data.orderId}`,
+    label: data.description || `COD sale — ${orderRef}`,
     date: data.date,
     items,
     idempotencyKey: `cod-placed-${data.transactionId}`,

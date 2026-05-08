@@ -11,7 +11,7 @@
  *   const ctx = flowCtxGuard.from(req);
  */
 
-import { defineGuard, type Guard } from '@classytic/arc/utils';
+import { ForbiddenError, defineGuard, type Guard } from '@classytic/arc/utils';
 import type { IRequestContext } from '@classytic/arc';
 import type { FlowContext, FlowEngine } from '@classytic/flow';
 import { getFlowContext } from '../../flow/context-helpers.js';
@@ -42,10 +42,7 @@ function createModeGuard(requiredMode: 'standard' | 'enterprise'): Guard<true> {
       const current = flow().services.mode;
       const rank: Record<string, number> = { simple: 0, standard: 1, enterprise: 2 };
       if ((rank[current] ?? 0) < rank[requiredMode]) {
-        reply.code(403).send({
-          success: false,
-          error: `This feature requires '${requiredMode}' mode or higher. Current mode: '${current}'. Update FLOW_MODE in your environment config.`,
-        });
+        throw new ForbiddenError(`This feature requires '${requiredMode}' mode or higher. Current mode: '${current}'. Update FLOW_MODE in your environment config.`);
         // defineGuard checks reply.sent — stash is skipped when the reply
         // was already sent, so the handler never runs.
       }

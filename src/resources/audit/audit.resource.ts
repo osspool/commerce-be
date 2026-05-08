@@ -1,110 +1,65 @@
+/**
+ * Audit Logs Resource
+ *
+ * Read-only HTTP surface over the `audit_logs` collection. Writes happen
+ * exclusively through Arc's audit plugin (`fastify.audit.create / update
+ * / delete`); there is no API endpoint for creating / updating / deleting
+ * audit rows.
+ *
+ * Auto-CRUD via `createMongooseAdapter` + `BaseController`. The repository
+ * hooks at `audit.repository.ts` translate the SDK's flat-style query
+ * params (`?module=…&from=…&to=…&action=a,b`) into mongo predicates and
+ * project `_id → id` on every response, so consumers see the SDK's
+ * `AuditEntry` shape regardless of which read endpoint they hit.
+ *
+ * Permissions:
+ *
+ *   • READ (list/get) — relaxed to admin / finance_admin / superadmin so
+ *     HQ admins and finance reviewers can run forensics without needing
+ *     a superadmin login. Audit rows are intrinsically sensitive (full
+ *     before/after document state) so we still gate by elevated role —
+ *     a regular cashier or branch manager can't read them. Aligns with
+ *     ERPNext's "Auditor" role pattern.
+ *
+ *   • WRITE (create/update/delete) — `denyAll()`. The collection is
+ *     append-only; arc's audit plugin owns the write path through
+ *     `fastify.audit.*` and auto-cleanup runs via the TTL index on
+ *     `expiresAt` (per-resource retention from `audit.config.ts`,
+ *     5-year floor for NBR books-of-account). HTTP write verbs would
+ *     bypass that contract and risk polluting the immutable trail.
+ */
+
 import { defineResource } from '@classytic/arc';
-import { requireRoles } from '@classytic/arc/permissions';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import mongoose from 'mongoose';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
+import { denyAll, requireRoles } from '@classytic/arc/permissions';
+import { queryParser } from '#shared/query-parser.js';
+// Use the `#resources/...` subpath specifier (not relative) so the ESM
+// module cache key matches `register-infra-plugins.ts` — otherwise tsx
+// resolves the two import sites as different URLs, evaluates
+// `audit.repository.ts` twice, and the audit-plugin write path ends up
+// using a different `auditRepository` instance than this resource's
+// read path. Same gotcha documented in `tests/support/preload-resources.ts`.
+import auditController from '#resources/audit/audit.controller.js';
+import AuditModel from '#resources/audit/audit.model.js';
+import auditRepository from '#resources/audit/audit.repository.js';
 
-// Module -> resource name mapping for frontend filtering
-const MODULE_RESOURCES: Record<string, string[]> = {
-  inventory: ['transfer', 'purchase', 'supplier', 'stock-request'],
-  accounting: ['account', 'journal-entry', 'fiscal-period', 'budget'],
-  sales: ['order', 'customer', 'transaction'],
-  commerce: ['branch', 'member', 'user'],
-};
-
-interface AuditQuerystring {
-  resource?: string;
-  documentId?: string;
-  userId?: string;
-  organizationId?: string;
-  action?: string;
-  module?: string;
-  from?: string;
-  to?: string;
-  limit?: string;
-  offset?: string;
-}
+const auditReader = requireRoles(['superadmin', 'admin', 'finance_admin']);
 
 export default defineResource({
   name: 'audit-log',
   displayName: 'Audit Logs',
   tag: 'Audit',
   prefix: '/audit-logs',
-  disableDefaultRoutes: true,
-  routes: [
-    {
-      method: 'GET',
-      path: '/',
-      summary: 'Query audit logs (superadmin only)',
-      permissions: requireRoles(['superadmin']),
-      raw: true,
-      handler: (async (req: FastifyRequest<{ Querystring: AuditQuerystring }>, reply: FastifyReply) => {
-        const q = req.query;
 
-        // Resolve module filter to resource names
-        if (q.module && MODULE_RESOURCES[q.module]) {
-          const resources = MODULE_RESOURCES[q.module];
-          const limit = q.limit ? parseInt(q.limit, 10) : 50;
-          const offset = q.offset ? parseInt(q.offset, 10) : 0;
+  adapter: createMongooseAdapter(AuditModel, auditRepository),
+  controller: auditController,
+  queryParser,
 
-          // Query all resources in the module and merge
-          const allEntries = [];
-          for (const res of resources) {
-            const entries = await req.server.audit.query({
-              resource: res,
-              documentId: q.documentId,
-              userId: q.userId,
-              organizationId: q.organizationId,
-              action: q.action
-                ? q.action.includes(',')
-                  ? (q.action.split(',') as any)
-                  : (q.action as any)
-                : undefined,
-              from: q.from ? new Date(q.from) : undefined,
-              to: q.to ? new Date(q.to) : undefined,
-              limit: limit * 2, // over-fetch then trim after merge
-              offset: 0,
-            });
-            allEntries.push(...entries);
-          }
-
-          // Sort by timestamp desc and paginate
-          allEntries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          const paginated = allEntries.slice(offset, offset + limit);
-
-          return reply.send({ success: true, data: paginated, total: allEntries.length });
-        }
-
-        // Direct query (no module filter)
-        const entries = await req.server.audit.query({
-          resource: q.resource,
-          documentId: q.documentId,
-          userId: q.userId,
-          organizationId: q.organizationId,
-          action: q.action ? (q.action.includes(',') ? (q.action.split(',') as any) : (q.action as any)) : undefined,
-          from: q.from ? new Date(q.from) : undefined,
-          to: q.to ? new Date(q.to) : undefined,
-          limit: q.limit ? parseInt(q.limit, 10) : 50,
-          offset: q.offset ? parseInt(q.offset, 10) : 0,
-        });
-
-        return reply.send({ success: true, data: entries });
-      }) as any,
-    },
-    {
-      method: 'GET',
-      path: '/:id',
-      summary: 'Get single audit log entry',
-      permissions: requireRoles(['superadmin']),
-      raw: true,
-      handler: (async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
-        const db = mongoose.connection.db;
-        if (!db) return reply.code(500).send({ success: false, error: 'Database not available' });
-
-        const doc = await db.collection('audit_logs').findOne({ id: req.params.id });
-        if (!doc) return reply.code(404).send({ success: false, error: 'Audit entry not found' });
-
-        return reply.send({ success: true, data: doc });
-      }) as any,
-    },
-  ],
+  permissions: {
+    list: auditReader,
+    get: auditReader,
+    create: denyAll(),
+    update: denyAll(),
+    delete: denyAll(),
+  },
 });

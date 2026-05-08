@@ -54,9 +54,9 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    const body = JSON.parse(res.body);
-    expect(body.data.length).toBeGreaterThan(0);
-    nodeId = String(body.data[0]._id);
+    const body = JSON.parse(res.body) as Array<{ _id: string }>;
+    expect(body.length).toBeGreaterThan(0);
+    nodeId = String(body[0]._id);
   });
 
   it('should expose a storage location for receipts', async () => {
@@ -67,11 +67,11 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    const body = JSON.parse(res.body);
-    const storage = (body.data as Array<{ _id: string; type: string }>).find(
+    const body = JSON.parse(res.body) as Array<{ _id: string; type: string }>;
+    const storage = body.find(
       (l) => l.type === 'storage' || l.type === 'stock',
     );
-    storageLocationId = String((storage ?? body.data[0])._id);
+    storageLocationId = String((storage ?? body[0])._id);
   });
 
   it('POST /inventory/procurement should create a purchase order', async () => {
@@ -89,10 +89,10 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
     expect([200, 201]).toContain(res.statusCode);
 
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('draft');
-    expect(body.data.vendorRef).toBe('SMOKE-VENDOR-001');
-    poId = String(body.data._id);
+
+    expect(body.status).toBe('draft');
+    expect(body.vendorRef).toBe('SMOKE-VENDOR-001');
+    poId = String(body._id);
   });
 
   it('GET /inventory/procurement should list the PO', async () => {
@@ -106,8 +106,8 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
     // Arc emits the mongokit `getAll` envelope at the top level:
     // `{ docs: [...], total, page, limit, pages }`. Earlier this test
     // read `body.data.map(...)` which assumed a different envelope shape.
-    const body = JSON.parse(res.body) as { docs: Array<{ _id: string }> };
-    const ids = body.docs.map((d) => String(d._id));
+    const body = JSON.parse(res.body) as { data: Array<{ _id: string }> };
+    const ids = body.data.map((d) => String(d._id));
     expect(ids).toContain(poId);
   });
 
@@ -121,7 +121,7 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.body);
-    expect(body.data.status).toBe('approved');
+    expect(body.status).toBe('approved');
   });
 
   it('POST /inventory/procurement/:id/receive should accept a receipt within tolerance', async () => {
@@ -139,7 +139,7 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.body);
-    expect(['received', 'partially_received']).toContain(body.data.status);
+    expect(['received', 'partially_received']).toContain(body.status);
   });
 
   it('GET /inventory/availability should reflect received stock', async () => {
@@ -151,7 +151,7 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.body);
-    expect(body.data.quantityOnHand).toBe(105);
+    expect(body.quantityOnHand).toBe(105);
   });
 
   it('should reject a receipt beyond the 10% over-receipt tolerance', async () => {
@@ -168,7 +168,7 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
       },
     });
     expect([200, 201]).toContain(createRes.statusCode);
-    const overPo = JSON.parse(createRes.body).data._id;
+    const overPo = JSON.parse(createRes.body)._id;
 
     await server.inject({
       method: 'POST',
@@ -209,7 +209,7 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
       },
     });
     expect([200, 201]).toContain(createRes.statusCode);
-    returnPoId = JSON.parse(createRes.body).data._id;
+    returnPoId = JSON.parse(createRes.body)._id;
 
     await server.inject({
       method: 'POST',
@@ -230,7 +230,7 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
       },
     });
     expect(receiveRes.statusCode).toBe(200);
-    expect(JSON.parse(receiveRes.body).data.status).toBe('received');
+    expect(JSON.parse(receiveRes.body).status).toBe('received');
   });
 
   it('POST /inventory/procurement/:id/supplier-return should return items to vendor', async () => {
@@ -247,9 +247,9 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.status).toBe('done');
-    expect(body.data.groupType).toBe('return');
+
+    expect(body.status).toBe('done');
+    expect(body.groupType).toBe('return');
   });
 
   it('should reflect reduced stock after supplier return', async () => {
@@ -262,7 +262,7 @@ describe('WMS Procurement Smoke — PO lifecycle via HTTP', () => {
 
     const body = JSON.parse(res.body);
     // Had 50, returned 20 → should be 30
-    expect(body.data.quantityOnHand).toBe(30);
+    expect(body.quantityOnHand).toBe(30);
   });
 
   it('should reject supplier return with empty lines', async () => {

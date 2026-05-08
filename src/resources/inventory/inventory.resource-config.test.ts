@@ -12,14 +12,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import purchaseOrderResource from './purchase-order/purchase-order.resource.js';
 import stockRequestResource from './stock-request/stock-request.resource.js';
 import supplierResource from './supplier/supplier.resource.js';
-import transferResource from './transfer/transfer.resource.js';
+
+// transfer + purchase-order are now engine-backed factories
+// (createTransferResource, createPurchaseOrderResource) registered manually in
+// inventory-management.plugin.ts — not auto-discovered, not tested here.
 
 const resources = [
-  ['purchase-order', purchaseOrderResource],
-  ['transfer', transferResource],
   ['stock-request', stockRequestResource],
   ['supplier', supplierResource],
 ] as const;

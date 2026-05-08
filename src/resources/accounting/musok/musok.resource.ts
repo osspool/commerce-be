@@ -6,7 +6,8 @@
  * State transitions (cancel) via declarative actions.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
 import {
   monthlyReturnParamsSchema,
@@ -19,6 +20,7 @@ import { z } from 'zod';
 import { orgScoped } from '#shared/presets/index.js';
 import {
   cancelMusokInvoice,
+  generateMusokFromOrderEndpoint,
   generateMusokInvoice,
   getMonthlyReturn,
   getMusokBySource,
@@ -86,6 +88,22 @@ const musokResource = defineResource({
       raw: true,
       schema: { body: mushak63GenerateBodySchema },
       handler: generateMusokInvoice,
+    },
+    {
+      method: 'POST' as const,
+      path: '/generate-from-order',
+      summary: 'Generate Mushak 6.3 from an existing order (auto-derives buyer + lines + tax)',
+      description:
+        'Same code path as the order.fulfilled auto-generation bridge. Idempotent on (Order, orderId). Use to backfill Mushaks for orders fulfilled before the bridge was wired or to retry after a typed-error skip.',
+      permissions: requireRoles('admin', 'finance_admin'),
+      raw: true,
+      schema: {
+        body: z.object({
+          orderId: z.string().describe('Order ObjectId'),
+          date: z.string().datetime().optional().describe('Override invoice date (defaults to order.fulfilledAt / confirmedAt / now)'),
+        }),
+      },
+      handler: generateMusokFromOrderEndpoint,
     },
     {
       method: 'GET' as const,

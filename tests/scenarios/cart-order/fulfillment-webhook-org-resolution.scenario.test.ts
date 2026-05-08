@@ -51,9 +51,10 @@ async function getFulfillmentStatus(fulNumber: string, forOrderNumber: string): 
     headers: adminHeaders(),
   });
   if (res.statusCode >= 400) return null;
-  const body = parse(res.body);
-  const data = body?.data as { docs?: Array<Record<string, unknown>> } | Array<Record<string, unknown>> | undefined;
-  const list = Array.isArray(data) ? data : (data?.docs ?? []);
+  const body = parse(res.body) as Record<string, unknown> | null;
+  // Handler spreads mongokit pagination at top level — `docs` sibling of
+  // `success`, NOT under `data` (matches arc-next list convention).
+  const list = (body?.data as Array<Record<string, unknown>> | undefined) ?? [];
   const match = list.find((f) => f.fulfillmentNumber === fulNumber);
   return (match?.status as string) ?? null;
 }
@@ -84,7 +85,7 @@ async function placeOrderAndFulfill(idempotencyKey: string): Promise<{
   if (orderRes.statusCode >= 400) {
     throw new Error(`Order place failed: ${orderRes.statusCode} ${orderRes.body}`);
   }
-  const newOrderNumber = ((parse(orderRes.body)?.data as Record<string, unknown>)
+  const newOrderNumber = ((parse(orderRes.body) as Record<string, unknown>)
     ?.orderNumber) as string;
 
   const fulRes = await server.inject({
@@ -99,7 +100,7 @@ async function placeOrderAndFulfill(idempotencyKey: string): Promise<{
   if (fulRes.statusCode >= 400) {
     throw new Error(`Fulfillment create failed: ${fulRes.statusCode} ${fulRes.body}`);
   }
-  const newFulNumber = ((parse(fulRes.body)?.data as Record<string, unknown>)
+  const newFulNumber = ((parse(fulRes.body) as Record<string, unknown>)
     ?.fulfillmentNumber) as string;
 
   // Advance pick → pack → ship (admin).

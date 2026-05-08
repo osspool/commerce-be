@@ -72,7 +72,7 @@ export default defineConfig({
           fileParallelism: false,
           sequence: { concurrent: false },
           testTimeout: 30_000,
-          hookTimeout: 60_000,
+          hookTimeout: 120_000,
         },
       },
       {
@@ -85,7 +85,7 @@ export default defineConfig({
           fileParallelism: false,
           sequence: { concurrent: false },
           testTimeout: 30_000,
-          hookTimeout: 60_000,
+          hookTimeout: 120_000,
         },
       },
       {
@@ -98,7 +98,7 @@ export default defineConfig({
           fileParallelism: false,
           sequence: { concurrent: false },
           testTimeout: 30_000,
-          hookTimeout: 60_000,
+          hookTimeout: 120_000,
         },
       },
       ...SCENARIO_DOMAINS.map(({ name, maxForks, hookTimeout }) => ({

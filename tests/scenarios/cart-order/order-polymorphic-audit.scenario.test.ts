@@ -126,7 +126,7 @@ async function placeOrder(): Promise<{ orderNumber: string; orderId: string }> {
   });
   expect(res.statusCode).toBe(201);
   const body = parse(res.body) as { data: { orderNumber: string; _id: string } };
-  return { orderNumber: body.data.orderNumber, orderId: body.data._id };
+  return { orderNumber: body.orderNumber, orderId: body._id };
 }
 
 describe('be-prod cart→order: polymorphic audit timeline', () => {
@@ -176,7 +176,7 @@ describe('be-prod cart→order: polymorphic audit timeline', () => {
     });
     expect(fulRes.statusCode).toBe(201);
     const fulBody = parse(fulRes.body) as { data: { fulfillmentNumber: string } };
-    fulfillmentNumber = fulBody.data.fulfillmentNumber;
+    fulfillmentNumber = fulBody.fulfillmentNumber;
 
     await env.server.inject({
       method: 'POST',
@@ -230,7 +230,7 @@ describe('be-prod cart→order: polymorphic audit timeline', () => {
     });
     expect(changeRes.statusCode).toBe(201);
     const changeBody = parse(changeRes.body) as { data: { changeNumber: string } };
-    changeNumber = changeBody.data.changeNumber;
+    changeNumber = changeBody.changeNumber;
 
     const events = await mongoose.connection
       .db!.collection('order_events')

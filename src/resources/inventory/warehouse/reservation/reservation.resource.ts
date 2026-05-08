@@ -34,7 +34,7 @@ const reservationResource = defineResource({
           { ...input, locationId: (input.locationId as string) || DEFAULT_LOCATION } as ReserveInput,
           ctx,
         );
-        return reply.code(201).send({ success: true, data: result });
+        return reply.code(201).send(result);
       },
     },
     {
@@ -47,7 +47,7 @@ const reservationResource = defineResource({
       handler: async (req: FastifyRequest, reply: FastifyReply) => {
         const { id } = req.params as { id: string };
         const result = await flow().services.reservation.release(id, flowCtxGuard.from(req));
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
     {
@@ -61,7 +61,7 @@ const reservationResource = defineResource({
         const { id } = req.params as { id: string };
         const { quantity } = req.body as { quantity: number };
         const result = await flow().services.reservation.consume(id, quantity, flowCtxGuard.from(req));
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
   ],

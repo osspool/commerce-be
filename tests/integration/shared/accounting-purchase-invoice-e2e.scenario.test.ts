@@ -132,7 +132,15 @@ afterAll(async () => {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Seed a received purchase directly (we test the accounting lifecycle, not purchase service) */
+/**
+ * Seed a received purchase directly (we test the accounting lifecycle, not purchase service).
+ *
+ * `grandTotal` is given in **paisa** here (the unit assertions later use), but
+ * purchase_orders persists totals as BDT-major — the vendor-bill posting
+ * contract multiplies by 100 to convert. Store `grandTotal / 100` so that the
+ * action's *100 conversion lands the JE-side credit on the same paisa value
+ * the caller passed in.
+ */
 async function seedReceivedPurchase(args: {
   _id: mongoose.Types.ObjectId;
   supplierId: mongoose.Types.ObjectId;
@@ -142,6 +150,7 @@ async function seedReceivedPurchase(args: {
   isPaid?: boolean;
   inventoryType?: string;
 }) {
+  const grandTotalMajor = args.grandTotal / 100;
   await mongoose.connection.db!.collection('purchase_orders').insertOne({
     _id: args._id,
     supplier: args.supplierId,
@@ -150,10 +159,10 @@ async function seedReceivedPurchase(args: {
     status: 'received',
     receivedAt: new Date(),
     creditDays: args.creditDays,
-    grandTotal: args.grandTotal,
+    grandTotal: grandTotalMajor,
     taxTotal: 0,
-    paidAmount: args.isPaid ? args.grandTotal : 0,
-    dueAmount: args.isPaid ? 0 : args.grandTotal,
+    paidAmount: args.isPaid ? grandTotalMajor : 0,
+    dueAmount: args.isPaid ? 0 : grandTotalMajor,
     paymentStatus: args.isPaid ? 'paid' : 'unpaid',
     paymentTerms: args.creditDays > 0 ? 'credit' : 'cash',
     items: [],
@@ -170,7 +179,7 @@ async function getOpenApForSupplier(supplierId: mongoose.Types.ObjectId): Promis
     headers: h(),
   });
   expect(r.statusCode).toBe(200);
-  const items = parse(r.body).data as Array<{ debit: number; credit: number }>;
+  const items = parse(r.body) as Array<{ debit: number; credit: number }>;
   return items.reduce((s, i) => s + ((i.credit || 0) - (i.debit || 0)), 0);
 }
 
@@ -190,8 +199,8 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
     // Verify critical accounts exist
     const db = mongoose.connection.db!;
     const ap = await db.collection('accounts').findOne({ accountTypeCode: '2111' });
-    const bank = await db.collection('accounts').findOne({ accountTypeCode: '1112' });
-    const merch = await db.collection('accounts').findOne({ accountTypeCode: '1165' });
+    const bank = await db.collection('accounts').findOne({ accountTypeCode: '1113' });
+    const merch = await db.collection('accounts').findOne({ accountTypeCode: '1164' });
     const raw = await db.collection('accounts').findOne({ accountTypeCode: '1161' });
     expect(ap).toBeTruthy();
     expect(bank).toBeTruthy();
@@ -255,11 +264,11 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
     });
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.data.journalEntryId).toBeTruthy();
+    expect(body.journalEntryId).toBeTruthy();
 
     // Verify JE is posted (not draft)
     const je = await mongoose.connection.db!.collection('journalentries')
-      .findOne({ _id: new mongoose.Types.ObjectId(body.data.journalEntryId) });
+      .findOne({ _id: new mongoose.Types.ObjectId(body.journalEntryId) });
     expect(je!.state).toBe('posted');
 
     // Cash purchase should NOT create A/P for RawTex
@@ -287,7 +296,7 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
       payload: { action: 'post' },
     });
     expect(r.statusCode).toBe(200);
-    bill2JeId = parse(r.body).data.journalEntryId;
+    bill2JeId = parse(r.body).journalEntryId;
     expect(bill2JeId).toBeTruthy();
 
     // Verify A/P for FabricWorld
@@ -323,13 +332,13 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
       payload: {
         action: 'pay',
         amount: 10_000_000,
-        fromAccountCode: '1112',
+        fromAccountCode: '1113',
         reference: 'BKASH-TXN-001',
       },
     });
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.data.settled).toBe(false);
+    expect(body.settled).toBe(false);
 
     const apTotal = await getOpenApForSupplier(SUPPLIER_FABRIC_ID);
     expect(apTotal).toBe(15_000_000);
@@ -354,7 +363,7 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
       payload: { action: 'post' },
     });
     expect(r.statusCode).toBe(200);
-    bill3JeId = parse(r.body).data.journalEntryId;
+    bill3JeId = parse(r.body).journalEntryId;
 
     // Open A/P = (250k − 100k from Day 3 partial) + 150k (bill #2) = 300k
     const apTotal = await getOpenApForSupplier(SUPPLIER_FABRIC_ID);
@@ -376,9 +385,9 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
     // 2 bill credits + 1 partial-payment debit (Day 3) — at least 2 lines.
-    expect(body.data.lines.length).toBeGreaterThanOrEqual(2);
+    expect(body.lines.length).toBeGreaterThanOrEqual(2);
     // Closing balance after Day 3 partial: -(250k − 100k + 150k) = -300k
-    expect(body.data.closingBalance).toBe(-(25_000_000 - 10_000_000 + 15_000_000));
+    expect(body.closingBalance).toBe(-(25_000_000 - 10_000_000 + 15_000_000));
   });
 
   // Day 6 — Full settlement ──────────────────────────────────────────────────
@@ -391,12 +400,12 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
       payload: {
         action: 'pay',
         amount: 15_000_000,
-        fromAccountCode: '1112',
+        fromAccountCode: '1113',
         reference: 'CHQ-301',
       },
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.settled).toBe(true);
+    expect(parse(r.body).settled).toBe(true);
   });
 
   it('Day 6.2 — settle full ৳150,000 on bill #2', async () => {
@@ -407,12 +416,12 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
       payload: {
         action: 'pay',
         amount: 15_000_000,
-        fromAccountCode: '1112',
+        fromAccountCode: '1113',
         reference: 'CHQ-302',
       },
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.settled).toBe(true);
+    expect(parse(r.body).settled).toBe(true);
   });
 
   it('Day 6.3 — open A/P for FabricWorld is zero after both bills settle', async () => {
@@ -432,9 +441,15 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
     });
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    const rows = body.data.rows as Array<{ ending?: { debit?: number; credit?: number } }>;
-    const totalDebit = rows.reduce((s, r) => s + (r.ending?.debit || 0), 0);
-    const totalCredit = rows.reduce((s, r) => s + (r.ending?.credit || 0), 0);
+    // Trial-balance shape (ledger 0.7+): `columnarRows[].ending.{debit,credit}`
+    // are per-currency dicts. Sum across currencies; debits = credits.
+    const rows = body.columnarRows as Array<{
+      ending?: { debit?: Record<string, number>; credit?: Record<string, number> };
+    }>;
+    const sumByCurrency = (m?: Record<string, number>) =>
+      Object.values(m ?? {}).reduce((s, v) => s + v, 0);
+    const totalDebit = rows.reduce((s, r) => s + sumByCurrency(r.ending?.debit), 0);
+    const totalCredit = rows.reduce((s, r) => s + sumByCurrency(r.ending?.credit), 0);
     expect(totalDebit).toBeGreaterThan(0);
     expect(totalDebit).toBe(totalCredit);
   });
@@ -447,9 +462,8 @@ describe('Procurement Lifecycle — Multi-Supplier A/P with Cash & Credit', () =
     });
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.success).toBe(true);
     // Grand total should be > 0 (bills are posted but not paid)
-    expect(body.data.grandTotal).toBeGreaterThan(0);
+    expect(body.grandTotal).toBeGreaterThan(0);
   });
 
   it('Day 7.3 — idempotency: re-posting bill #1 does not double-post', async () => {

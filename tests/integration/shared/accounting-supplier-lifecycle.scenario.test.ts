@@ -155,9 +155,13 @@ afterAll(async () => {
 async function seedReceivedPurchase(args: {
   _id: mongoose.Types.ObjectId;
   invoiceNumber: string;
-  grandTotal: number; // paisa
+  grandTotal: number; // paisa (test-side unit)
   creditDays: number;
 }) {
+  // purchase_orders persists totals as BDT-major; the vendor-bill action
+  // multiplies by 100 to convert. Store grandTotal/100 so the action's *100
+  // lands the JE-side credit on the same paisa value the caller passed.
+  const grandTotalMajor = args.grandTotal / 100;
   await mongoose.connection.db!.collection('purchase_orders').insertOne({
     _id: args._id,
     supplier: SUPPLIER_ID,
@@ -166,10 +170,10 @@ async function seedReceivedPurchase(args: {
     status: 'received',
     receivedAt: new Date(),
     creditDays: args.creditDays,
-    grandTotal: args.grandTotal,
+    grandTotal: grandTotalMajor,
     taxTotal: 0,
     paidAmount: 0,
-    dueAmount: args.grandTotal,
+    dueAmount: grandTotalMajor,
     paymentStatus: 'unpaid',
     items: [],
     createdAt: new Date(),
@@ -197,7 +201,7 @@ async function getOpenApTotal(): Promise<number> {
     headers: h(),
   });
   expect(r.statusCode).toBe(200);
-  const items = parse(r.body).data as Array<{ debit: number; credit: number }>;
+  const items = parse(r.body) as Array<{ debit: number; credit: number }>;
   return items.reduce((s, i) => s + ((i.credit || 0) - (i.debit || 0)), 0);
 }
 
@@ -213,7 +217,6 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       headers: h(),
     });
     expect([200, 201]).toContain(r.statusCode);
-    expect(parse(r.body).success).toBe(true);
 
     // A/P control must exist — everything else hangs off it
     const ap = await mongoose.connection
@@ -236,13 +239,12 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.success).toBe(true);
-    expect(body.data.journalEntryId).toBeTruthy();
+    expect(body.journalEntryId).toBeTruthy();
 
     // Verify the JE: Cr 2111 tagged with partnerId, Dr 3310
     const je = await mongoose.connection
       .db!.collection('journalentries')
-      .findOne({ _id: new mongoose.Types.ObjectId(body.data.journalEntryId) });
+      .findOne({ _id: new mongoose.Types.ObjectId(body.journalEntryId) });
     expect(je!.state).toBe('posted');
     const apLine = (je!.journalItems as any[]).find(
       (i: any) => i.credit === 50_000_000,
@@ -287,7 +289,7 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       payload: { action: 'post' },
     });
     expect(r.statusCode).toBe(200);
-    bill1JeId = parse(r.body).data.journalEntryId;
+    bill1JeId = parse(r.body).journalEntryId;
     expect(bill1JeId).toBeTruthy();
   });
 
@@ -305,7 +307,7 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       payload: { action: 'post' },
     });
     expect(r.statusCode).toBe(200);
-    bill2JeId = parse(r.body).data.journalEntryId;
+    bill2JeId = parse(r.body).journalEntryId;
     expect(bill2JeId).toBeTruthy();
 
     // Open A/P = opening + bill1 + bill2 = 500k + 200k + 300k = 1,000,000 BDT
@@ -359,11 +361,11 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
     // closing balance should be our full outstanding.
     // (The opening balance JE is dated Dec 31 of last year by default,
     // inside the [start, end] window.)
-    expect(body.data.lines.length).toBeGreaterThanOrEqual(3);
+    expect(body.lines.length).toBeGreaterThanOrEqual(3);
     // Partner-ledger balance uses debit-minus-credit convention. A/P is a
     // credit-side liability, so a net outstanding owed-to-supplier shows as
     // NEGATIVE in the running balance. Compare the magnitude.
-    expect(body.data.closingBalance).toBe(-(50_000_000 + 20_000_000 + 30_000_000));
+    expect(body.closingBalance).toBe(-(50_000_000 + 20_000_000 + 30_000_000));
   });
 
   // Day 3 — Partial payment ---------------------------------------------------
@@ -376,13 +378,13 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       payload: {
         action: 'pay',
         amount: 15_000_000, // ৳150,000
-        fromAccountCode: '1112',
+        fromAccountCode: '1113',
         reference: 'CHQ-101',
       },
     });
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.data.settled).toBe(false); // group still has ৳50k open
+    expect(body.settled).toBe(false); // group still has ৳50k open
 
     // Open A/P = 1,000,000 - 150,000 = 850,000
     expect(await getOpenApTotal()).toBe(85_000_000);
@@ -419,7 +421,7 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       },
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.matched).toBe(false); // still partial
+    expect(parse(r.body).matched).toBe(false); // still partial
     // Open A/P = 850,000 - 50,000 = 800,000
     expect(await getOpenApTotal()).toBe(80_000_000);
   });
@@ -438,7 +440,7 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       payload,
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.idempotent).toBe(true);
+    expect(parse(r.body).idempotent).toBe(true);
     // Balance unchanged
     expect(await getOpenApTotal()).toBe(80_000_000);
   });
@@ -453,7 +455,7 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       payload: {
         action: 'pay',
         amount: 99_999_999,
-        fromAccountCode: '1112',
+        fromAccountCode: '1113',
         reference: 'CHQ-OVER',
       },
     });
@@ -469,12 +471,12 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       payload: {
         action: 'pay',
         amount: 5_000_000, // the remaining ৳50k
-        fromAccountCode: '1112',
+        fromAccountCode: '1113',
         reference: 'CHQ-102',
       },
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.settled).toBe(true);
+    expect(parse(r.body).settled).toBe(true);
   });
 
   it('Day 5.3 — Bill #2 full payoff (৳250,000 remaining) settles its group', async () => {
@@ -485,12 +487,12 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
       payload: {
         action: 'pay',
         amount: 25_000_000, // 300k - 50k CN = 250k
-        fromAccountCode: '1112',
+        fromAccountCode: '1113',
         reference: 'CHQ-103',
       },
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.settled).toBe(true);
+    expect(parse(r.body).settled).toBe(true);
   });
 
   // Day 6 — Final reporting ---------------------------------------------------
@@ -507,8 +509,7 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    expect(body.success).toBe(true);
-    expect(body.data.grandTotal).toBeGreaterThanOrEqual(50_000_000);
+    expect(body.grandTotal).toBeGreaterThanOrEqual(50_000_000);
   });
 
   it('Day 6.3 — trial balance is balanced (debits = credits)', async () => {
@@ -519,13 +520,16 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = parse(r.body);
-    // generateTrialBalance returns rows with `ending: {debit, credit}`.
-    // Sum the ending column — debits should equal credits across the book.
-    const rows = body.data.rows as Array<{
-      ending?: { debit?: number; credit?: number };
+    // generateTrialBalance returns `columnarRows[]` (ledger 0.7+), each
+    // row's ending.debit / ending.credit is a per-currency dict, not a
+    // scalar. Sum across currencies; debits and credits balance.
+    const rows = body.columnarRows as Array<{
+      ending?: { debit?: Record<string, number>; credit?: Record<string, number> };
     }>;
-    const totalDebit = rows.reduce((s, r) => s + (r.ending?.debit || 0), 0);
-    const totalCredit = rows.reduce((s, r) => s + (r.ending?.credit || 0), 0);
+    const sumByCurrency = (m?: Record<string, number>) =>
+      Object.values(m ?? {}).reduce((s, v) => s + v, 0);
+    const totalDebit = rows.reduce((s, r) => s + sumByCurrency(r.ending?.debit), 0);
+    const totalCredit = rows.reduce((s, r) => s + sumByCurrency(r.ending?.credit), 0);
     expect(totalDebit).toBeGreaterThan(0);
     expect(totalDebit).toBe(totalCredit);
   });
@@ -544,7 +548,7 @@ describe('Supplier Lifecycle — Acme Electronics A/P story', () => {
     const body = parse(r.body);
     // All bills paid down; only the opening balance remains outstanding.
     // A/P convention: net credit shows as a negative running balance.
-    expect(body.data.closingBalance).toBe(-50_000_000);
+    expect(body.closingBalance).toBe(-50_000_000);
     // Cross-check: the still-open items (all from the opening JE) total ৳500k
     expect(await getOpenApTotal()).toBe(50_000_000);
   });

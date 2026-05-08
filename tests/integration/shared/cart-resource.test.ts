@@ -55,8 +55,7 @@ describe('Cart routes are registered', () => {
   it('GET /cart returns 200 with null data (empty cart)', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/cart', headers: h() });
     expect(res.statusCode).toBe(200);
-    expect(res.json().success).toBe(true);
-    expect(res.json().data).toBeNull();
+    expect(res.json()).toBeNull();
   });
 
   it('DELETE /cart returns non-200 when no cart exists', async () => {
@@ -147,8 +146,8 @@ describe('All 11 cart routes reachable (not 404 for route, though handler may 4x
       // Route exists — handler executed (even if it returned 4xx/5xx).
       // Fastify's own 404 body has `error: 'Not Found'` — anything else means
       // the route matched and ran.
-      const body = JSON.parse(res.body || '{}');
-      expect(body.error).not.toBe('Not Found');
+      const body = JSON.parse(res.body || '{}') ?? {};
+      expect(body.message).not.toBe('Not Found');
     });
   }
 });

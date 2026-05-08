@@ -5,7 +5,8 @@
  * Company-wide: tenantField:false.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { denyAll, requireAuth, requireRoles } from '@classytic/arc/permissions';
 import { closeFiscalPeriod, reopenFiscalPeriod } from '@classytic/ledger';
 import { QueryParser } from '@classytic/mongokit';
@@ -51,7 +52,7 @@ const fiscalPeriodResource = defineResource({
           },
           { periodId: req.params.id, closedBy: userId },
         );
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
     {
@@ -69,7 +70,7 @@ const fiscalPeriodResource = defineResource({
           },
           { periodId: req.params.id, reopenedBy: userId },
         );
-        return reply.send({ success: true, data: result });
+        return reply.send(result);
       },
     },
   ],

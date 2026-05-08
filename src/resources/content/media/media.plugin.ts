@@ -5,7 +5,8 @@
  * plugin boots it once per app and registers the routes.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import type { RouteDefinition } from '@classytic/arc/types';
 import type { Repository } from '@classytic/mongokit';
 import fp from 'fastify-plugin';

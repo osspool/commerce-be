@@ -2,7 +2,7 @@
  * Invoice Engine Configuration
  *
  * Controls the @classytic/invoice integration.
- * Master switch: INVOICE_ENGINE (defaults to true when ACCOUNTING_MODE !== 'simple').
+ * Master switch: INVOICE_ENGINE (defaults to true).
  *
  * Auto-invoicing policies (Odoo-inspired):
  *   - INVOICE_AUTO_SALES:    'off' | 'on_order' | 'on_payment'
@@ -59,11 +59,8 @@ export interface InvoiceConfigSection {
   };
 }
 
-const accountingMode = process.env.ACCOUNTING_MODE || 'standard';
-
 const invoice: InvoiceConfigSection['invoice'] = {
-  engine:
-    process.env.INVOICE_ENGINE !== undefined ? process.env.INVOICE_ENGINE !== 'false' : accountingMode !== 'simple',
+  engine: process.env.INVOICE_ENGINE !== 'false',
   autoSales: parseEnum(process.env.INVOICE_AUTO_SALES, VALID_SALES, 'off'),
   autoPurchase: parseEnum(process.env.INVOICE_AUTO_PURCHASE, VALID_PURCHASE, 'off'),
   autoPOS: parseEnum(process.env.INVOICE_AUTO_POS, VALID_POS, 'off'),

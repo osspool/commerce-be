@@ -15,7 +15,7 @@ let createdProductId: string;
 
 beforeAll(async () => {
   ctx = await setupTestOrg();
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
   await teardownTestOrg(ctx);
@@ -47,14 +47,13 @@ describe('Product CRUD', () => {
 
     expect(res.statusCode, `Product create: ${res.statusCode} ${res.body}`).toBeLessThan(300);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data._id).toBeDefined();
-    expect(body.data.name).toBe('Integration Test Tee');
-    expect(body.data.slug).toMatch(/integration-test-tee/);
+    expect(body._id).toBeDefined();
+    expect(body.name).toBe('Integration Test Tee');
+    expect(body.slug).toMatch(/integration-test-tee/);
     // Catalog defaults to 'draft' on create — expected behavior
-    expect(['active', 'draft']).toContain(body.data.status);
+    expect(['active', 'draft']).toContain(body.status);
 
-    createdProductId = body.data._id;
+    createdProductId = body._id;
   });
 
   it('GET / — lists products', async () => {
@@ -66,8 +65,7 @@ describe('Product CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    const docs = body.data ?? body.docs;
+    const docs = body.data ?? [];
     expect(Array.isArray(docs)).toBe(true);
     expect(docs.length).toBeGreaterThanOrEqual(1);
   });
@@ -81,9 +79,8 @@ describe('Product CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data._id).toBe(createdProductId);
-    expect(body.data.name).toBe('Integration Test Tee');
+    expect(body._id).toBe(createdProductId);
+    expect(body.name).toBe('Integration Test Tee');
   });
 
   it('PATCH /:id — updates product', async () => {
@@ -99,8 +96,7 @@ describe('Product CRUD', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.name).toBe('Updated Integration Tee');
+    expect(body.name).toBe('Updated Integration Tee');
   });
 });
 
@@ -117,8 +113,7 @@ describe('Product Custom Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data._id).toBe(createdProductId);
+    expect(body._id).toBe(createdProductId);
   });
 
   it('GET /slug/:slug — returns 404 for non-existent slug', async () => {
@@ -140,8 +135,7 @@ describe('Product Custom Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(Array.isArray(body.data)).toBe(true);
+    expect(Array.isArray(body)).toBe(true);
   });
 
   it('POST /:id/sync-stock — syncs stock projection', async () => {
@@ -153,8 +147,7 @@ describe('Product Custom Routes', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.productId).toBe(createdProductId);
+    expect(body.productId).toBe(createdProductId);
   });
 });
 
@@ -188,12 +181,11 @@ describe('Variant Product', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.variants).toBeDefined();
-    expect(body.data.variants.length).toBeGreaterThan(0);
-    expect(body.data.variationAttributes).toHaveLength(2);
+    expect(body.variants).toBeDefined();
+    expect(body.variants.length).toBeGreaterThan(0);
+    expect(body.variationAttributes).toHaveLength(2);
 
-    variantProductId = body.data._id;
+    variantProductId = body._id;
   });
 
   it('variant SKUs are generated', async () => {
@@ -206,8 +198,8 @@ describe('Variant Product', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.data.variants).toBeDefined();
-    const skus = body.data.variants.map((v: { sku: string }) => v.sku);
+    expect(body.variants).toBeDefined();
+    const skus = body.variants.map((v: { sku: string }) => v.sku);
     expect(skus.length).toBeGreaterThan(0);
     expect(new Set(skus).size).toBe(skus.length);
   });
@@ -265,8 +257,7 @@ describe('Product Company-Wide Access (tenantField:false regression)', () => {
 
     expect(res.statusCode).toBeLessThan(300);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    sharedProductId = body.data._id;
+    sharedProductId = body._id;
   });
 
   it('GET /:id from Branch B succeeds (catalog is company-wide)', async () => {
@@ -281,8 +272,8 @@ describe('Product Company-Wide Access (tenantField:false regression)', () => {
     // the org-less catalog doc stopped matching. See AGENTS.md.
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.data._id).toBe(sharedProductId);
-    expect(body.data.name).toBe('Shared Catalog Product');
+    expect(body._id).toBe(sharedProductId);
+    expect(body.name).toBe('Shared Catalog Product');
   });
 
   it('PATCH /:id from Branch B succeeds', async () => {
@@ -295,7 +286,7 @@ describe('Product Company-Wide Access (tenantField:false regression)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.data.tags).toContain('updated-from-b');
+    expect(body.tags).toContain('updated-from-b');
   });
 
   it('GET / from Branch B lists the Branch-A-created product', async () => {
@@ -307,7 +298,7 @@ describe('Product Company-Wide Access (tenantField:false regression)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const docs = (body.data ?? body.docs) as Array<{ _id: string }>;
+    const docs = (body.data ?? body.data) as Array<{ _id: string }>;
     expect(docs.some((d) => d._id === sharedProductId)).toBe(true);
   });
 

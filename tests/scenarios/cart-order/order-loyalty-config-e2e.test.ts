@@ -2,11 +2,17 @@
  * Order + Loyalty + PlatformConfig E2E Tests
  *
  * Validates that PlatformConfig.membership values flow through:
- * 1. Bridge functions (calculatePointsForOrder, getTierDiscountPercent)
- * 2. Loyalty engine (redemption limits, conversion rate)
- * 3. Card enrollment (prefix, digits)
+ *   1. Loyalty engine (redemption limits, conversion rate)
+ *   2. Card enrollment (prefix, digits)
  *
  * Uses MongoMemoryReplSet (loyalty engine requires transactions).
+ *
+ * Note: Earlier versions also tested two pure helpers
+ * (`calculatePointsForOrder`, `getTierDiscountPercent`) on the loyalty
+ * bridge. Those were removed when the loyalty surface switched from a
+ * config-driven calculator to engine + earning rules. The replacement
+ * `previewPointsForOrder` is async and engine-backed; it's covered by
+ * the integration suite alongside the order kernel.
  */
 
 process.env.NODE_ENV = 'test';
@@ -78,131 +84,7 @@ beforeEach(async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 1. calculatePointsForOrder — CONFIG → POINTS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('calculatePointsForOrder (config → points)', () => {
-  let calculatePointsForOrder: typeof import('../../../src/resources/sales/loyalty/loyalty.bridge.js').calculatePointsForOrder;
-
-  beforeAll(async () => {
-    const mod = await import('../../../src/resources/sales/loyalty/loyalty.bridge.js');
-    calculatePointsForOrder = mod.calculatePointsForOrder;
-  });
-
-  it('Bronze (1x): 2000 BDT → 20 points', () => {
-    expect(calculatePointsForOrder(2000, CONFIG, 'Bronze')).toBe(20);
-  });
-
-  it('Silver (1.5x): 2000 BDT → 30 points', () => {
-    expect(calculatePointsForOrder(2000, CONFIG, 'Silver')).toBe(30);
-  });
-
-  it('Gold (2x): 2000 BDT → 40 points', () => {
-    expect(calculatePointsForOrder(2000, CONFIG, 'Gold')).toBe(40);
-  });
-
-  it('Silver (1.5x): 1500 BDT → 22 points (floor)', () => {
-    // (1500/100)*1*1.5 = 22.5 → floor = 22
-    expect(calculatePointsForOrder(1500, CONFIG, 'Silver')).toBe(22);
-  });
-
-  it('disabled config → 0 points', () => {
-    expect(calculatePointsForOrder(5000, { ...CONFIG, enabled: false }, 'Gold')).toBe(0);
-  });
-
-  it('zero order → 0 points', () => {
-    expect(calculatePointsForOrder(0, CONFIG, 'Silver')).toBe(0);
-  });
-
-  it('unknown tier → 1x multiplier (fallback)', () => {
-    // (2000/100)*1*1 = 20
-    expect(calculatePointsForOrder(2000, CONFIG, 'Platinum')).toBe(20);
-  });
-
-  describe('rounding modes', () => {
-    it('floor: 150 BDT Bronze → 1 point', () => {
-      expect(calculatePointsForOrder(150, { ...CONFIG, roundingMode: 'floor' }, 'Bronze')).toBe(1);
-    });
-
-    it('ceil: 150 BDT Bronze → 2 points', () => {
-      expect(calculatePointsForOrder(150, { ...CONFIG, roundingMode: 'ceil' }, 'Bronze')).toBe(2);
-    });
-
-    it('round: 150 BDT Bronze → 2 points (1.5 rounds up)', () => {
-      expect(calculatePointsForOrder(150, { ...CONFIG, roundingMode: 'round' }, 'Bronze')).toBe(2);
-    });
-
-    it('round: 140 BDT Bronze → 1 point (1.4 rounds down)', () => {
-      expect(calculatePointsForOrder(140, { ...CONFIG, roundingMode: 'round' }, 'Bronze')).toBe(1);
-    });
-  });
-
-  describe('config changes affect output', () => {
-    it('halving amountPerPoint doubles points', () => {
-      expect(calculatePointsForOrder(2000, { ...CONFIG, amountPerPoint: 50 }, 'Bronze')).toBe(40);
-    });
-
-    it('doubling pointsPerAmount doubles points', () => {
-      expect(calculatePointsForOrder(2000, { ...CONFIG, pointsPerAmount: 2 }, 'Bronze')).toBe(40);
-    });
-
-    it('changing tier multiplier changes output', () => {
-      const customConfig = {
-        ...CONFIG,
-        tiers: [{ name: 'Silver', minPoints: 100, pointsMultiplier: 3, discountPercent: 5, color: '#C0C0C0' }],
-      };
-      // (2000/100)*1*3 = 60
-      expect(calculatePointsForOrder(2000, customConfig, 'Silver')).toBe(60);
-    });
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 2. getTierDiscountPercent — CONFIG → DISCOUNT
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('getTierDiscountPercent (config → discount)', () => {
-  let getTierDiscountPercent: typeof import('../../../src/resources/sales/loyalty/loyalty.bridge.js').getTierDiscountPercent;
-
-  beforeAll(async () => {
-    const mod = await import('../../../src/resources/sales/loyalty/loyalty.bridge.js');
-    getTierDiscountPercent = mod.getTierDiscountPercent;
-  });
-
-  it('Bronze → 0%', () => {
-    expect(getTierDiscountPercent('Bronze', CONFIG)).toBe(0);
-  });
-
-  it('Silver → 5%', () => {
-    expect(getTierDiscountPercent('Silver', CONFIG)).toBe(5);
-  });
-
-  it('Gold → 10%', () => {
-    expect(getTierDiscountPercent('Gold', CONFIG)).toBe(10);
-  });
-
-  it('unknown tier → 0%', () => {
-    expect(getTierDiscountPercent('Diamond', CONFIG)).toBe(0);
-  });
-
-  it('disabled config → 0%', () => {
-    expect(getTierDiscountPercent('Gold', { ...CONFIG, enabled: false })).toBe(0);
-  });
-
-  it('config update reflects immediately', () => {
-    const updated = {
-      ...CONFIG,
-      tiers: [
-        ...CONFIG.tiers.filter(t => t.name !== 'Silver'),
-        { name: 'Silver', minPoints: 100, pointsMultiplier: 1.5, discountPercent: 8, color: '#C0C0C0' },
-      ],
-    };
-    expect(getTierDiscountPercent('Silver', updated)).toBe(8);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 3. LOYALTY ENGINE — REDEMPTION LIMITS FROM CONFIG
+// 1. LOYALTY ENGINE — REDEMPTION LIMITS FROM CONFIG
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Loyalty Engine redemption (config → limits)', () => {
@@ -336,12 +218,18 @@ describe('Full lifecycle with config values', () => {
     expect(member.status).toBe('active');
     expect(member.balance.current).toBe(0);
 
-    // 2. Simulate order: earn points using bridge function
-    const { calculatePointsForOrder } = await import(
-      '../../../src/resources/sales/loyalty/loyalty.bridge.js'
-    );
+    // 2. Simulate order: compute the points the OLD bridge helper would
+    //    have returned. The new loyalty surface is engine + earning rules
+    //    (`previewPointsForOrder` is async / engine-backed); this test
+    //    asserts the post-earn balance directly via the engine, so the
+    //    intermediate `pointsToEarn` is computed inline using the same
+    //    formula the old helper used:
+    //      floor(orderTotal / amountPerPoint * pointsPerAmount * tierMultiplier)
     const orderTotal = 5000; // 5000 BDT
-    const pointsToEarn = calculatePointsForOrder(orderTotal, CONFIG, 'Silver');
+    const tier = CONFIG.tiers.find((t) => t.name === 'Silver')!;
+    const pointsToEarn = Math.floor(
+      (orderTotal / CONFIG.amountPerPoint) * CONFIG.pointsPerAmount * tier.pointsMultiplier,
+    );
     // (5000/100)*1*1.5 = 75
     expect(pointsToEarn).toBe(75);
 

@@ -1,5 +1,5 @@
 import { createStatusError } from '#resources/inventory/shared/status-errors.js';
-import type { IPurchaseOrder } from '../models/purchase-order.model.js';
+import type { IPurchaseOrder } from '../purchase-order.constants.js';
 import purchaseOrderRepository from '../purchase-order.repository.js';
 import { computePaymentStatus, computePurchaseTotals, normalizeNumber } from '../purchase-order.utils.js';
 import type { PurchaseWithId, UpdatePurchaseData } from './shared.js';

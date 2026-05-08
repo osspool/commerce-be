@@ -31,7 +31,7 @@ const augmented = Object.assign(repo, {
       : organizationId;
     const result = await posEngine.models.Shift.findOne({
       organizationId: orgObjectId,
-      state: { $in: ACTIVE_SHIFT_STATES as unknown as string[] },
+      state: { $in: [...ACTIVE_SHIFT_STATES] },
     }).lean();
     if (!result && process.env.LOG_LEVEL === 'debug') {
       logger.debug(

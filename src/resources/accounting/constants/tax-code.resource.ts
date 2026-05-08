@@ -11,6 +11,7 @@
 import { defineResource } from '@classytic/arc';
 import { requireAuth } from '@classytic/arc/permissions';
 import { BD_DIVISIONS, TAX_CODES, TAX_CODES_BY_DIVISION } from '@classytic/ledger-bd';
+import { NotFoundError } from '@classytic/arc/utils';
 
 type TaxCodeEntry = (typeof TAX_CODES)[keyof typeof TAX_CODES];
 
@@ -44,7 +45,7 @@ const taxCodeResource = defineResource({
       raw: true,
       handler: async () => {
         const allCodes = Object.values(TAX_CODES) as any[];
-        return { success: true, results: allCodes.length, data: allCodes };
+        return { results: allCodes.length, data: allCodes };
       },
     },
 
@@ -55,7 +56,7 @@ const taxCodeResource = defineResource({
       permissions: requireAuth(),
       raw: true,
       handler: async () => {
-        return { success: true, data: BD_DIVISIONS };
+        return { data: BD_DIVISIONS };
       },
     },
 
@@ -68,10 +69,10 @@ const taxCodeResource = defineResource({
       handler: async (req: any, reply: any) => {
         const division = normalizeDivision(req.params.division);
         if (!division) {
-          return reply.status(404).send({ success: false, error: `Division '${req.params.division}' not found` });
+          throw new NotFoundError(`Division '${req.params.division}' not found`);
         }
         const taxes = getTaxesForDivision(division);
-        return { success: true, data: { division, taxes } };
+        return { data: { division, taxes } };
       },
     },
   ],

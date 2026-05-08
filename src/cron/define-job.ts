@@ -27,6 +27,7 @@
 
 import mongoose from 'mongoose';
 import type logger from '#lib/utils/logger.js';
+import { getCronInstanceId, tryAcquireCronLock } from './cron-lock.js';
 
 type Logger = typeof logger;
 
@@ -67,6 +68,19 @@ export function startCronJob(job: CronJob, log: Logger): CronRunner {
       log.warn({ job: job.name }, 'cron: skipped tick — previous still running');
       return;
     }
+
+    // Multi-replica leader lock — only one instance per cluster runs the
+    // tick per cycle. Lease is 90% of the interval so a crashed leader
+    // is reclaimed within one cycle. The cron-lock module silently
+    // returns `false` on Mongo disconnects / write conflicts — those
+    // turn into a skipped tick, not an exception.
+    const leaseMs = Math.max(1_000, Math.floor(job.intervalMs * 0.9));
+    const acquired = await tryAcquireCronLock(job.name, leaseMs);
+    if (!acquired) {
+      log.debug({ job: job.name, instance: getCronInstanceId() }, 'cron: skipped — another replica holds the lease');
+      return;
+    }
+
     running = true;
     const start = Date.now();
     try {

@@ -23,6 +23,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
 import { flow, flowCtxFromArcReq, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
+import { ValidationError } from '@classytic/arc/utils';
 
 export function createWorkerSessionResource() {
   const engine = flow();
@@ -78,7 +79,7 @@ export function createWorkerSessionResource() {
             deviceId?: string;
           };
           const session = await flow().repositories.workerSession.clockIn(body, ctx);
-          return { success: true, data: session, status: 201 };
+          return { data: session, status: 201 };
         },
       },
       {
@@ -98,10 +99,7 @@ export function createWorkerSessionResource() {
             periodEnd?: string;
           };
           if (!query.periodStart || !query.periodEnd) {
-            return reply.code(400).send({
-              success: false,
-              error: 'periodStart and periodEnd (ISO dates) are required',
-            });
+            throw new ValidationError('periodStart and periodEnd (ISO dates) are required');
           }
           const kpis = await flow().repositories.workerSession.computeKpis(
             {
@@ -111,7 +109,7 @@ export function createWorkerSessionResource() {
             },
             ctx,
           );
-          return reply.send({ success: true, data: kpis });
+          return reply.send(kpis);
         },
       },
       {
@@ -135,7 +133,7 @@ export function createWorkerSessionResource() {
             },
             { organizationId: ctx.organizationId, sort: { occurredAt: 1 } },
           );
-          return reply.send({ success: true, data: rows });
+          return reply.send(rows);
         },
       },
     ],

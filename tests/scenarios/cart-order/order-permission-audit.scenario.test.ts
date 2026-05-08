@@ -128,7 +128,7 @@ async function createDraft(headers: Record<string, string>, suffix: string): Pro
   });
   if (res.statusCode >= 400) return null;
   const body = parse(res.body);
-  return (body?.data as { quotationNumber: string; _id: string }) ?? null;
+  return (body as { quotationNumber: string; _id: string }) ?? null;
 }
 
 beforeAll(async () => {
@@ -228,7 +228,7 @@ describe('Quotations — list/get', () => {
     });
     expect(res.statusCode, res.body).toBe(200);
     const body = parse(res.body)!;
-    const docs = (body.docs as Array<Record<string, unknown>>) ?? [];
+    const docs = (body.data as Array<Record<string, unknown>>) ?? [];
     expect(docs.length).toBeGreaterThanOrEqual(1);
     for (const d of docs) expect(String(d.organizationId)).toBe(orgId);
   });
@@ -240,7 +240,7 @@ describe('Quotations — list/get', () => {
       headers: headersWith(branchManagerToken),
     });
     expect(res.statusCode, res.body).toBe(200);
-    const data = (parse(res.body)!.data as Record<string, unknown>);
+    const data = (parse(res.body) as Record<string, unknown>);
     expect(data.quotationNumber).toBe(seedQuoteNumber);
   });
 
@@ -351,11 +351,11 @@ describe('Quotations — FSM actions (branch staff drive the workflow)', () => {
 
     const send = await postAction(quote!.quotationNumber, headersWith(branchManagerToken), 'send');
     expect(send.statusCode, send.body).toBe(200);
-    expect((parse(send.body)!.data as Record<string, unknown>).status).toBe('sent');
+    expect((parse(send.body) as Record<string, unknown>).status).toBe('sent');
 
     const accept = await postAction(quote!.quotationNumber, headersWith(branchManagerToken), 'accept');
     expect(accept.statusCode, accept.body).toBe(200);
-    expect((parse(accept.body)!.data as Record<string, unknown>).status).toBe('accepted');
+    expect((parse(accept.body) as Record<string, unknown>).status).toBe('accepted');
   });
 
   it('cashier cannot drive quotation FSM (not in branchOrderOps groups)', async () => {

@@ -202,11 +202,10 @@ describe('POST /journal-entries/:id/action', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.state).toBe('posted');
+    expect(body.state).toBe('posted');
   });
 
-  it('action=reverse → 200, creates new posted counter-entry', async () => {
+  it('action=reverse → 200, creates a draft counter-entry', async () => {
     const { cashId, revenueId } = await resolveAccounts();
     const id = await createDraftEntry({ cashId, revenueId, date: '2026-04-15' });
     await callAction(id, 'post');
@@ -215,13 +214,17 @@ describe('POST /journal-entries/:id/action', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    // Original + reversal both present
+    // Kernel semantics (matches ERPNext `make_reverse_journal_entry` and
+    // Odoo `_reverse_moves`): the reversal lands as a DRAFT for review,
+    // not auto-posted. The reviewer posts it explicitly via `action=post`.
+    // Original stays posted, marked `reversed=true`.
     const db = mongoose.connection.db!;
     const all = await db.collection('journalentries').find({}).toArray();
     expect(all.length).toBe(2);
     const posted = all.filter((e) => e.state === 'posted');
-    expect(posted.length).toBe(2);
+    const draft = all.filter((e) => e.state === 'draft');
+    expect(posted.length).toBe(1);
+    expect(draft.length).toBe(1);
   });
 
   it('action=duplicate → 200, new draft entry', async () => {
@@ -232,9 +235,8 @@ describe('POST /journal-entries/:id/action', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.state).toBe('draft');
-    expect(body.data._id).not.toBe(id);
+    expect(body.state).toBe('draft');
+    expect(body._id).not.toBe(id);
   });
 
   it('action=archive → 200, draft entry archived', async () => {
@@ -245,8 +247,7 @@ describe('POST /journal-entries/:id/action', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data.state).toBe('archived');
+    expect(body.state).toBe('archived');
   });
 
   it('action=unpost → 400 (intentionally removed)', async () => {
@@ -261,7 +262,7 @@ describe('POST /journal-entries/:id/action', () => {
     // handler's "Invalid action" message is acceptable; both are 400.
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body);
-    expect(body.success === false || body.error).toBeTruthy();
+    expect(res.statusCode >= 400 || body.message).toBeTruthy();
   });
 
   it('action=post into closed fiscal period → 409 PERIOD_LOCKED', async () => {
@@ -286,25 +287,35 @@ describe('POST /journal-entries/:id/action', () => {
 
     expect(res.statusCode).toBe(409);
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(false);
     expect(body.code).toMatch(/FISCAL_ERROR|FISCAL_PERIOD_CLOSED|PERIOD_LOCKED/);
   });
 
-  it('action=reverse with reversalDate in closed day → 409', async () => {
+  it('action=reverse with reversalDate in closed day defers the lock to post', async () => {
     const { cashId, revenueId } = await resolveAccounts();
     // Post original on 2026-04-10 (no lock yet)
     const id = await createDraftEntry({ cashId, revenueId, date: '2026-04-10' });
     await callAction(id, 'post');
 
-    // Close days through 2026-04-05 by seeding a closed shift on that date.
-    // period-lock-guard.ts derives the watermark from pos_shifts (state in
-    // closed/orphaned_closed) — so reversalDate at 04-03 is locked.
+    // Close days through 2026-04-05 — reversalDate of 04-03 is locked.
     await seedClosedShift(ctx.orgId, '2026-04-05');
 
+    // Reverse creates a DRAFT counter-entry (kernel default `autoPost: false`,
+    // matches ERPNext / Odoo). Drafts don't trip the period lock — that
+    // contract guards POSTS into closed periods. So `reverse` succeeds,
+    // and the reviewer hits PERIOD_LOCKED only when they `action=post` the
+    // draft into a closed day — which is the next assertion.
     const res = await callAction(id, 'reverse', { reversalDate: '2026-04-03' });
+    expect(res.statusCode).toBe(200);
 
-    expect(res.statusCode).toBe(409);
-    const body = JSON.parse(res.body);
+    // Find the new draft and try to post it — that's where the lock kicks in.
+    const db = mongoose.connection.db!;
+    const all = await db.collection('journalentries').find({}).toArray();
+    const reversal = all.find((e) => e.state === 'draft');
+    expect(reversal).toBeDefined();
+
+    const postRes = await callAction(String(reversal!._id), 'post');
+    expect(postRes.statusCode).toBe(409);
+    const body = JSON.parse(postRes.body);
     expect(body.code).toMatch(/^PERIOD_LOCKED/);
   });
 

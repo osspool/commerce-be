@@ -28,7 +28,7 @@ let env: ScenarioEnv;
 beforeAll(async () => {
   env = await bootScenarioApp({
     scenario: 'crm-e2e',
-    env: { CRM_MODE: 'simple' },
+    env: { CRM_MODE: 'simple', ENABLE_CRM: 'true' },
   });
 }, 120_000);
 

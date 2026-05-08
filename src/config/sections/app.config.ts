@@ -35,11 +35,27 @@ export interface CorsConfig {
   exposedHeaders: string[];
 }
 
+export interface HttpLimitsConfig {
+  /**
+   * Max upload size per file for `@fastify/multipart` (image upload, CSV
+   * import, signed-attachment routes). Bytes. Beyond this, the client
+   * gets 413 "Payload Too Large" before the route handler runs.
+   *
+   * Default: 50 MiB. JSON request body limit stays at Fastify's default
+   * (~1 MiB) — Arc 2.14 doesn't surface that knob, and it's adequate for
+   * commerce JSON traffic. Bump via env if a specific route needs more.
+   */
+  multipartFileSize: number;
+  /** Max number of files per multipart request. Default 10. */
+  multipartFiles: number;
+}
+
 export interface AppConfigSection {
   betterAuth: BetterAuthConfig;
   app: AppSectionConfig;
   rateLimit: RateLimitConfig;
   cors: CorsConfig;
+  httpLimits: HttpLimitsConfig;
 }
 
 const corsOriginsFromEnv: string[] = parseDelimitedString(process.env.CORS_ORIGIN);
@@ -79,6 +95,11 @@ const appConfig: AppConfigSection = {
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  },
+
+  httpLimits: {
+    multipartFileSize: parseIntEnv(process.env.MULTIPART_FILE_SIZE_BYTES, 50 * 1024 * 1024),
+    multipartFiles: parseIntEnv(process.env.MULTIPART_MAX_FILES, 10),
   },
 };
 

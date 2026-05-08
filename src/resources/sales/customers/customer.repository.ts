@@ -1,7 +1,8 @@
 import { Repository, validationChainPlugin } from '@classytic/mongokit';
-import type { ContactInfo, PersonName } from '@classytic/primitives/person';
+import type { ContactInfo } from '@classytic/primitives/person';
 import type { CustomerDocument, IAddress, ICustomer } from './customer.model.js';
 import Customer from './customer.model.js';
+import { nameFromString } from './customer.name-utils.js';
 
 interface UserLike {
   _id?: string;
@@ -15,21 +16,6 @@ interface CustomerData {
   name?: string;
   phone?: string;
   email?: string;
-}
-
-/**
- * Split a flat "Full Name" string into a structured `PersonName`.
- *
- * Callers at the auth / POS boundary pass flat names; storage is structured.
- * Single-token names go in `given` with an empty `family` (many BD and
- * single-name locales store a single name, which is valid).
- */
-function nameFromString(flat: string | undefined, fallback: string): PersonName {
-  const source = (flat ?? '').trim() || fallback;
-  const parts = source.split(/\s+/);
-  if (parts.length <= 1) return { given: parts[0] ?? fallback, family: '' };
-  const family = parts.pop() ?? '';
-  return { given: parts.join(' '), family };
 }
 
 function contactFromPartials(email: string | undefined, phone: string | undefined): ContactInfo {
@@ -110,7 +96,7 @@ class CustomerRepository extends Repository<ICustomer> {
     if (existing) {
       let updated = false;
       if (user.name) {
-        const next = nameFromString(user.name, existing.name.given);
+        const next = nameFromString(user.name, existing.name.given, user);
         if (next.given !== existing.name.given || next.family !== existing.name.family) {
           existing.name = next;
           updated = true;
@@ -140,7 +126,7 @@ class CustomerRepository extends Repository<ICustomer> {
         if (!byPhone.userId || byPhone.userId.toString() === userId?.toString()) {
           (byPhone as unknown as { userId?: unknown }).userId = userId;
           if (user.name) {
-            byPhone.name = nameFromString(user.name, byPhone.name.given);
+            byPhone.name = nameFromString(user.name, byPhone.name.given, user);
           }
           if (email && email !== byPhone.contact?.email) {
             byPhone.contact = { ...(byPhone.contact ?? {}), email };
@@ -156,7 +142,7 @@ class CustomerRepository extends Repository<ICustomer> {
       if (byEmail) {
         (byEmail as unknown as { userId?: unknown }).userId = userId;
         if (user.name) {
-          byEmail.name = nameFromString(user.name, byEmail.name.given);
+          byEmail.name = nameFromString(user.name, byEmail.name.given, user);
         }
         if (phone && (!byEmail.contact?.phone || byEmail.contact.phone.startsWith('pending_'))) {
           const phoneOwner = await this.Model.findOne({
@@ -174,7 +160,7 @@ class CustomerRepository extends Repository<ICustomer> {
 
     return this.create({
       userId,
-      name: nameFromString(user.name, 'Unknown'),
+      name: nameFromString(user.name, 'Unknown', user),
       contact: contactFromPartials(email, phone || `pending_${userId}`),
     });
   }
@@ -192,13 +178,14 @@ class CustomerRepository extends Repository<ICustomer> {
     if (!phone) throw new Error('Phone required');
     if (!name) throw new Error('Name required');
 
-    return (await this.getOrCreate(
+    const { doc } = await this.getOrCreate(
       { 'contact.phone': phone },
       {
-        name: nameFromString(name, 'Unknown'),
+        name: nameFromString(name, 'Unknown', { name, email }),
         contact: contactFromPartials(email, phone),
       },
-    ))!;
+    );
+    return doc;
   }
 
   async getByUserId(userId: string): Promise<ICustomer | null> {
@@ -233,7 +220,7 @@ class CustomerRepository extends Repository<ICustomer> {
 
       if (existing) {
         if (customerData.name) {
-          const next = nameFromString(customerData.name, existing.name.given);
+          const next = nameFromString(customerData.name, existing.name.given, customerData);
           if (next.given !== existing.name.given || next.family !== existing.name.family) {
             await this.Model.updateOne({ _id: existing._id }, { name: next });
             existing.name = next;
@@ -243,7 +230,7 @@ class CustomerRepository extends Repository<ICustomer> {
       }
 
       return this.create({
-        name: nameFromString(customerData.name, 'Walk-in'),
+        name: nameFromString(customerData.name, 'Walk-in', customerData),
         contact: contactFromPartials(customerData.email, phone),
         tags: ['pos'],
       });

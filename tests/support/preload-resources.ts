@@ -1,9 +1,9 @@
 /**
  * Test resource preloader
  *
- * Uses Arc's `preloadResourcesAsync` helper to normalize a Vite
- * `import.meta.glob` (lazy) result into ResourceLike[]. Tests keep using
- * explicit preloaded resources instead of runtime discovery so boot stays
+ * Resolves a Vite `import.meta.glob` (lazy) result into ResourceLike[]
+ * by importing each module sequentially. Tests keep using explicit
+ * preloaded resources instead of runtime discovery so boot stays
  * deterministic under Vitest.
  *
  * Usage in test files:
@@ -13,9 +13,14 @@
  * The accounting engine MUST be initialized before resource modules evaluate
  * because account.resource.ts / journal-entry.resource.ts call getAccountModel()
  * at module top-level. Mongoose must be connected before this is called.
+ *
+ * Resolution is sequential. Arc's `preloadResourcesAsync` resolves the glob
+ * with `Promise.all`, which deadlocks under tsx/vitest's tsx-loader (>70
+ * resource modules race for module-graph locks). A serial loop is bounded
+ * by the longest single import, not the worst-case parallel contention,
+ * and finishes in seconds where the parallel path stalled past 5 minutes.
  */
 
-import { preloadResourcesAsync } from '@classytic/arc/testing';
 import type { ResourceLike } from '@classytic/arc/factory';
 import type { AppContext } from '../../src/core/app/context.js';
 // Eager engine imports — must run before resource modules evaluate, since
@@ -52,7 +57,14 @@ export async function loadTestResources(): Promise<{ resources: ResourceLike[] }
   const cat = await ensureCatalogEngine();
   const ctx: AppContext = { catalog: cat };
 
-  const autoDiscovered = await preloadResourcesAsync(resourceModules);
+  const autoDiscovered: ResourceLike[] = [];
+  for (const importer of Object.values(resourceModules)) {
+    const mod = (await (importer as () => Promise<unknown>)()) as { default?: unknown };
+    if (mod.default && typeof mod.default === 'object') {
+      autoDiscovered.push(mod.default as ResourceLike);
+    }
+  }
+
   cached = [
     ...autoDiscovered,
     (categoryFactory as (c: AppContext) => ResourceLike)(ctx),

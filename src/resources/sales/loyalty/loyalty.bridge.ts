@@ -1,6 +1,7 @@
 import type { LoyaltyContext } from '@classytic/loyalty/types';
 import platformRepository from '#resources/platform/platform.repository.js';
 import Customer from '../customers/customer.model.js';
+import customerRepository from '../customers/customer.repository.js';
 import { generateCardId } from './card-id.js';
 import { getLoyaltyEngine } from './loyalty.plugin.js';
 
@@ -44,7 +45,7 @@ export async function enrollCustomer(customerId: string, ctx: LoyaltyBridgeConte
   const engine = getLoyaltyEngine();
   const loyaltyCtx = toLoyaltyCtx(ctx);
 
-  const customer = await Customer.findById(customerId);
+  const customer = await customerRepository.getById(customerId, { throwOnNotFound: false });
   if (!customer) throw new Error('Customer not found');
 
   // Generate smart card ID with branch provenance (safe defaults if no config)
@@ -286,9 +287,9 @@ export async function previewPointsForOrder(input: {
     filters: { status: 'active', programId: member.programId },
     sort: { priority: 1 },
     limit: 100,
-  })) as unknown as { docs?: EarningRuleLike[] } | EarningRuleLike[];
+  })) as unknown as { data?: EarningRuleLike[] } | EarningRuleLike[];
 
-  const ruleDocs = Array.isArray(rules) ? rules : (rules.docs ?? []);
+  const ruleDocs = Array.isArray(rules) ? rules : (rules.data ?? []);
   const orderRules = ruleDocs
     .filter((r) => r.type === 'order' || r.type === 'category' || r.type === 'tier_bonus')
     .sort((a, b) => a.priority - b.priority);

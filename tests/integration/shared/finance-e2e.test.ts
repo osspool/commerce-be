@@ -66,11 +66,10 @@ describe('GET /finance/summary', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.success).toBe(true);
-    expect(body.data.totals.incomeBdt).toBe(0);
-    expect(body.data.totals.expenseBdt).toBe(0);
-    expect(body.data.totals.netBdt).toBe(0);
-    expect(body.data.byDay).toEqual([]);
+    expect(body.totals.incomeBdt).toBe(0);
+    expect(body.totals.expenseBdt).toBe(0);
+    expect(body.totals.netBdt).toBe(0);
+    expect(body.byDay).toEqual([]);
   });
 
   it('aggregates verified inflow/outflow into income, expense, and net', async () => {
@@ -116,13 +115,13 @@ describe('GET /finance/summary', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.data.totals.incomeBdt).toBe(1000);
-    expect(body.data.totals.expenseBdt).toBe(300);
-    expect(body.data.totals.netBdt).toBe(700);
-    expect(body.data.byMethod.cash).toBeDefined();
-    expect(body.data.byMethod.cash.netBdt).toBe(700);
-    expect(body.data.byDay.length).toBeGreaterThanOrEqual(1);
-    expect(body.data.byDay[0].dateKey).toBe('2026-04-15');
+    expect(body.totals.incomeBdt).toBe(1000);
+    expect(body.totals.expenseBdt).toBe(300);
+    expect(body.totals.netBdt).toBe(700);
+    expect(body.byMethod.cash).toBeDefined();
+    expect(body.byMethod.cash.netBdt).toBe(700);
+    expect(body.byDay.length).toBeGreaterThanOrEqual(1);
+    expect(body.byDay[0].dateKey).toBe('2026-04-15');
   });
 
   it('skips non-verified transactions by default', async () => {
@@ -148,7 +147,7 @@ describe('GET /finance/summary', () => {
       url: '/api/v1/finance/summary?startDate=2026-04-01&endDate=2026-04-30',
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().data.totals.incomeBdt).toBe(0);
+    expect(res.json().totals.incomeBdt).toBe(0);
   });
 });
 

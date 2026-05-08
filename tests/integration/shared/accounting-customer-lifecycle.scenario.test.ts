@@ -182,7 +182,7 @@ async function getOpenArTotal(): Promise<number> {
     headers: h(),
   });
   expect(r.statusCode).toBe(200);
-  const items = parse(r.body).data as Array<{ debit: number; credit: number }>;
+  const items = parse(r.body) as Array<{ debit: number; credit: number }>;
   return items.reduce((s, i) => s + ((i.debit || 0) - (i.credit || 0)), 0);
 }
 
@@ -218,7 +218,7 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
     const body = parse(r.body);
     const je = await mongoose.connection
       .db!.collection('journalentries')
-      .findOne({ _id: new mongoose.Types.ObjectId(body.data.journalEntryId) });
+      .findOne({ _id: new mongoose.Types.ObjectId(body.journalEntryId) });
     const arLine = (je!.journalItems as any[]).find(
       (i: any) => i.debit === 30_000_000,
     );
@@ -243,7 +243,7 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
       payload: { action: 'post', creditDays: 30 },
     });
     expect(r.statusCode).toBe(200);
-    invoice1JeId = parse(r.body).data.journalEntryId;
+    invoice1JeId = parse(r.body).journalEntryId;
   });
 
   it('Day 1.2 — Invoice #2 ৳700,000 posts successfully (still under limit)', async () => {
@@ -259,7 +259,7 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
       payload: { action: 'post', creditDays: 30 },
     });
     expect(r.statusCode).toBe(200);
-    invoice2JeId = parse(r.body).data.journalEntryId;
+    invoice2JeId = parse(r.body).journalEntryId;
     // Exposure = opening 300k + 500k + 700k = 1,500,000 (at cap)
     expect(await getOpenArTotal()).toBe(1_500_00_000);
   });
@@ -296,12 +296,12 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
       payload: {
         action: 'receive',
         amount: 30_000_000,
-        toAccountCode: '1112',
+        toAccountCode: '1113',
         reference: 'BNK-INC-001',
       },
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.settled).toBe(false);
+    expect(parse(r.body).settled).toBe(false);
     // Exposure = 1.5M - 300k = 1,200,000
     expect(await getOpenArTotal()).toBe(1_200_00_000);
   });
@@ -319,7 +319,7 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
       payload: { action: 'post', creditDays: 30 },
     });
     expect(r.statusCode).toBe(200);
-    invoice4JeId = parse(r.body).data.journalEntryId;
+    invoice4JeId = parse(r.body).journalEntryId;
     // Exposure = 1.2M + 200k = 1,400,000 (still under cap)
     expect(await getOpenArTotal()).toBe(1_400_00_000);
   });
@@ -353,12 +353,12 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
       payload: {
         action: 'receive',
         amount: 20_000_000,
-        toAccountCode: '1112',
+        toAccountCode: '1113',
         reference: 'BNK-INC-002',
       },
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.settled).toBe(true);
+    expect(parse(r.body).settled).toBe(true);
   });
 
   it('Day 5.2 — Invoice #2 remaining ৳650k receipt → settles', async () => {
@@ -369,12 +369,12 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
       payload: {
         action: 'receive',
         amount: 65_000_000, // 700k - 50k DN = 650k
-        toAccountCode: '1112',
+        toAccountCode: '1113',
         reference: 'BNK-INC-003',
       },
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.settled).toBe(true);
+    expect(parse(r.body).settled).toBe(true);
   });
 
   // Day 6 — final reporting ---------------------------------------------------
@@ -390,7 +390,7 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
       headers: h(),
     });
     expect(r.statusCode).toBe(200);
-    expect(parse(r.body).data.grandTotal).toBeGreaterThanOrEqual(50_000_000);
+    expect(parse(r.body).grandTotal).toBeGreaterThanOrEqual(50_000_000);
   });
 
   it('Day 6.3 — partner ledger closing balance equals ৳500k', async () => {
@@ -406,7 +406,7 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
     expect(r.statusCode).toBe(200);
     // A/R is a debit-side asset, so the running balance is POSITIVE when
     // the customer owes money.
-    expect(parse(r.body).data.closingBalance).toBe(50_000_000);
+    expect(parse(r.body).closingBalance).toBe(50_000_000);
   });
 
   it('Day 6.4 — trial balance is balanced (debits = credits)', async () => {
@@ -416,11 +416,16 @@ describe('Customer Lifecycle — Wholesale Mart A/R story', () => {
       headers: h(),
     });
     expect(r.statusCode).toBe(200);
-    const rows = parse(r.body).data.rows as Array<{
-      ending?: { debit?: number; credit?: number };
+    // Trial-balance shape (ledger 0.7+): `columnarRows[].ending.{debit,credit}`
+    // are dicts keyed by currency code. Sum across currencies — the
+    // single-currency BDT case naturally produces `{ BDT: <amount> }`.
+    const rows = parse(r.body).columnarRows as Array<{
+      ending?: { debit?: Record<string, number>; credit?: Record<string, number> };
     }>;
-    const totalDebit = rows.reduce((s, r) => s + (r.ending?.debit || 0), 0);
-    const totalCredit = rows.reduce((s, r) => s + (r.ending?.credit || 0), 0);
+    const sumByCurrency = (m?: Record<string, number>) =>
+      Object.values(m ?? {}).reduce((s, v) => s + v, 0);
+    const totalDebit = rows.reduce((s, r) => s + sumByCurrency(r.ending?.debit), 0);
+    const totalCredit = rows.reduce((s, r) => s + sumByCurrency(r.ending?.credit), 0);
     expect(totalDebit).toBeGreaterThan(0);
     expect(totalDebit).toBe(totalCredit);
   });

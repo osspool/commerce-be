@@ -7,7 +7,8 @@
  *   pause, resume, cash-in, cash-out, blind-close, reconcile, close.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { QueryParser } from '@classytic/mongokit';
 import permissions from '#config/permissions.js';
 import {

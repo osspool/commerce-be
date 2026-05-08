@@ -15,15 +15,6 @@ const requestItem = z
   })
   .strict();
 
-const approvedItem = z
-  .object({
-    itemId: z.string().optional(),
-    productId: z.string().optional(),
-    variantSku: z.string().nullable().optional(),
-    quantityApproved: z.number().int().min(0).optional(),
-  })
-  .strict();
-
 const fulfillItem = z
   .object({
     itemId: z.string().optional(),
@@ -47,16 +38,9 @@ export const createSchema = {
     .strict(),
 };
 
-// Action schemas — items optional on approve (defaults to full request),
-// optional on fulfill (defaults to approved quantities). Reason optional
-// on reject/cancel.
-export const approveActionSchema = z.object({
-  items: z.array(approvedItem).optional(),
-  reviewNotes: z.string().optional(),
-});
-
-export const rejectActionSchema = z.object({ reason: z.string().optional() });
-
+// Action schemas — fulfill items optional (defaults to approved quantities).
+// Reason optional on cancel. `submit_for_approval` and `decide` schemas come
+// from the shared `withApprovalChain` preset and are not redeclared here.
 export const fulfillActionSchema = z.object({
   documentType: z.enum(['delivery_note', 'dispatch_note', 'delivery_slip']).optional(),
   remarks: z.string().optional(),

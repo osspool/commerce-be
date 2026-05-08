@@ -12,7 +12,7 @@
 
 import { expect } from 'vitest';
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 
 // ============================================================================
 // Request Helpers
@@ -182,7 +182,11 @@ export async function removeMember(app, token, memberIdOrEmail) {
  * - Organization (branch) with all members assigned roles
  */
 export async function setupTestOrg() {
-  const mongod = await MongoMemoryServer.create();
+  // ReplSet (not standalone) so repos that wrap writes in
+  // `withTransaction.allowFallback` (catalog/categories DELETE) get a
+  // topology that actually supports transactions and retryable writes.
+  // Standalone MongoMemoryServer rejects retryable writes outright.
+  const mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   const uri = mongod.getUri();
   // Disconnect from per-suite-mongo if active, then connect to our own instance
   if (mongoose.connection.readyState !== 0) {

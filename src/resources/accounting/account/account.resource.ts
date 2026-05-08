@@ -14,7 +14,8 @@
  * level work.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { requireAuth, requireRoles } from '@classytic/arc/permissions';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import { QueryParser } from '@classytic/mongokit';
@@ -97,7 +98,7 @@ const accountResource = defineResource({
       // biome-ignore lint/suspicious/noExplicitAny: bulk seed handler — no id, no body
       handler: async (_req: any, reply: any) => {
         const result = await accountRepository.seedAccounts(undefined);
-        return reply.status(201).send({ success: true, data: result });
+        return reply.status(201).send(result);
       },
     },
     {
@@ -111,7 +112,7 @@ const accountResource = defineResource({
         const { accounts } = req.body;
         const result = await accountRepository.bulkCreate(accounts, undefined);
         const status = result.summary?.created > 0 ? 201 : 200;
-        return reply.status(status).send({ success: true, data: result });
+        return reply.status(status).send(result);
       },
     },
   ],

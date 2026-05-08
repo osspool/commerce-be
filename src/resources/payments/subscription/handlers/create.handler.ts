@@ -49,5 +49,5 @@ export async function createSubscriptionHandler(req: FastifyRequest, reply: Fast
     { organizationId: ctx.organizationId },
   );
 
-  return reply.status(201).send({ success: true, data: created });
+  return reply.status(201).send(created);
 }

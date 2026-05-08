@@ -3,7 +3,7 @@
  */
 import { z } from 'zod';
 
-const successData = <T extends z.ZodType>(schema: T) => z.object({ success: z.literal(true), data: schema });
+const successData = <T extends z.ZodType>(schema: T) => schema;
 
 const idParam = z.object({ id: z.string() });
 
@@ -65,7 +65,6 @@ export const scrapSchemas = {
     }),
     response: {
       200: z.object({
-        success: z.literal(true),
         data: z.array(scrapEntity),
         total: z.number(),
       }),

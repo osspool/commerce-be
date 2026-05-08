@@ -8,6 +8,7 @@ export interface ICMSMetadata {
 }
 
 export interface ICMS {
+  _id?: import('mongoose').Types.ObjectId;
   name: string;
   slug: string;
   status: 'draft' | 'published' | 'archived';

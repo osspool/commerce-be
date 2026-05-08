@@ -17,31 +17,13 @@
 import { defineResource, BaseController } from '@classytic/arc';
 import type { IRequestContext, IControllerResponse } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
-import {
-  applyDecision,
-  createChain,
-  type ApprovalChain,
-  type ChainOrder,
-  type DecisionInput,
-} from '@classytic/primitives/approval';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
+import { withApprovalChain } from '#core/approval/with-approval-chain.js';
+import { createPolicyChainResolver } from '#resources/approval/policy-resolver.js';
 import { flow, flowCtxFromArcReq, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
-
-interface SubmitForApprovalBody {
-  chain: {
-    order: ChainOrder;
-    steps: Array<{
-      id: string;
-      name?: string;
-      approvers: Array<{ id: string; name?: string; role?: string }>;
-      requiredApprovals?: number;
-    }>;
-  };
-}
-
-type DecideBody = Omit<DecisionInput, 'decidedAt'>;
+import { NotFoundError, ValidationError } from '@classytic/arc/utils';
 
 interface ProcurementCreateBody {
   vendorRef?: string;
@@ -106,7 +88,7 @@ class ProcurementController extends BaseController {
         >[0],
         ctx,
       );
-      return { success: true, data: result as unknown as Record<string, unknown>, status: 201 };
+      return { data: result as unknown as Record<string, unknown>, status: 201 };
     } catch (err) {
       // Mongoose validation → clean 400 instead of 500 raw schema leak.
       const e = err as { name?: string; message?: string; code?: string | number; statusCode?: number };
@@ -140,7 +122,7 @@ export function createProcurementResource() {
         destinationLocationId: { systemManaged: true },
         fx: { systemManaged: true },
         // Mutated only via submit_for_approval / decide actions; never via PATCH.
-        approvalChain: { systemManaged: true },
+        approvals: { systemManaged: true },
         receivedAt: { systemManaged: true },
         createdBy: { systemManaged: true },
         modifiedBy: { systemManaged: true },
@@ -213,7 +195,7 @@ export function createProcurementResource() {
           // biome-ignore lint/suspicious/noExplicitAny: service contract opaque
           const body = req.body as any;
           const result = await flow().services.procurement.receive(id, body, ctx);
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         },
       },
       {
@@ -231,19 +213,17 @@ export function createProcurementResource() {
           const body = req.body as { lines: Array<{ skuRef: string; quantity: number }> };
 
           if (!body.lines?.length) {
-            return reply.code(400).send({ success: false, error: 'lines[] is required with at least one item' });
+            throw new ValidationError('lines[] is required with at least one item');
           }
 
           const order = (await flow().repositories.procurement.getByQuery(
             { _id: id },
             { organizationId: ctx.organizationId, throwOnNotFound: false, lean: true },
           )) as Record<string, unknown> | null;
-          if (!order) return reply.code(404).send({ success: false, error: 'Procurement order not found' });
+          if (!order) throw new NotFoundError('Procurement order not found');
 
           if (order.status !== 'received' && order.status !== 'partially_received' && order.status !== 'cancelled') {
-            return reply
-              .code(400)
-              .send({ success: false, error: `Cannot return items from PO in '${order.status}' status` });
+            throw new ValidationError(`Cannot return items from PO in '${order.status}' status`);
           }
 
           const locations = await flow().repositories.location.findAll(
@@ -252,7 +232,7 @@ export function createProcurementResource() {
           );
           const vendorLoc = locations[0];
           if (!vendorLoc) {
-            return reply.code(400).send({ success: false, error: 'No vendor location found for this warehouse' });
+            throw new ValidationError('No vendor location found for this warehouse');
           }
 
           const sourceLocationId = String(order.destinationLocationId || order.destinationNodeId);
@@ -277,7 +257,7 @@ export function createProcurementResource() {
           await flow().services.moveGroup.executeAction(String(returnGroup._id), 'confirm', {}, ctx);
           const result = await flow().services.moveGroup.executeAction(String(returnGroup._id), 'receive', {}, ctx);
 
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         },
       },
       {
@@ -291,7 +271,7 @@ export function createProcurementResource() {
           const { id } = req.params as { id: string };
           const ctx = flowCtxGuard.from(req);
           const status = await flow().services.matching.getMatchStatus(id, ctx);
-          return reply.send({ success: true, data: status });
+          return reply.send(status);
         },
       },
       {
@@ -313,7 +293,7 @@ export function createProcurementResource() {
             { procurementOrderId: id, lines: body.lines },
             ctx,
           );
-          return reply.send({ success: true, data: status });
+          return reply.send(status);
         },
       },
       {
@@ -330,7 +310,7 @@ export function createProcurementResource() {
           const body = (req.body ?? {}) as Record<string, unknown>;
           const tolerance = body.tolerance as Record<string, number> | undefined;
           const result = await flow().services.matching.validateMatch(id, ctx, tolerance);
-          return reply.send({ success: true, data: result });
+          return reply.send(result);
         },
       },
       {
@@ -348,7 +328,7 @@ export function createProcurementResource() {
           for (const [lineIndex, moves] of byLine) {
             data[lineIndex] = moves;
           }
-          return reply.send({ success: true, data });
+          return reply.send(data);
         },
       },
     ],
@@ -379,117 +359,53 @@ export function createProcurementResource() {
         },
         permissions: permissions.inventory.procurementApprove,
       },
-      // Attach a multi-step approval chain to a draft PO. Steps come from the
-      // request body — admins typically build them from a saved template
-      // client-side. Subsequent `approve` calls are gated on
-      // `isApproved(approvalChain)` inside the kernel service.
-      submit_for_approval: {
+      'force-cancel': {
         handler: async (id, data, req) => {
           const ctx = flowCtxFromArcReq(req as unknown as IRequestContext);
-          const body = (data ?? {}) as unknown as SubmitForApprovalBody;
-          if (!body.chain?.steps?.length) {
-            throw Object.assign(new Error('chain.steps is required and must be non-empty'), {
-              statusCode: 400,
-              code: 'INVALID_CHAIN',
-            });
-          }
-
-          const order = await engine.repositories.procurement.getByQuery(
-            { _id: id },
-            { organizationId: ctx.organizationId, throwOnNotFound: false, lean: true },
-          );
-          if (!order) {
-            throw Object.assign(new Error(`Procurement order ${id} not found`), {
-              statusCode: 404,
-              code: 'PROCUREMENT_NOT_FOUND',
-            });
-          }
-          if (order.status !== 'draft') {
-            throw Object.assign(
-              new Error(`Cannot attach approval chain to order in status: ${order.status}`),
-              { statusCode: 422, code: 'INVALID_STATUS' },
-            );
-          }
-          if (order.approvalChain) {
-            throw Object.assign(new Error('Approval chain already attached'), {
-              statusCode: 409,
-              code: 'CHAIN_ALREADY_ATTACHED',
-            });
-          }
-
-          let chain: ApprovalChain;
-          try {
-            chain = createChain(body.chain);
-          } catch (err) {
-            const e = err as { code?: string; message?: string };
-            throw Object.assign(new Error(e?.message ?? 'Invalid approval chain'), {
-              statusCode: 400,
-              code: e?.code ?? 'INVALID_CHAIN',
-            });
-          }
-
-          return engine.repositories.procurement.update(
-            id,
-            { approvalChain: chain } as Record<string, unknown>,
-            { organizationId: ctx.organizationId, lean: true },
-          );
+          const body = (data ?? {}) as { reason?: string };
+          return engine.services.procurement.cancel(id, ctx, {
+            force: true,
+            ...(body.reason ? { reason: body.reason } : {}),
+          });
         },
         permissions: permissions.inventory.procurementApprove,
       },
-      // Apply a single approver decision to the attached chain. Pure
-      // transformation: load → applyDecision (primitive) → persist.
-      decide: {
-        handler: async (id, data, req) => {
-          const ctx = flowCtxFromArcReq(req as unknown as IRequestContext);
-          const body = (data ?? {}) as unknown as DecideBody;
-          if (!body.stepId || !body.approverId || !body.decision) {
-            throw Object.assign(
-              new Error('stepId, approverId, and decision are required'),
-              { statusCode: 400, code: 'INVALID_DECISION' },
-            );
-          }
-
-          const order = await engine.repositories.procurement.getByQuery(
-            { _id: id },
-            { organizationId: ctx.organizationId, throwOnNotFound: false, lean: true },
-          );
-          if (!order) {
-            throw Object.assign(new Error(`Procurement order ${id} not found`), {
-              statusCode: 404,
-              code: 'PROCUREMENT_NOT_FOUND',
-            });
-          }
-          if (!order.approvalChain) {
-            throw Object.assign(new Error('No approval chain attached'), {
-              statusCode: 422,
-              code: 'NO_CHAIN_ATTACHED',
-            });
-          }
-
-          let updatedChain: ApprovalChain;
-          try {
-            updatedChain = applyDecision(order.approvalChain as ApprovalChain, {
-              stepId: body.stepId,
-              approverId: body.approverId,
-              decision: body.decision,
-              ...(body.note !== undefined ? { note: body.note } : {}),
-            });
-          } catch (err) {
-            const e = err as { code?: string; message?: string };
-            throw Object.assign(new Error(e?.message ?? 'Invalid decision'), {
-              statusCode: 422,
-              code: e?.code ?? 'INVALID_DECISION',
-            });
-          }
-
-          return engine.repositories.procurement.update(
-            id,
-            { approvalChain: updatedChain } as Record<string, unknown>,
-            { organizationId: ctx.organizationId, lean: true },
-          );
+      // Approval chain — `submit_for_approval` + `decide` come from the
+      // shared `withApprovalChain` preset (`#core/approval`). Replaces the
+      // hand-rolled per-action handlers we used to keep here. The kernel's
+      // `engine.services.procurement.approve(id, ctx)` (above) still gates
+      // on `isApproved(approvals)` and surfaces APPROVAL_CHAIN_INCOMPLETE
+      // when the chain isn't approved — that domain rule stays in Flow.
+      ...withApprovalChain({
+        subjectType: 'purchase_order',
+        // Flow's procurement repository is typed `Repository<ProcurementOrderDocument>`
+        // and ProcurementOrder declares `approvals?: ApprovalChain` (P7) —
+        // satisfies `ApprovableDoc` natively, no cast needed.
+        repository: engine.repositories.procurement,
+        allowedSubmitStatus: ['draft'],
+        // `status` is the default — omitted; preset reads `doc.status` natively.
+        permissions: {
+          submit: permissions.inventory.procurementApprove,
+          decide: permissions.inventory.procurementApprove,
         },
-        permissions: permissions.inventory.procurementApprove,
-      },
+        // Optional matrix-driven submit. Callers pass `useMatrix: true` to
+        // resolve a chain from `/approval/policies` instead of supplying a
+        // literal `chain`. The evaluation context exposes the order total
+        // for threshold conditions ("amount > 100000 needs CFO").
+        toEvaluationContext: (po) => {
+          const items = (po.items ?? []) as Array<{ quantity?: number; unitCost?: number }>;
+          const amount = items.reduce(
+            (sum, it) => sum + Number(it.quantity ?? 0) * Number(it.unitCost ?? 0),
+            0,
+          );
+          return {
+            branchId: String((po.organizationId as unknown) ?? ''),
+            amount,
+            vendorRef: po.vendorRef as string | undefined,
+          };
+        },
+        resolveChain: createPolicyChainResolver(),
+      }),
     },
   });
 }

@@ -59,9 +59,9 @@ describe('Warehouse Mode Certification: Standard', () => {
     const nodesRes = await inject('GET', '/inventory/nodes');
     expect(nodesRes.statusCode).toBe(200);
     const nodesBody = parse(nodesRes.body);
-    expect(Array.isArray(nodesBody?.data)).toBe(true);
-    expect(nodesBody.data.length).toBe(1);
-    nodeId = String(nodesBody.data[0]._id);
+    expect(Array.isArray(nodesBody)).toBe(true);
+    expect(nodesBody.length).toBe(1);
+    nodeId = String(nodesBody[0]._id);
 
     const locationCode = `A-${Date.now()}`;
     const createLocRes = await inject('POST', '/inventory/locations', {
@@ -74,13 +74,13 @@ describe('Warehouse Mode Certification: Standard', () => {
       coordinates: { zone: 'A', aisle: 1, bay: 1, level: 1, bin: '01' },
     });
     expect(createLocRes.statusCode).toBe(201);
-    expect(parse(createLocRes.body)?.data?.code).toBe(locationCode);
+    expect(parse(createLocRes.body)?.code).toBe(locationCode);
 
     const layoutRes = await inject('GET', `/inventory/locations/layout?nodeId=${nodeId}`);
     expect(layoutRes.statusCode).toBe(200);
     const layoutBody = parse(layoutRes.body);
-    expect(layoutBody?.data?.totalLocations).toBeGreaterThanOrEqual(5);
-    expect(Array.isArray(layoutBody?.data?.zones)).toBe(true);
+    expect(layoutBody?.totalLocations).toBeGreaterThanOrEqual(5);
+    expect(Array.isArray(layoutBody?.zones)).toBe(true);
   });
 
   it('rejects a second warehouse node in standard mode', async () => {
@@ -91,7 +91,7 @@ describe('Warehouse Mode Certification: Standard', () => {
       isDefault: false,
     });
     expect(createNodeRes.statusCode).toBe(400);
-    expect(parse(createNodeRes.body)?.error).toContain('Only 1 warehouse allowed');
+    expect(parse(createNodeRes.body)?.message).toContain('Only 1 warehouse allowed');
   });
 
   it('rejects enterprise reports in standard mode', async () => {

@@ -68,7 +68,7 @@ class LRUCache {
  * class MyRepository extends Repository {
  *   constructor() {
  *     super(Model, [
- *       cachePlugin({ adapter, ttl: 60 }),
+ *       cachePlugin({ adapter, defaults: { staleTime: 60, gcTime: 60 } }),
  *     ]);
  *   }
  * }

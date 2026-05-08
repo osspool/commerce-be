@@ -25,6 +25,8 @@ import PlatformConfig from '#resources/platform/platform.model.js';
 import { taxResolver } from '../accounting.engine.js';
 import { aggregateTax, periodRangeFromString } from '../tax/tax.aggregator.js';
 import musokInvoiceRepository from './musok.repository.js';
+import { generateMushakFromOrder, MushakGenerationError } from './musok.service.js';
+import { NotFoundError, ValidationError, createDomainError, createError } from '@classytic/arc/utils';
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
@@ -45,22 +47,12 @@ async function loadSeller(): Promise<Seller | null> {
 // 422 (not 400) — the request is well-formed; the system simply isn't
 // configured yet. Payload tells the UI exactly where to send the operator.
 function replySellerBinMissing(reply: FastifyReply): FastifyReply {
-  return reply.code(422).send({
-    success: false,
-    code: 'SELLER_BIN_MISSING',
-    message:
-      'Seller BIN is not configured yet. Set the company VAT registration (BIN) in Platform Config → VAT before generating Mushak forms.',
-    action: {
-      label: 'Configure VAT settings',
-      path: '/dashboard/platform-config/vat',
-      field: 'vat.bin',
-    },
-  });
+  throw createError(422, 'Seller BIN is not configured yet. Set the company VAT registration (BIN) in Platform Config → VAT before generating Mushak forms.', { code: 'SELLER_BIN_MISSING' });
 }
 
 async function resolveBranchCode(orgId: string): Promise<string> {
-  const branch = await branchRepository.Model.findById(orgId).select('code').lean();
-  return (branch as { code?: string })?.code || 'HQ';
+  const branch = await branchRepository.getById(orgId);
+  return branch?.code || 'HQ';
 }
 
 // ── Generate Mushak 6.3 ────────────────────────────────────────────────────
@@ -77,11 +69,8 @@ async function resolveBranchCode(orgId: string): Promise<string> {
 export async function generateMusokInvoice(req: FastifyRequest, reply: FastifyReply) {
   const parsed = mushak63GenerateBodySchema.safeParse(req.body);
   if (!parsed.success) {
-    return reply.code(400).send({
-      success: false,
-      error: 'Invalid Mushak 6.3 payload',
-      code: 'VALIDATION_FAILED',
-      details: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    throw createDomainError('VALIDATION_FAILED', 'Invalid Mushak 6.3 payload', 400, {
+      issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
     });
   }
   const body = parsed.data;
@@ -94,7 +83,8 @@ export async function generateMusokInvoice(req: FastifyRequest, reply: FastifyRe
     { throwOnNotFound: false },
   );
   if (existing) {
-    return reply.send({ success: true, data: existing, idempotent: true });
+    const existingDoc = (existing as Record<string, unknown> & { toObject?: () => Record<string, unknown> }).toObject?.() ?? existing;
+    return reply.send({ ...(existingDoc as Record<string, unknown>), idempotent: true });
   }
 
   const seller = await loadSeller();
@@ -124,10 +114,7 @@ export async function generateMusokInvoice(req: FastifyRequest, reply: FastifyRe
   // Fail closed: NGO claim without certificate → reject. Same rule for any
   // exempt/zero-rated remap that lacks an SRO — fraud risk otherwise.
   if (fp && fp.position === 'EXEMPT_NGO' && !fp.reference) {
-    return reply.code(400).send({
-      success: false,
-      error: 'NGO exemption claimed without SRO / certificate reference',
-      code: 'SRO_REFERENCE_REQUIRED',
+    throw createDomainError('SRO_REFERENCE_REQUIRED', 'NGO exemption claimed without SRO / certificate reference', 400, {
       fiscalPositionReason: fp.reason,
     });
   }
@@ -209,7 +196,7 @@ export async function generateMusokInvoice(req: FastifyRequest, reply: FastifyRe
     'Musok 6.3 invoice generated',
   );
 
-  return reply.code(201).send({ success: true, data: doc });
+  return reply.code(201).send(doc);
 }
 
 // ── Get by Source ───────────────────────────────────────────────────────────
@@ -221,9 +208,9 @@ export async function getMusokBySource(req: FastifyRequest, reply: FastifyReply)
     { throwOnNotFound: false },
   );
   if (!doc) {
-    return reply.code(404).send({ success: false, error: 'No Musok invoice for this source' });
+    throw new NotFoundError('No Musok invoice for this source');
   }
-  return reply.send({ success: true, data: doc });
+  return reply.send(doc);
 }
 
 // ── Monthly Return (branches on branch.businessType) ──────────────────────
@@ -236,8 +223,8 @@ export async function getMusokBySource(req: FastifyRequest, reply: FastifyReply)
 
 async function getBranchRegime(orgId: string | undefined): Promise<BusinessType> {
   if (!orgId) return 'STANDARD_VAT';
-  const branch = await branchRepository.Model.findById(orgId).select('businessType').lean();
-  return ((branch as { businessType?: BusinessType })?.businessType ?? 'STANDARD_VAT') as BusinessType;
+  const branch = await branchRepository.getById(orgId);
+  return (branch?.businessType ?? 'STANDARD_VAT') as BusinessType;
 }
 
 export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply) {
@@ -248,7 +235,7 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
   const year = Number(yearStr);
   const month = Number(monthStr);
   if (!year || !month || month < 1 || month > 12) {
-    return reply.code(400).send({ success: false, error: 'Period must be YYYY-MM format' });
+    throw new ValidationError('Period must be YYYY-MM format');
   }
 
   const regime = await getBranchRegime(orgId);
@@ -256,12 +243,9 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
   // Cottage-exempt branches file nothing.
   if (regime === 'COTTAGE_EXEMPT') {
     return reply.send({
-      success: true,
-      data: {
-        formType: 'NONE',
-        regime,
-        message: 'Cottage-exempt branch — no VAT/TOT return filing required.',
-      },
+      formType: 'NONE',
+      regime,
+      message: 'Cottage-exempt branch — no VAT/TOT return filing required.',
     });
   }
 
@@ -284,13 +268,10 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
       exemptTurnover,
     });
     return reply.send({
-      success: true,
-      data: {
-        formType: '9.2',
-        regime,
-        aggregates,
-        return: totReturn,
-      },
+      formType: '9.2',
+      regime,
+      aggregates,
+      return: totReturn,
     });
   }
 
@@ -304,7 +285,9 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
   const range = periodRangeFromString(period);
   const taxAgg = await aggregateTax(range, orgId);
 
+  const inputZeroRated = taxAgg.input.find((b) => b.rate === 0)?.vatAmount ?? 0;
   const vatData: MonthlyVatData = {
+    taxableSupplyValue: 0,
     outputVat15: 0,
     outputVat10: 0,
     outputVat7_5: 0,
@@ -312,9 +295,11 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
     zeroRatedSales: 0,
     exemptSales: 0,
     inputVatCredit: taxAgg.input.reduce((sum, b) => sum + b.vatAmount, 0),
+    inputVatZeroRated: inputZeroRated,
     sdCollected: 0,
     previousBalance: 0,
     vdsCredit: taxAgg.vdsCollected,
+    treasuryDeposit: 0,
     penalty: 0,
   };
 
@@ -324,6 +309,7 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
     else if (agg._id === 7.5) vatData.outputVat7_5 = agg.vatAmount;
     else if (agg._id === 5) vatData.outputVat5 = agg.vatAmount;
     else if (agg._id === 0) vatData.zeroRatedSales = agg.taxableBase;
+    if (agg._id > 0) vatData.taxableSupplyValue += agg.taxableBase;
     vatData.sdCollected += agg.sdAmount;
   }
 
@@ -333,15 +319,63 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
   const returnData = buildMushak91(period, seller.bin, vatData);
 
   return reply.send({
-    success: true,
-    data: {
-      formType: '9.1',
-      regime,
-      aggregates,
-      inputVat: taxAgg.input,
-      return: returnData,
-    },
+    formType: '9.1',
+    regime,
+    aggregates,
+    inputVat: taxAgg.input,
+    return: returnData,
   });
+}
+
+// ── Generate from Order (admin/backfill) ───────────────────────────────────
+//
+// `POST /musok/generate-from-order` — triggers the same auto-generation logic
+// the `accounting:order.fulfilled` bridge runs, but explicitly per-order.
+//
+// Use cases:
+//   - Backfill missing Mushaks after a data issue (e.g. after running
+//     cleanup-dev-data, after fixing seller BIN, or for orders fulfilled
+//     before the bridge was wired).
+//   - Manual retry when the bridge skipped due to a typed error
+//     (SELLER_BIN_MISSING, etc.) and the underlying issue is now fixed.
+//
+// Idempotent — returns the existing doc if a Mushak already exists for the
+// order. Same code path as the auto-generate bridge, so output is identical.
+
+export async function generateMusokFromOrderEndpoint(req: FastifyRequest, reply: FastifyReply) {
+  const body = req.body as { orderId?: string; date?: string } | undefined;
+  if (!body?.orderId) {
+    throw new ValidationError('orderId is required');
+  }
+  const orgId = (req as any).scope?.organizationId as string | undefined;
+  try {
+    const result = await generateMushakFromOrder({
+      orderId: body.orderId,
+      organizationId: orgId,
+      date: body.date ? new Date(body.date) : undefined,
+    });
+    return reply.code(result.alreadyExists ? 200 : 201).send({
+      alreadyExists: result.alreadyExists,
+      doc: result.doc,
+    });
+  } catch (err) {
+    if (err instanceof MushakGenerationError) {
+      // Map service codes to canonical Arc error responses
+      switch (err.code) {
+        case 'ORDER_NOT_FOUND':
+          throw new NotFoundError(err.message);
+        case 'NO_LINES':
+          throw new ValidationError(err.message);
+        case 'SELLER_BIN_MISSING':
+          throw createError(422, err.message, { code: 'SELLER_BIN_MISSING' });
+        case 'SRO_REFERENCE_REQUIRED':
+          throw createDomainError('SRO_REFERENCE_REQUIRED', err.message, 400);
+        default:
+          throw createDomainError(err.code, err.message, 500);
+      }
+    }
+    throw err;
+  }
 }
 
 // ── BIN Validation ─────────────────────────────────────────────────────────
@@ -349,10 +383,7 @@ export async function getMonthlyReturn(req: FastifyRequest, reply: FastifyReply)
 export async function validateBinEndpoint(req: FastifyRequest, reply: FastifyReply) {
   const { bin } = req.params as { bin: string };
   const isValid = validateBIN(bin);
-  return reply.send({
-    success: true,
-    data: { bin, formatted: isValid ? formatBIN(bin) : bin, isValid },
-  });
+  return reply.send({ bin, formatted: isValid ? formatBIN(bin) : bin, isValid });
 }
 
 // ── Cancel (action handler for Arc actions pattern) ────────────────────────

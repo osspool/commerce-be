@@ -12,10 +12,18 @@ const documentType = z.enum(['delivery_note', 'dispatch_note', 'delivery_slip'])
 const transferItem = z
   .object({
     productId: z.string(),
+    productName: z.string().optional(),
     variantSku: z.string().nullable().optional(),
     quantity: z.number().min(0),
     cartonNumber: z.string().optional(),
     costPrice: z.number().min(0).optional(),
+    /**
+     * Per-line transit / landed cost in major BDT (decimal). Capitalized
+     * into receiver inventory at receive time and credited to the
+     * `2126 Transfer Cost Clearing` account by the accounting bridge.
+     * See `@classytic/commerce-sdk` `TransferItemPayload`.
+     */
+    transitCost: z.number().min(0).optional(),
     notes: z.string().optional(),
     sourceLocationId: z.string().optional(),
     destinationLocationId: z.string().optional(),

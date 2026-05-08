@@ -68,9 +68,8 @@ describe('Analytics — /dashboard', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = parse(res.body);
-    expect(body?.success).toBe(true);
-
-    const data = body?.data as {
+    console.log('analytics body keys:', Object.keys(body ?? {}));
+    const data = (body?.data ?? body) as {
       summary: { totalCustomers: number; totalOrders: number; totalRevenue: number; averageOrderValue: number };
       today: { newCustomers: number; newOrders: number; revenue: number };
       period: { days: number; orders: number; revenue: number };
@@ -106,7 +105,8 @@ describe('Analytics — /dashboard', () => {
       url: `${API}/analytics/dashboard`,
       headers: h(),
     });
-    const data = parse(res.body)?.data as { period: { days: number } };
+    const body = parse(res.body);
+    const data = (body?.data ?? body) as { period: { days: number } };
     expect(data.period.days).toBe(30);
   });
 
@@ -149,7 +149,8 @@ describe('Analytics — /dashboard', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    const data = parse(res.body)?.data as {
+    const body = parse(res.body);
+    const data = (body?.data ?? body) as {
       summary: { totalCustomers: number; totalOrders: number; totalRevenue: number; averageOrderValue: number };
       today: { newCustomers: number; newOrders: number; revenue: number };
       period: { orders: number; revenue: number };

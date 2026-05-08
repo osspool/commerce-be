@@ -1,8 +1,10 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { publish } from '#lib/events/arcEvents.js';
+import { BD } from '#resources/accounting/posting/bd-account-codes.js';
 import { validateCodSettlementInputs } from '#resources/accounting/posting/contracts/cod-settlement.contract.js';
 import { ensureOrderEngine } from '../order.engine.js';
 import { getOrderContext, getScopedOrderByNumber } from './shared.js';
+import { ConflictError, NotFoundError, ValidationError, createDomainError } from '@classytic/arc/utils';
 
 export async function codSettlementHandler(req: FastifyRequest, reply: FastifyReply) {
   const engine = await ensureOrderEngine();
@@ -11,7 +13,7 @@ export async function codSettlementHandler(req: FastifyRequest, reply: FastifyRe
     actualReceived: number;
     courierCommission: number;
     writeoff?: number;
-    cashAccount?: '1111' | '1112';
+    cashAccount?: typeof BD.pettyCash | typeof BD.cash;
     notes?: string;
     date?: string;
   };
@@ -19,31 +21,21 @@ export async function codSettlementHandler(req: FastifyRequest, reply: FastifyRe
 
   const order = await getScopedOrderByNumber(id, ctx);
   if (!order) {
-    return reply.status(404).send({ success: false, error: 'Order not found' });
+    throw new NotFoundError('Order not found');
   }
 
   const gateway = String((order.metadata as Record<string, unknown> | undefined)?.paymentGateway ?? '').toLowerCase();
   if (gateway !== 'cod') {
-    return reply.status(400).send({
-      success: false,
-      error: 'COD settlement is only valid for cash-on-delivery orders',
-    });
+    throw new ValidationError('COD settlement is only valid for cash-on-delivery orders');
   }
 
   if (order.metadata?.codSettlement) {
-    return reply.status(409).send({
-      success: false,
-      error: 'COD settlement already recorded for this order',
-      code: 'ALREADY_SETTLED',
-    });
+    throw createDomainError('ALREADY_SETTLED', 'COD settlement already recorded for this order', 409);
   }
 
   const grossAmount = order.totals?.grandTotal?.amount ?? 0;
   if (grossAmount <= 0) {
-    return reply.status(400).send({
-      success: false,
-      error: 'Order has no gross amount to settle',
-    });
+    throw new ValidationError('Order has no gross amount to settle');
   }
 
   const actualReceived = Math.max(0, Math.trunc(Number(body.actualReceived) || 0));
@@ -57,7 +49,7 @@ export async function codSettlementHandler(req: FastifyRequest, reply: FastifyRe
     writeoff,
   });
   if (!check.ok) {
-    return reply.status(400).send({ success: false, error: check.reason, code: 'SETTLEMENT_UNBALANCED' });
+    throw createDomainError('SETTLEMENT_UNBALANCED', check.reason, 400);
   }
 
   const settlementId = `cod-settle-${String(order._id)}-${Date.now()}`;
@@ -67,7 +59,7 @@ export async function codSettlementHandler(req: FastifyRequest, reply: FastifyRe
     actualReceived,
     courierCommission,
     writeoff,
-    cashAccount: body.cashAccount ?? '1112',
+    cashAccount: body.cashAccount ?? BD.cash,
     notes: body.notes,
     settledAt,
     settledBy: ctx.actorRef,
@@ -89,5 +81,5 @@ export async function codSettlementHandler(req: FastifyRequest, reply: FastifyRe
     branchId: ctx.organizationId,
   });
 
-  return reply.send({ success: true, data: settlementRecord });
+  return reply.send(settlementRecord);
 }

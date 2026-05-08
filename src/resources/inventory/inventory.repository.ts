@@ -10,6 +10,7 @@
  */
 
 import logger from '#lib/utils/logger.js';
+import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 import { buildFlowContext, DEFAULT_LOCATION } from './flow/context-helpers.js';
 import { getFlowEngine } from './flow/flow-engine.js';
 
@@ -27,6 +28,32 @@ interface GetBatchOptions {
 interface ProductVariantMap {
   productId: string;
   variantSkus: string[];
+}
+
+/** Per-branch stock summary suitable for dashboard cards. */
+export interface BranchStockSummary {
+  /** Distinct SKUs that have any Flow quant record at this branch (regardless of qty). */
+  totalItems: number;
+  /** Sum of `quantityOnHand` across all quants at this branch's default location. */
+  totalQuantity: number;
+  /** Variants where 0 < summed qty ≤ threshold. */
+  lowStockCount: number;
+  /**
+   * Variants out of stock at this branch — counts BOTH:
+   *   • variants whose Flow quants sum to ≤ 0 (depleted),
+   *   • variants with no Flow quant record (never received).
+   *
+   * Computed as `totalActiveCatalogVariants − inStockVariantsAtBranch`. This is
+   * the "Odoo `qty_available <= 0`" semantics; ERPNext's stricter "must have a
+   * Bin row" was rejected because it hides freshly-imported SKUs from the
+   * out-of-stock dashboard.
+   */
+  outOfStockCount: number;
+}
+
+interface StockSummaryOptions {
+  /** Default 10 — matches the historical `LOW_STOCK_THRESHOLD` constant. */
+  lowStockThreshold?: number;
 }
 
 /**
@@ -156,4 +183,168 @@ async function getBatchBranchStock(
   return result;
 }
 
-export default { getBatchBranchStock };
+/**
+ * Branch stock summary for dashboard cards.
+ *
+ * ### Why this exists
+ * The previous summary iterated Flow's `quants` and counted `qty <= 0` — but
+ * variants that have **never been received** at a branch have NO quant row,
+ * so they were silently excluded from `outOfStockCount`. UI table showed
+ * "Out" for those rows (catalog enrichment defaults missing quants to 0),
+ * but the stat card showed `outOfStockCount: 0`. The mismatch surfaced when
+ * a 73-product catalog showed `outOfStockCount: 0` despite 19 zero-stock
+ * variants on page 1 alone.
+ *
+ * ### Pattern
+ * Mirrors Odoo's `_search_qty_available_new` (product.py:494): when asked
+ * "how many products are out of stock?", catalog is the source for "how
+ * many variants exist", Flow is the source for "how many have positive
+ * stock", and the difference is the out-of-stock count. Variants with no
+ * Flow record naturally fall into the "not in stock" bucket.
+ *
+ * ### Query shape
+ * Two **parallel** aggregations — no cross-collection `$lookup`:
+ *
+ * 1. **Catalog** counts active variants. Single `$match` + `$project` with
+ *    `$size` over the `variants` array. Uses the `status` index. O(active
+ *    products) — typically small (thousands, not millions).
+ * 2. **Flow** groups quants by `skuRef`, sums qty, and `$facet`s the result
+ *    into the four buckets. Uses the leading-key index `{ skuRef, locationId,
+ *    inDate, _id }`. Filtered to `locationId: DEFAULT_LOCATION` and the
+ *    branch's tenant scope (organizationId = branchId, applied by Flow's
+ *    multi-tenant policy hook).
+ *
+ * Both queries hit different collections under the same connection; running
+ * them in `Promise.all` keeps wall-clock time at max(catalog, flow), not
+ * sum.
+ *
+ * @param branchId Better Auth organization ID for the target branch.
+ * @param opts.lowStockThreshold Variants with `0 < qty ≤ threshold` count as
+ *   low-stock. Default 10.
+ */
+async function getStockSummary(
+  branchId: string,
+  opts: StockSummaryOptions = {},
+): Promise<BranchStockSummary> {
+  const lowStockThreshold = opts.lowStockThreshold ?? 10;
+  const empty: BranchStockSummary = {
+    totalItems: 0,
+    totalQuantity: 0,
+    lowStockCount: 0,
+    outOfStockCount: 0,
+  };
+  if (!branchId) return empty;
+
+  try {
+    const flow = getFlowEngine();
+    const ctx = buildFlowContext(branchId);
+    const catalog = await ensureCatalogEngine();
+
+    const [catalogResult, flowResult] = await Promise.all([
+      // 1. Total active variants in catalog. Single document expected.
+      catalog.repositories.product.aggregatePipeline<{ totalVariants: number }>([
+        { $match: { status: 'active', deletedAt: null } },
+        {
+          $project: {
+            // Count only variants flagged active. `$ne: false` treats
+            // missing/undefined as active, matching the Variant default.
+            vCount: {
+              $size: {
+                $filter: {
+                  input: { $ifNull: ['$variants', []] },
+                  as: 'v',
+                  cond: { $ne: ['$$v.isActive', false] },
+                },
+              },
+            },
+          },
+        },
+        { $group: { _id: null, totalVariants: { $sum: '$vCount' } } },
+        { $project: { _id: 0, totalVariants: 1 } },
+      ]),
+
+      // 2. Flow quants grouped by skuRef, then bucketed. The outer $group
+      //    collapses multi-quant SKUs (lots, conditions, etc.) into a single
+      //    qty per skuRef BEFORE the bucketing $group sees them — otherwise
+      //    a SKU with two lots both at 5 would count as two low-stock rows.
+      flow.repositories.quant.aggregatePipeline<{
+        totalItems: number;
+        totalQuantity: number;
+        inStockVariants: number;
+        lowStockCount: number;
+      }>(
+        [
+          { $match: { locationId: DEFAULT_LOCATION } },
+          { $group: { _id: '$skuRef', qty: { $sum: '$quantityOnHand' } } },
+          {
+            $group: {
+              _id: null,
+              totalItems: { $sum: 1 },
+              totalQuantity: { $sum: '$qty' },
+              inStockVariants: {
+                $sum: { $cond: [{ $gt: ['$qty', 0] }, 1, 0] },
+              },
+              lowStockCount: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $gt: ['$qty', 0] },
+                        { $lte: ['$qty', lowStockThreshold] },
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              totalItems: 1,
+              totalQuantity: 1,
+              inStockVariants: 1,
+              lowStockCount: 1,
+            },
+          },
+        ],
+        // Flow's multi-tenant policy injects `{ organizationId }` as a
+        // `$match` at the front of the pipeline — see flow's repository
+        // hooks. Same option shape as the existing `getAvailability` call.
+        { organizationId: ctx.organizationId },
+      ),
+    ]);
+
+    const totalActiveVariants = catalogResult[0]?.totalVariants ?? 0;
+    const flow0 = flowResult[0] ?? {
+      totalItems: 0,
+      totalQuantity: 0,
+      inStockVariants: 0,
+      lowStockCount: 0,
+    };
+
+    return {
+      totalItems: flow0.totalItems,
+      totalQuantity: flow0.totalQuantity,
+      lowStockCount: flow0.lowStockCount,
+      // Catalog-aware out-of-stock: every active variant minus those with
+      // positive stock at this branch. Includes variants with no Flow row.
+      // Clamped at 0 in case catalog races behind a stock arrival.
+      outOfStockCount: Math.max(0, totalActiveVariants - flow0.inStockVariants),
+    };
+  } catch (err) {
+    logger.error(
+      {
+        err: (err as Error).message,
+        stack: (err as Error).stack,
+        branchId,
+      },
+      '[inventory.repository] getStockSummary failed — returning zeros',
+    );
+    return empty;
+  }
+}
+
+export default { getBatchBranchStock, getStockSummary };

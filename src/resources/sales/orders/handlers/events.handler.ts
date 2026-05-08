@@ -16,5 +16,5 @@ export async function listOrderEventsHandler(req: FastifyRequest, reply: Fastify
     limit,
   });
 
-  return reply.send({ success: true, ...result });
+  return reply.send(result);
 }

@@ -18,12 +18,13 @@
  * | cardPrefix, cardDigits | Yes — reads per enrollment |
  */
 
-import { createMongooseAdapter } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { createLoyaltyEngine, type LoyaltyEngine } from '@classytic/loyalty';
 import fp from 'fastify-plugin';
 import mongoose from 'mongoose';
 import platformRepository from '#resources/platform/platform.repository.js';
 import { outboxStore } from '#shared/outbox/index.js';
+import { shouldAutoIndex } from '#shared/db/auto-index.js';
 import { registerLoyaltyEventHandlers } from './loyalty.events.js';
 
 let _engine: LoyaltyEngine | null = null;
@@ -64,7 +65,8 @@ export async function ensureLoyaltyEngine(): Promise<LoyaltyEngine> {
     _engine = createLoyaltyEngine({
       mongoose: mongoose.connection,
       tenant: false,
-      autoIndex: process.env.NODE_ENV !== 'production',
+      autoIndex: shouldAutoIndex(),
+      forceRecreate: process.env.NODE_ENV === 'test',
       program: { conversionRate: (redemption?.pointsPerBdt as number) || 10 },
       redemption: {
         minPoints: (redemption?.minRedeemPoints as number) || 0,

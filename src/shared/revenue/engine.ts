@@ -18,6 +18,7 @@
 
 import { createRevenue, type RevenueBridges, type RevenueEngine } from '@classytic/revenue';
 import { ManualProvider } from '@classytic/revenue-manual';
+import { shouldAutoIndex } from '#shared/db/auto-index.js';
 import type { Connection } from 'mongoose';
 import mongoose from 'mongoose';
 
@@ -95,7 +96,7 @@ export async function initRevenueEngine(options: RevenueEngineInitOptions = {}):
   engine = await createRevenue({
     connection,
     defaultCurrency: 'BDT',
-    autoIndex: process.env.NODE_ENV !== 'production',
+    autoIndex: shouldAutoIndex(),
     // Immediate-payment gateway aliases all point at the single ManualProvider
     // instance. The bridge passes `gateway: 'cash'|'bkash'|...` as both the
     // provider lookup key AND the `method` field stamped on the transaction

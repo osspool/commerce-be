@@ -7,8 +7,12 @@
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
-import { buildFlowContext, DEFAULT_LOCATION } from '#resources/inventory/flow/context-helpers.js';
+import {
+  buildHeadOfficeFlowContext,
+  DEFAULT_LOCATION,
+} from '#resources/inventory/flow/context-helpers.js';
 import { getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';
+import { NotFoundError } from '@classytic/arc/utils';
 
 function catalogCtx(req: FastifyRequest) {
   return {
@@ -28,9 +32,9 @@ export async function getBySlug(req: FastifyRequest, reply: FastifyReply) {
     { ...catalogCtx(req), throwOnNotFound: false },
   );
   if (!product) {
-    return reply.code(404).send({ success: false, error: 'Product not found' });
+    throw new NotFoundError('Product not found');
   }
-  return reply.send({ success: true, data: product });
+  return reply.send(product);
 }
 
 /** GET /products/:productId/recommendations */
@@ -39,17 +43,33 @@ export async function getRecommendations(req: FastifyRequest, reply: FastifyRepl
   const catalog = await ensureCatalogEngine();
   try {
     const related = await catalog.utilities.query.getRelated(productId, 'related', catalogCtx(req), { limit: 4 });
-    return reply.send({ success: true, data: related });
+    return reply.send(related);
   } catch {
-    return reply.send({ success: true, data: [] });
+    return reply.send([]);
   }
 }
 
 /**
  * POST /products/:id/sync-stock
  *
- * Reads current on-hand from Flow for each variant (or product._id for simple)
- * and updates the cached stockProjection on the catalog product.
+ * Manually rebuild the storefront's `stockProjection` cache for one
+ * product. Reads on-hand from the **head-office** branch and writes a
+ * new projection.
+ *
+ * This route exists as an admin emergency button — the normal happy
+ * path is the event-driven auto-sync registered in
+ * [resources/inventory/inventory.handlers.ts](../../inventory/inventory.handlers.ts)
+ * which fires on `flow.move.done` / `flow.reservation.released` /
+ * `flow.reservation.consumed` / `flow.adjustment.posted` /
+ * `flow.procurement.received`. Use this route only when you suspect
+ * the cache has drifted and want to force a re-read.
+ *
+ * **Branch context is HO, not the caller's active branch.** Routing
+ * the read through the caller's branch (the previous behavior) caused
+ * a "last-sync-wins" cache-corruption bug: a manager syncing from
+ * MAIN's dashboard would overwrite the public storefront's HO figure
+ * with sub-branch stock. The single shared cache must reflect a
+ * single canonical branch — head-office, where online orders fulfill.
  */
 export async function syncStock(req: FastifyRequest, reply: FastifyReply) {
   const { id } = req.params as { id: string };
@@ -58,21 +78,23 @@ export async function syncStock(req: FastifyRequest, reply: FastifyReply) {
 
   const product = await catalog.repositories.product.getById(id, ctx);
   if (!product) {
-    return reply.code(404).send({ success: false, error: 'Product not found' });
+    throw new NotFoundError('Product not found');
   }
 
   const flow = getFlowEngineOrNull();
   if (!flow) {
-    return reply.send({
-      success: true,
-      data: { productId: id, totalQuantity: 0, synced: false, errors: ['Flow engine not available'] },
-    });
+    return reply.send({ productId: id, totalQuantity: 0, synced: false, errors: ['Flow engine not available'] });
   }
 
-  const orgId =
-    (req as unknown as { scope?: { organizationId?: string } }).scope?.organizationId ||
-    (req.headers['x-organization-id'] as string);
-  const flowCtx = buildFlowContext(orgId);
+  const flowCtx = await buildHeadOfficeFlowContext('stock-sync');
+  if (!flowCtx) {
+    return reply.send({
+      productId: id,
+      totalQuantity: 0,
+      synced: false,
+      errors: ['No head-office branch configured — storefront stock unavailable'],
+    });
+  }
 
   const hasVariants = product.variants && product.variants.length > 0;
   let totalQuantity = 0;
@@ -109,8 +131,5 @@ export async function syncStock(req: FastifyRequest, reply: FastifyReply) {
     ctx,
   );
 
-  return reply.send({
-    success: true,
-    data: { productId: id, totalQuantity, variantQuantities, synced: true },
-  });
+  return reply.send({ productId: id, totalQuantity, variantQuantities, synced: true });
 }

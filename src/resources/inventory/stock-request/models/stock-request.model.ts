@@ -1,3 +1,4 @@
+import type { ApprovalChain } from '@classytic/primitives/approval';
 import mongoose, { type HydratedDocument, type Model, Schema } from 'mongoose';
 import { InventoryCounter } from '../../flow/counter-bridge.js';
 
@@ -63,6 +64,16 @@ export interface IStockRequest {
   expectedDate?: Date;
   notes?: string;
   reviewNotes?: string;
+  /**
+   * Embedded approval chain (P7). Attached via the `submit_for_approval`
+   * action and advanced by `decide`. The terminal approval is captured by
+   * the `withApprovalChain` preset, which calls back into `onApproved` to
+   * flip `status` and run the kernel-side allocation work.
+   */
+  approvals?: ApprovalChain | null;
+  /** Policy that produced the chain when matrix-driven submit was used. */
+  approvalPolicyId?: string | null;
+  approvalPolicyVersion?: number | null;
   createdAt?: Date;
   updatedAt?: Date;
   // Virtuals
@@ -199,12 +210,16 @@ const stockRequestSchema = new Schema<IStockRequest, StockRequestModel>(
     reviewedAt: Date,
     transfer: {
       type: Schema.Types.ObjectId,
-      ref: 'Transfer',
+      ref: 'StockTransfer',
     },
     reason: String,
     expectedDate: Date,
     notes: String,
     reviewNotes: String,
+    // P7 — primitives owns the chain shape, store as Mixed.
+    approvals: { type: Schema.Types.Mixed, default: null },
+    approvalPolicyId: { type: String, default: null },
+    approvalPolicyVersion: { type: Number, default: null },
   },
   { timestamps: true },
 );

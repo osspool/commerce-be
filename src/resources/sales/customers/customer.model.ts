@@ -2,6 +2,7 @@ import type { ContactInfo, Gender, PersonName } from '@classytic/primitives/pers
 import { formatDisplayName, formatFullName } from '@classytic/primitives/person';
 import mongoose, { type HydratedDocument, Schema, type Types } from 'mongoose';
 import timelineAuditPlugin from 'mongoose-timeline-audit';
+import { hasUsableName } from './customer.name-utils.js';
 
 export interface IProviderAreaIds {
   redx?: number;
@@ -323,11 +324,18 @@ customerSchema.virtual('defaultAddress').get(function (this: CustomerDocument) {
   return this.addresses.find((a: IAddress) => a.isDefault) || this.addresses[0];
 });
 
+// `hasUsableName` lives in `customer.name-utils.ts` — shared between the
+// model virtuals (read boundary, defense in depth) and the repository
+// (write boundary, prevents token-as-name from being persisted). Returning
+// `undefined` from the virtuals when the name is empty collapses into the
+// FE's `|| "-"` fallback — see `commerce/customers/dashboard/customer-columns.jsx`.
 customerSchema.virtual('fullName').get(function (this: CustomerDocument) {
+  if (!hasUsableName(this.name)) return undefined;
   return formatFullName(this.name);
 });
 
 customerSchema.virtual('displayName').get(function (this: CustomerDocument) {
+  if (!hasUsableName(this.name)) return undefined;
   return formatDisplayName(this.name);
 });
 
@@ -374,7 +382,7 @@ function backfillCustomerVirtuals(docs: unknown): void {
     // Hydrated Documents have an internal `$__` state object — skip them.
     if ('$__' in (doc as Record<string, unknown>)) continue;
     const target = doc as Record<string, unknown> & { name?: PersonName };
-    if (target.name) {
+    if (target.name && hasUsableName(target.name)) {
       if (target.fullName == null) target.fullName = formatFullName(target.name);
       if (target.displayName == null) target.displayName = formatDisplayName(target.name);
     }

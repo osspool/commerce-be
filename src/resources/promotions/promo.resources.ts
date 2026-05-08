@@ -15,7 +15,8 @@
  * Same pattern as pricelist.resource.ts and order.resource.ts.
  */
 
-import { createMongooseAdapter, defineResource } from '@classytic/arc';
+import { defineResource } from '@classytic/arc';
+import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { ArcError, handleRaw } from '@classytic/arc/utils';
 import type { EvaluateInput, GenerateCodesInput, GenerateSingleCodeInput } from '@classytic/promo';
 import type { FastifyReply, FastifyRequest } from 'fastify';

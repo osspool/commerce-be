@@ -68,6 +68,32 @@ export function buildFlowContext(branchId: string | { toString(): string }, acto
 }
 
 /**
+ * Resolve the head-office branch and return a FlowContext scoped to it.
+ *
+ * **Source of truth for online storefront stock.** The public catalog cache
+ * (`product.stockProjection`) is single-valued and shared across all
+ * consumers, so it MUST reflect a single branch. We pick head-office
+ * because that's where online orders fulfill from (sub-branches like
+ * stores hold POS-only retail stock that is NOT sellable online).
+ *
+ * Returns `null` when no head-office branch is configured — callers
+ * should treat that as "no online stock available" rather than fall back
+ * to the caller's branch (falling back is what produced the
+ * "last-sync-wins" cache-corruption bug this helper exists to fix).
+ */
+export async function buildHeadOfficeFlowContext(
+  actorId: string = 'stock-sync',
+): Promise<FlowContext | null> {
+  const branchRepository = (await import('#resources/commerce/branch/branch.repository.js')).default;
+  const ho = (await branchRepository.getHeadOffice()) as { _id?: unknown } | null;
+  if (!ho?._id) return null;
+  return {
+    organizationId: String(ho._id),
+    actorId,
+  };
+}
+
+/**
  * Derive a skuRef from product + variant.
  * Simple products: use product._id as skuRef.
  * Variant products: use variantSku as skuRef.
@@ -114,12 +140,23 @@ export const DEFAULT_LOCATION = 'stock';
 export const VENDOR_LOCATION = 'vendor';
 export const CUSTOMER_LOCATION = 'customer';
 export const ADJUSTMENT_LOCATION = 'adjustment';
+/**
+ * Holding bay for goods in transit on an RMA between customer-receipt and
+ * QC-inspection. Mirrors Odoo `stock_quality_quarantine` / SAP "Quality
+ * Inspection Stock". Goods land here on `order:change.confirmed` when
+ * `metadata.requireInspection: true`, then move to DEFAULT (pass) or
+ * ADJUSTMENT (fail) on the new `inspect` action. quantityOnHand at
+ * RETURN_HOLDING is NOT sellable — the catalog enrichment that surfaces
+ * stock to POS / storefront only sums DEFAULT location.
+ */
+export const RETURN_HOLDING_LOCATION = 'return_holding';
 
 export const SYSTEM_LOCATION_CODES: readonly string[] = [
   DEFAULT_LOCATION,
   VENDOR_LOCATION,
   CUSTOMER_LOCATION,
   ADJUSTMENT_LOCATION,
+  RETURN_HOLDING_LOCATION,
 ];
 
 export function isSystemLocationCode(code: string): boolean {

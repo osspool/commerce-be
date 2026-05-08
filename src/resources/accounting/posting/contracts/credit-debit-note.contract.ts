@@ -23,9 +23,10 @@
  */
 
 import type { PostingInput, PostingItem } from '../posting.service.js';
+import { BD } from '../bd-account-codes.js';
 
-const ACCOUNTS_PAYABLE = '2111';
-const ACCOUNTS_RECEIVABLE = '1141';
+const ACCOUNTS_PAYABLE = BD.ap;
+const ACCOUNTS_RECEIVABLE = BD.ar;
 const PURCHASE_RETURNS = '5503';
 const SALES_RETURNS = '4114';
 
@@ -73,7 +74,10 @@ export function validateNoteInput(input: { amount: number; reason: string; refer
   }
 }
 
-export function vendorCreditNoteToPosting(input: VendorCreditNoteInput): PostingInput {
+export function vendorCreditNoteToPosting(
+  input: VendorCreditNoteInput,
+  options: { autoPost?: boolean } = {},
+): PostingInput {
   validateNoteInput(input);
   const items: PostingItem[] = [
     {
@@ -98,11 +102,15 @@ export function vendorCreditNoteToPosting(input: VendorCreditNoteInput): Posting
     items,
     idempotencyKey: `vendor-credit-note-${input.sourceId}-${input.reference}-${input.amount}`,
     sourceRef: { sourceModel: input.sourceModel, sourceId: input.sourceId },
-    autoPost: true,
+    // Correction document — finance reviews reason, reference, and amount.
+    autoPost: options.autoPost ?? false,
   };
 }
 
-export function customerDebitNoteToPosting(input: CustomerDebitNoteInput): PostingInput {
+export function customerDebitNoteToPosting(
+  input: CustomerDebitNoteInput,
+  options: { autoPost?: boolean } = {},
+): PostingInput {
   validateNoteInput(input);
   const items: PostingItem[] = [
     {
@@ -127,7 +135,8 @@ export function customerDebitNoteToPosting(input: CustomerDebitNoteInput): Posti
     items,
     idempotencyKey: `customer-debit-note-${input.sourceId}-${input.reference}-${input.amount}`,
     sourceRef: { sourceModel: input.sourceModel, sourceId: input.sourceId },
-    autoPost: true,
+    // Correction document — finance reviews reason, reference, and amount.
+    autoPost: options.autoPost ?? false,
   };
 }
 

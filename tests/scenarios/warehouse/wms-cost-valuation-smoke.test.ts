@@ -61,7 +61,7 @@ describe('WMS Cost Valuation Smoke — cost ledger via HTTP', () => {
       headers: h(),
     });
     expect(nodesRes.statusCode).toBe(200);
-    nodeId = String(JSON.parse(nodesRes.body).data[0]._id);
+    nodeId = String(JSON.parse(nodesRes.body)[0]._id);
 
     const locsRes = await server.inject({
       method: 'GET',
@@ -69,7 +69,7 @@ describe('WMS Cost Valuation Smoke — cost ledger via HTTP', () => {
       headers: h(),
     });
     expect(locsRes.statusCode).toBe(200);
-    const locs = JSON.parse(locsRes.body).data as Array<{ _id: string; type: string }>;
+    const locs = JSON.parse(locsRes.body) as Array<{ _id: string; type: string }>;
     const storage = locs.find((l) => l.type === 'storage' || l.type === 'stock') ?? locs[0];
     storageLocId = String(storage._id);
   });
@@ -88,7 +88,7 @@ describe('WMS Cost Valuation Smoke — cost ledger via HTTP', () => {
       },
     });
     expect([200, 201]).toContain(poRes.statusCode);
-    const poId = JSON.parse(poRes.body).data._id;
+    const poId = JSON.parse(poRes.body)._id;
 
     // 2. Approve
     const approveRes = await server.inject({
@@ -122,10 +122,9 @@ describe('WMS Cost Valuation Smoke — cost ledger via HTTP', () => {
     expect(layersRes.statusCode).toBe(200);
 
     const layersBody = JSON.parse(layersRes.body);
-    expect(layersBody.success).toBe(true);
-    expect(layersBody.data.length).toBeGreaterThan(0);
+    expect(layersBody.length).toBeGreaterThan(0);
 
-    const layer = layersBody.data[0];
+    const layer = layersBody[0];
     expect(layer.skuRef).toBe('COST-SMOKE-A');
     expect(layer.unitCost).toBe(12);
     expect(layer.remainingQty).toBe(50);
@@ -140,15 +139,15 @@ describe('WMS Cost Valuation Smoke — cost ledger via HTTP', () => {
     expect(res.statusCode).toBe(200);
 
     const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data).toBeDefined();
+
+    expect(body).toBeDefined();
     // Strict: the previous test just received 50 units @ $12, so the
     // valuation endpoint must return exactly that (no partial consumes
     // have happened since).
-    expect(body.data.totalQuantity).toBe(50);
-    expect(body.data.totalValue).toBe(600);
-    expect(body.data.averageUnitCost).toBe(12);
-    expect(body.data.layerCount).toBe(1);
+    expect(body.totalQuantity).toBe(50);
+    expect(body.totalValue).toBe(600);
+    expect(body.averageUnitCost).toBe(12);
+    expect(body.layerCount).toBe(1);
   });
 
   it('should return layers for a SKU that has no cost history as empty (not 404)', async () => {
@@ -159,10 +158,9 @@ describe('WMS Cost Valuation Smoke — cost ledger via HTTP', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    const body = JSON.parse(res.body);
-    expect(body.success).toBe(true);
-    expect(body.data).toEqual([]);
-    expect(body.total).toBe(0);
+    const body = JSON.parse(res.body) as unknown[];
+
+    expect(body).toEqual([]);
   });
 
   it('should require authentication on cost routes', async () => {

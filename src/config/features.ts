@@ -130,6 +130,7 @@ export const FEATURE_CATALOG: FeatureDefinition[] = [
       enterprise: ['chart_of_accounts', 'journal_entries', 'posting', 'trial_balance', 'reports'],
     },
   },
+  { id: 'orders', name: 'Order Operations', description: 'Quotations, RFQs, blanket orders, RMA workflow', defaultTier: 'standard' },
   { id: 'cms', name: 'CMS', description: 'Content pages', defaultTier: 'standard' },
   { id: 'media', name: 'Media Library', description: 'Image and asset management', defaultTier: 'standard' },
   {

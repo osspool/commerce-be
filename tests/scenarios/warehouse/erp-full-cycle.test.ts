@@ -218,7 +218,7 @@ describe('Full ERP Business Cycle', () => {
   it('Step 6: Valuation report matches remaining FIFO layers', async () => {
     // HEAD valuation
     const headVal = await flow.services.reporting.stockValuation.generate(
-      ctx(HEAD), { mode: 'layers' },
+      ctx(HEAD), { mode: 'layers', stockableOnly: false },
     );
     // HEAD outbound transfer (stock→customer) DRAINED cost layers via FIFO:
     //   T-Shirt: 100@450 → drained 40 → remaining 60@450. Plus 50@500.
@@ -228,7 +228,7 @@ describe('Full ERP Business Cycle', () => {
 
     // OUTLET valuation
     const outletVal = await flow.services.reporting.stockValuation.generate(
-      ctx(OUTLET), { mode: 'layers' },
+      ctx(OUTLET), { mode: 'layers', stockableOnly: false },
     );
     // OUTLET T-Shirt: started 40@450, sold 15 (drained to 25@450),
     //   damaged 3 (adjustment stock→adjustment drains FIFO → 22@450)
@@ -297,10 +297,10 @@ describe('Full ERP Business Cycle', () => {
 
   it('Step 9: Company-wide valuation = HEAD + OUTLET remaining value', async () => {
     const headVal = await flow.services.reporting.stockValuation.generate(
-      ctx(HEAD), { mode: 'layers' },
+      ctx(HEAD), { mode: 'layers', stockableOnly: false },
     );
     const outletVal = await flow.services.reporting.stockValuation.generate(
-      ctx(OUTLET), { mode: 'layers' },
+      ctx(OUTLET), { mode: 'layers', stockableOnly: false },
     );
 
     // After Step 8: HEAD tshirt layers fully consumed, jacket 30@1200 remains.
