@@ -17,10 +17,13 @@
  * `../posting/partner-posting.helper.ts` so A/P stays in lockstep with A/R.
  */
 
+import { calculateVDS } from '@classytic/bd-tax';
 import { requireRoles } from '@classytic/arc/permissions';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import mongoose from 'mongoose';
 import { JournalEntry } from '../accounting.engine.js';
+import WithholdingCertificate from '../withholding/withholding-certificate.model.js';
+import { buildCertificateData } from '../withholding/withholding-certificate.auto.js';
 import {
   assertPositiveIntegerPaisa,
   getIds,
@@ -138,7 +141,135 @@ async function postBillAction(purchaseId: string, data: Record<string, unknown>,
     { autoPost: true },
   );
   const branchId = String(purchase.branch || '') || orgId;
-  return createPosting(branchId, { ...posting, actorId });
+  const result = await createPosting(branchId, { ...posting, actorId });
+
+  // Auto-generate a VDS certificate stub when withholding was applied.
+  // Finance staff fills in challanNumber when they remit to NBR.
+  if (withholdVds && taxTotalPaisa > 0) {
+    const vdsCalc = calculateVDS(taxTotalPaisa, vdsRate ?? 0.5);
+    if (vdsCalc.vdsAmount > 0) {
+      let supplierTin: string | undefined;
+      let supplierName: string | undefined;
+      try {
+        const sup = await mongoose.connection
+          .db!.collection('suppliers')
+          .findOne(
+            { _id: new mongoose.Types.ObjectId(String(purchase.supplier)) },
+            { projection: { bin: 1, tin: 1, name: 1 } },
+          );
+        supplierTin = (sup?.bin ?? sup?.tin) as string | undefined;
+        supplierName = sup?.name as string | undefined;
+      } catch {
+        // non-fatal — cert will use UNKNOWN placeholders
+      }
+      const certData = buildCertificateData({
+        organizationId: branchId ?? orgId ?? '',
+        supplierId: String(purchase.supplier),
+        purchaseId,
+        journalEntryId: result.journalEntryId,
+        grossAmount: taxTotalPaisa,
+        vdsRate: vdsRate ?? 0.5,
+        vdsAmount: vdsCalc.vdsAmount,
+        date: new Date(),
+        supplierTin,
+        supplierName,
+      });
+      try {
+        await WithholdingCertificate.create(certData);
+      } catch {
+        // Duplicate key on certificateNumber = idempotent replay; swallow.
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * POST /accounting/vendor-bills/bulk-pay
+ * Apply one payment across multiple open bills.
+ *
+ * Body: { allocations: [{ billJeId, amount }, ...], fromAccountCode?, reference?, date? } — amounts in paisa
+ *
+ * Per-allocation amount is asserted against THAT bill's open balance; the
+ * full payment is rejected (all-or-nothing) if any line fails — the
+ * accounting posting for each allocation is created in order, and a
+ * Mongo session would ideally wrap them. We use sequential creates with
+ * idempotent group settlement; on partial failure, the caller sees the
+ * failed allocation index and can retry the remainder.
+ */
+export async function bulkPayHandler(
+  req: RequestWithExtras & { body?: unknown },
+  reply: { send: (x: unknown) => unknown },
+): Promise<unknown> {
+  const { orgId, actorId } = getIds(req);
+  const body = (req.body ?? {}) as {
+    allocations?: Array<{ billJeId: string; amount: number }>;
+    fromAccountCode?: string;
+    reference?: string;
+    date?: string;
+  };
+
+  const allocations = body.allocations ?? [];
+  if (!Array.isArray(allocations) || allocations.length === 0) {
+    throw Object.assign(new Error('allocations array is required'), {
+      statusCode: 400,
+      code: 'ALLOCATIONS_REQUIRED',
+    });
+  }
+  if (allocations.length > 50) {
+    throw Object.assign(new Error('Cannot allocate to more than 50 bills in one call'), {
+      statusCode: 400,
+      code: 'TOO_MANY_ALLOCATIONS',
+    });
+  }
+
+  // Pre-flight: load every bill context + validate amount against open balance
+  // BEFORE creating any posting. Atomic-ish: if any fails, no postings created.
+  const contexts: Array<{ ctx: PartnerContext; amount: number; billJeId: string }> = [];
+  for (let i = 0; i < allocations.length; i++) {
+    const { billJeId, amount } = allocations[i] ?? { billJeId: '', amount: 0 };
+    if (!billJeId) {
+      throw Object.assign(new Error(`allocations[${i}].billJeId required`), {
+        statusCode: 400,
+        code: 'ALLOCATION_INVALID',
+      });
+    }
+    assertPositiveIntegerPaisa(amount);
+    const ctx = await loadBillContext(billJeId);
+    const open = await computeOpenBalance(ctx.groupKey);
+    if (amount > open) {
+      throw Object.assign(
+        new Error(`allocations[${i}] amount ${amount} exceeds open balance ${open} for bill ${billJeId}`),
+        { statusCode: 400, code: 'AMOUNT_EXCEEDS_OPEN_BALANCE', allocationIndex: i },
+      );
+    }
+    contexts.push({ ctx, amount, billJeId });
+  }
+
+  const date = body.date ? new Date(body.date) : new Date();
+  const results: Array<{ billJeId: string; journalEntryId: string; settled: boolean }> = [];
+
+  for (const { ctx, amount, billJeId } of contexts) {
+    const posting = vendorPaymentToPosting({
+      purchaseId: ctx.sourceId,
+      supplierId: ctx.partnerId,
+      amount,
+      date,
+      fromAccountCode: body.fromAccountCode,
+      reference: body.reference,
+    });
+    const result = await createPosting(ctx.branchId || orgId, { ...posting, actorId });
+    const settled = await maybeSettleGroup(ctx.groupKey);
+    results.push({
+      billJeId,
+      journalEntryId: (result as { journalEntryId: string }).journalEntryId,
+      settled,
+    });
+  }
+
+  const totalPaid = contexts.reduce((s, c) => s + c.amount, 0);
+  return reply.send({ allocations: results, totalPaid, billCount: results.length });
 }
 
 /** id = bill JE _id. Records a payment + atomically settles if net=0. */

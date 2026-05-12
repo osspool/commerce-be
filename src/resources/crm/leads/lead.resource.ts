@@ -4,7 +4,7 @@ import { QueryParser } from '@classytic/mongokit';
 import { z } from 'zod';
 import crmPermissions from '#config/permissions/crm.js';
 import { orgScoped } from '#shared/presets/index.js';
-import { convertLead, disqualifyLead, markLeadContacted, nurtureLead, qualifyLead } from './lead.actions.js';
+import { convertLead, disqualifyLead, markLeadContacted, nurtureLead, qualifyLead, rescoreLead } from './lead.actions.js';
 import CrmLead from './lead.model.js';
 import crmLeadRepository from './lead.repository.js';
 
@@ -83,6 +83,11 @@ const crmLeadResource = defineResource({
       handler: convertLead,
       permissions: crmPermissions.lead.update,
       schema: convertBody,
+    },
+    rescore: {
+      handler: rescoreLead,
+      permissions: crmPermissions.lead.update,
+      schema: emptyBody,
     },
   },
 });

@@ -12,6 +12,7 @@
 
 import { defineControlAccountResource } from '../_shared/control-account-resource.factory.js';
 import {
+  bulkPayHandler,
   vendorBillActionPermissions,
   vendorBillActions,
 } from './vendor-bill.actions.js';
@@ -29,6 +30,17 @@ const vendorBillResource = defineControlAccountResource({
 
   actions: vendorBillActions,
   actionPermissions: vendorBillActionPermissions,
+
+  extraRoutes: [
+    {
+      method: 'POST' as const,
+      path: '/bulk-pay',
+      summary: 'Apply one payment across multiple open vendor bills',
+      permissions: vendorBillActionPermissions,
+      raw: true,
+      handler: bulkPayHandler,
+    },
+  ],
 });
 
 export default vendorBillResource;

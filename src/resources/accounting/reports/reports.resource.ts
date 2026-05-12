@@ -19,6 +19,7 @@ import {
   getIncomeStatement,
   getPartnerLedger,
   getTrialBalance,
+  runRevaluation,
 } from './reports.handlers.js';
 import { budgetVsActualQuerySchema, dateQuerySchema } from './reports.utils.js';
 
@@ -130,6 +131,15 @@ routes.push({
   raw: true,
   schema: { querystring: budgetVsActualQuerySchema },
   handler: getBudgetVsActual,
+});
+
+routes.push({
+  method: 'POST',
+  path: '/revaluation',
+  summary: 'Foreign exchange revaluation — compute unrealized gain/loss, optionally post JE',
+  permissions: authenticated,
+  raw: true,
+  handler: runRevaluation,
 });
 
 const reportsResource = defineResource({

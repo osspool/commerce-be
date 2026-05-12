@@ -85,3 +85,7 @@ export const abandonedSchema = {
 export const userIdSchema = {
   params: z.object({ userId: z.string().min(1) }),
 };
+
+export const mergeCartSchema = {
+  body: z.object({ sourceCartId: z.string().min(1) }),
+};

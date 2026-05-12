@@ -5,7 +5,7 @@
  * All math/parsing lives in reports.utils.ts and is unit-tested separately.
  */
 
-import { generatePartnerLedger } from '@classytic/ledger';
+import { generatePartnerLedger, generateRevaluation } from '@classytic/ledger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type mongoose from 'mongoose';
 import { Account, accounting, JournalEntry } from '../accounting.engine.js';
@@ -302,4 +302,49 @@ export async function getDaybook(req: DaybookReq, reply: FastifyReply) {
     ...(limit ? { limit: Number(limit) } : {}),
   });
   return result;
+}
+
+// ─── FX Revaluation (gap #12) ──────────────────────────────────────────────
+
+type RevaluationBody = {
+  asOfDate?: string;
+  rates?: Array<{ currency: string; rate: number }>;
+  unrealizedGainLossAccountId?: string;
+  generateEntry?: boolean;
+};
+
+type RevaluationReq = FastifyRequest<{ Body: RevaluationBody; Querystring: { branchId?: string } }> & {
+  scope?: { organizationId?: string };
+};
+
+export async function runRevaluation(req: RevaluationReq, reply: FastifyReply) {
+  const orgId = requireOrgId(req);
+  const body = (req.body ?? {}) as RevaluationBody;
+
+  if (!body.asOfDate) throw new ValidationError("'asOfDate' is required");
+  if (!Array.isArray(body.rates) || body.rates.length === 0)
+    throw new ValidationError("'rates' must be a non-empty array");
+  if (body.generateEntry && !body.unrealizedGainLossAccountId)
+    throw new ValidationError("'unrealizedGainLossAccountId' is required when generateEntry is true");
+
+  const result = await generateRevaluation(
+    {
+      AccountModel: Account as never,
+      JournalEntryModel: JournalEntry as never,
+      country: accounting.country,
+      orgField: 'organizationId',
+      baseCurrency: 'BDT',
+    },
+    {
+      organizationId: toObjectId(orgId),
+      asOfDate: new Date(body.asOfDate),
+      rates: body.rates,
+      unrealizedGainLossAccountId: body.unrealizedGainLossAccountId
+        ? toObjectId(body.unrealizedGainLossAccountId)
+        : undefined,
+      generateEntry: body.generateEntry ?? false,
+    },
+  );
+
+  reply.send(result);
 }

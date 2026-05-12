@@ -8,6 +8,7 @@ import {
   adminListSchema,
   cancelCheckoutSchema,
   commitCheckoutSchema,
+  mergeCartSchema,
   removeItemSchema,
   startCheckoutSchema,
   updateItemSchema,
@@ -67,6 +68,17 @@ const cartResource = defineResource({
       summary: 'Clear cart',
       permissions: permissions.cart.access,
       raw: true,
+    },
+
+    // ─── Guest merge ───────────────────────────────────────────
+    {
+      method: 'POST',
+      path: '/merge',
+      handler: ctrl.mergeCart,
+      summary: 'Merge guest/session cart into authenticated user cart on login',
+      permissions: permissions.cart.access,
+      raw: true,
+      schema: mergeCartSchema,
     },
 
     // ─── Checkout ──────────────────────────────────────────────

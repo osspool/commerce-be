@@ -1,6 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 import { getCrmContext } from '../context-helpers.js';
 import { buildCrmServices } from '../crm-engine.js';
+import CrmLead from './lead.model.js';
 
 /**
  * Resolve CRM services for an incoming request. Prefers the
@@ -54,6 +55,30 @@ interface ConvertPayload {
   opportunityName?: unknown;
   amount?: unknown;
   expectedCloseAt?: unknown;
+}
+
+/**
+ * Compute a simple lead score from available fields and persist it.
+ * Scoring: email +10, phone +5, companyName +20, source +5,
+ *          status=contacted +15, status=qualified +30.
+ */
+export async function rescoreLead(id: string, _data: Record<string, unknown>, req: FastifyRequest): Promise<unknown> {
+  const services = resolveServices(req);
+  if (!services) throw new Error('CRM engine is not enabled (set ENABLE_CRM=true)');
+
+  const lead = await CrmLead.findById(id).lean();
+  if (!lead) throw new Error(`Lead ${id} not found`);
+
+  let score = 0;
+  if (lead.email) score += 10;
+  if (lead.phone) score += 5;
+  if (lead.companyName) score += 20;
+  if (lead.source) score += 5;
+  if (lead.status === 'contacted') score += 15;
+  if (lead.status === 'qualified') score += 30;
+
+  await CrmLead.findByIdAndUpdate(id, { score });
+  return { id, score };
 }
 
 export async function convertLead(id: string, data: Record<string, unknown>, req: FastifyRequest): Promise<unknown> {

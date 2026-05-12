@@ -201,6 +201,27 @@ export async function getAbandonedCarts(req: FastifyRequest, reply: FastifyReply
   reply.send({ data, metadata: { daysOld: Number(daysOld), cutoff: cutoff.toISOString() } });
 }
 
+export async function mergeCart(req: FastifyRequest, reply: FastifyReply) {
+  const { sourceCartId } = req.body as { sourceCartId: string };
+  const { mergeDrafts } = await import('@classytic/cart');
+  const ctx = buildCartContext(req);
+
+  try {
+    const result = await mergeDrafts({
+      repo: draft() as Parameters<typeof mergeDrafts>[0]['repo'],
+      sourcePublicId: sourceCartId,
+      targetActorRef: ctx.actorRef,
+      ctx,
+    });
+    reply.send(result);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('not found or not active')) {
+      throw new NotFoundError('Source cart not found');
+    }
+    throw err;
+  }
+}
+
 export async function getUserCart(req: FastifyRequest, reply: FastifyReply) {
   const { userId } = req.params as { userId: string };
   const ctx = buildCartContext(req, { actorRef: userId });

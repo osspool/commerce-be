@@ -271,6 +271,19 @@ const defaultShiftPolicySchema = new Schema(
 );
 
 /**
+ * Company identity — company-wide fields used in reports, invoices, and
+ * Mushak filings. Distinct from `platformName` (storefront display name)
+ * and `vat.registeredName` (VAT-specific entity name).
+ */
+const companySchema = new Schema(
+  {
+    legalName: { type: String, trim: true },
+    logo: { type: String, trim: true },
+  },
+  { _id: false },
+);
+
+/**
  * Platform Config Schema
  * Singleton document storing all platform-wide settings
  */
@@ -279,6 +292,22 @@ const platformConfigSchema = new Schema(
     platformName: {
       type: String,
       default: process.env.PLATFORM_NAME || 'My Store',
+    },
+
+    company: { type: companySchema, default: () => ({}) },
+
+    /** ISO 4217 currency code. Defaults to BDT. Used by reports and accounting. */
+    baseCurrency: { type: String, trim: true, default: 'BDT' },
+
+    /**
+     * Month (1-12) when the fiscal year starts. Bangladesh fiscal year
+     * starts in July (7). Used by financial report date-range defaults.
+     */
+    fiscalYearStartMonth: {
+      type: Number,
+      default: 7,
+      min: [1, 'fiscalYearStartMonth must be 1-12'],
+      max: [12, 'fiscalYearStartMonth must be 1-12'],
     },
 
     /**

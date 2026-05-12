@@ -66,6 +66,13 @@ export interface ControlAccountResourceConfig {
   actions: ResourceActions;
   /** Per-action permissions forwarded to `defineResource({ actionPermissions })`. */
   actionPermissions: ResourceActionPermissions;
+  /**
+   * Extra routes appended to the auto-generated `/open` route. Use for
+   * non-CRUD, non-action endpoints (e.g. bulk-pay, summaries) that the
+   * factory doesn't know about.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: arc route definitions are flexible
+  extraRoutes?: any[];
 }
 
 type JournalRepo = typeof journalEntryRepository;
@@ -210,6 +217,7 @@ export function defineControlAccountResource(config: ControlAccountResourceConfi
         // biome-ignore lint/suspicious/noExplicitAny: Arc's raw handler typing is permissive
         handler: openItemsHandler as any,
       },
+      ...(config.extraRoutes ?? []),
     ],
   });
 }

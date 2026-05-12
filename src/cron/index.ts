@@ -28,6 +28,7 @@ import {
 import { getCartEngine } from '#resources/sales/cart/cart.engine.js';
 import { registerLoyaltyEventHandlers } from '#resources/sales/loyalty/loyalty.events.js';
 import { getLoyaltyEngine } from '#resources/sales/loyalty/loyalty.plugin.js';
+import { ensureOrderEngine } from '#resources/sales/orders/order.engine.js';
 import { outbox } from '#shared/outbox/index.js';
 import { type CronJob, type CronRunner, startCronJob } from './define-job.js';
 
@@ -107,6 +108,21 @@ const jobs: ReadonlyArray<CronJob> = [
   // The workflow is self-rescheduling (process → sleep 1h → goto process) and
   // gets crash-recovery + retry semantics for free. See
   // `resources/payments/subscription/subscription.workflows.ts`.
+  {
+    name: 'quotation.expiry',
+    intervalMs: ONE_HOUR,
+    jitterMs: 5 * ONE_MINUTE,
+    run: async () => {
+      const engine = await ensureOrderEngine();
+      if (!engine.repositories.quotation) return;
+      const { expiredCount } = await engine.repositories.quotation.expireDue(new Date(), {
+        actorRef: 'system:cron:quotation-expiry',
+        actorKind: 'cron',
+        correlationId: randomUUID(),
+      });
+      if (expiredCount > 0) logger.info({ expiredCount }, 'Quotation expiry sweep');
+    },
+  },
   {
     name: 'cart.checkout.sweep',
     intervalMs: ONE_DAY,

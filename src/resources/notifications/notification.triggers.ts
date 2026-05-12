@@ -277,6 +277,84 @@ export const NOTIFICATION_TRIGGERS: NotificationTrigger[] = [
     }),
   },
 
+  // ── Payment ─────────────────────────────────────────────
+
+  {
+    // Fires on every payment state change; extract filters to failed-only
+    // so admin is only notified on actionable failures, not every update.
+    event: 'order:payment.state_updated',
+    type: 'payment:failed',
+    template: {
+      title: 'Payment Failed — Order #{orderNumber}',
+      message: 'Payment could not be collected. Reason: {reason}',
+      link: '/dashboard/orders/{orderId}',
+      entityType: 'order',
+    },
+    recipients: ['admin', 'branch_manager'],
+    priority: 'high',
+    extract: (p) => {
+      if (p.paymentState?.chargeStatus !== 'failed') return null;
+      return {
+        organizationId: p.organizationId,
+        variables: {
+          orderId: p.orderId || '',
+          orderNumber: p.orderNumber || '',
+          reason: p.paymentState?.failureReason || p.paymentState?.errorCode || 'Unknown',
+        },
+        triggeredBy: p.triggeredBy,
+      };
+    },
+  },
+
+  // ── Loyalty ─────────────────────────────────────────────
+
+  {
+    event: 'loyalty.points.expiring_soon',
+    type: 'loyalty:points_expiring',
+    template: {
+      title: 'Points expiring soon',
+      message: '{points} loyalty points will expire. Redeem before they are lost.',
+      link: '/dashboard/loyalty',
+      entityType: 'loyalty',
+    },
+    recipients: ['admin', 'branch_manager'],
+    extract: (p) => {
+      if (!p.organizationId) return null;
+      return {
+        organizationId: p.organizationId as string,
+        variables: {
+          points: String(p.pointsExpired ?? p.totalPoints ?? '0'),
+          membersAffected: String(p.membersAffected ?? ''),
+        },
+      };
+    },
+  },
+
+  {
+    // Escalation trigger on stock:low — routes to admins so a purchase order
+    // can be raised. Distinct type ('stock:low_escalation') so it's
+    // independently filterable from the branch-staff informational alert.
+    event: 'stock:low',
+    type: 'stock:low_escalation',
+    template: {
+      title: 'Stock critical — {productName}',
+      message: 'Only {quantity} units remain. Raise a purchase order.',
+      link: '/dashboard/inventory/purchase-orders',
+      entityType: 'product',
+    },
+    recipients: ['admin'],
+    priority: 'high',
+    sendEmail: true,
+    extract: (p) => ({
+      organizationId: p.organizationId,
+      variables: {
+        productId: p.productId || '',
+        productName: p.productName || '',
+        quantity: String(p.quantity ?? '0'),
+      },
+    }),
+  },
+
   // ── Team ────────────────────────────────────────────────
 
   {

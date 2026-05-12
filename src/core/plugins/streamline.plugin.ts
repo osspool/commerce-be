@@ -22,30 +22,11 @@ import { streamlinePlugin } from '@classytic/arc/integrations/streamline';
 import {
   createContainer,
   type StreamlineContainer,
-  WorkflowRunModel,
 } from '@classytic/streamline';
 import type { FastifyPluginAsync } from 'fastify';
 import config from '#config/index.js';
 import { eventTransport } from '#lib/events/EventBus.js';
 import logger from '#lib/utils/logger.js';
-
-const DAY_MS = 86_400;
-
-async function ensureTtlIndex(ttlDays: number): Promise<void> {
-  if (!Number.isFinite(ttlDays) || ttlDays <= 0) return;
-  const expireAfterSeconds = Math.floor(ttlDays * DAY_MS);
-  // Partial filter: only purge terminal runs. Active runs must never be deleted.
-  await WorkflowRunModel.collection.createIndex(
-    { updatedAt: 1 },
-    {
-      name: 'streamline_ttl_terminal_runs',
-      expireAfterSeconds,
-      partialFilterExpression: {
-        status: { $in: ['done', 'failed', 'cancelled'] },
-      },
-    },
-  );
-}
 
 const plugin: FastifyPluginAsync = async (fastify) => {
   if (!config.streamline.enabled) {
@@ -61,9 +42,18 @@ const plugin: FastifyPluginAsync = async (fastify) => {
   //   2. `bridgeStepEvents` + `enableStreaming` in arc's `streamlinePlugin`
   //      work (they need `wf.container.eventBus` which is now shared).
   //   3. Telemetry subscribers get workflow events alongside domain events.
+  //
+  // `retention` — streamline 2.3.2+: passes TTL + stale-sweeper config so
+  // `container.syncRetentionIndexes()` creates the correct MongoDB indexes
+  // (TTL on terminal runs + tenant-compound index). We no longer call
+  // `WorkflowRunModel.collection.createIndex` manually.
   const container: StreamlineContainer = createContainer({
     eventBus: 'global',
     eventTransport,
+    retention: {
+      terminalRunsTtlSeconds: Math.floor(config.streamline.ttlDays * 86_400),
+      staleHeartbeatThresholdMs: 30 * 60 * 1000,
+    },
   });
 
   // ── Collect workflows from domain modules ────────────────────────────────
@@ -148,21 +138,16 @@ const plugin: FastifyPluginAsync = async (fastify) => {
       });
   }
 
-  // ── TTL index for terminal runs ──────────────────────────────────────────
-  // Mongo's TTL monitor will auto-delete `done | failed | cancelled` runs
-  // older than `streamline.ttlDays`. Safe to call repeatedly; `createIndex`
-  // is idempotent for identical specs.
-  //
-  // Fire-and-log — DO NOT await. Atlas index creation can take 10-30s on
-  // a fresh collection; awaiting here exceeds Fastify's default plugin
-  // timeout and crashes boot with `AVV_ERR_PLUGIN_EXEC_TIMEOUT`. The
-  // index is opportunistic (Mongo's TTL monitor only purges what's
-  // there); a few seconds of "no auto-purge" while it builds is
-  // strictly preferable to refusing to serve traffic at all.
-  ensureTtlIndex(config.streamline.ttlDays).catch((err) => {
+  // ── Retention indexes (TTL + tenant compound) ────────────────────────────
+  // streamline 2.3.2+: `container.syncRetentionIndexes()` creates the TTL
+  // index on terminal runs AND tenant-prefixed compound indexes. Fire-and-
+  // log: Atlas index creation can take 10-30s on a fresh collection;
+  // awaiting here would exceed Fastify's plugin timeout. Idempotent — safe
+  // to call on every boot.
+  container.syncRetentionIndexes?.().catch((err: unknown) => {
     fastify.log.warn(
       { err, ttlDays: config.streamline.ttlDays },
-      'Streamline: failed to ensure TTL index (background)',
+      'Streamline: failed to sync retention indexes (background)',
     );
   });
 

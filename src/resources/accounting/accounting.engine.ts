@@ -303,10 +303,18 @@ export const accounting = createAccountingEngine({
         actionIfExceeded: {
           type: String,
           enum: ['stop', 'warn', 'ignore'],
-          default: 'ignore',
+          // Company-wide default sourced from BUDGET_DEFAULT_ENFORCEMENT
+          // env (config.accounting.budget.defaultActionIfExceeded). Per-budget
+          // override at create time. Default falls back to `ignore` if unset.
+          default: config.accounting.budget.defaultActionIfExceeded,
         },
         /** Threshold % at which actionIfExceeded fires. 100 = post-causes-overage; 80 = early-warning at 80% utilization. */
-        thresholdPercent: { type: Number, default: 100, min: 1, max: 200 },
+        thresholdPercent: {
+          type: Number,
+          default: config.accounting.budget.defaultThresholdPercent,
+          min: 1,
+          max: 200,
+        },
       },
       extraIndexes: [
         { fields: { organizationId: 1, status: 1 }, options: {} },

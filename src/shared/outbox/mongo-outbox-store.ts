@@ -175,6 +175,28 @@ export class MongoOutboxStore implements OutboxStore {
     );
   }
 
+  async getDeadLettered(limit: number) {
+    if (!isConnected()) return [];
+    const docs = await OutboxEvent.find({ status: 'dead_letter' })
+      .sort({ createdAt: 1 })
+      .limit(limit)
+      .lean();
+    return docs.map((doc) => {
+      const lastError = doc.lastError as { message?: string; code?: string; at?: Date } | null;
+      const failedAt = lastError?.at ?? new Date(0);
+      return {
+        event: toDomainEvent(doc as Record<string, unknown>),
+        error: {
+          message: lastError?.message ?? 'unknown',
+          code: lastError?.code ?? undefined,
+        },
+        attempts: (doc.attempts as number) ?? 0,
+        firstFailedAt: (doc.createdAt as Date) ?? failedAt,
+        lastFailedAt: failedAt,
+      };
+    });
+  }
+
   // No manual `purge()` — the `{ deliveredAt: 1 }` TTL index above
   // (expireAfterSeconds: 7 days) already auto-purges delivered events.
   // A cron sweep would just race the TTL monitor on the same docs.

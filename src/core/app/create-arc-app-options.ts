@@ -8,6 +8,7 @@ import { FlowError } from "@classytic/flow/domain";
 import { AccountingError } from "@classytic/ledger";
 import { IllegalTransitionError } from "@classytic/primitives/state-machine";
 import config from "#config/index.js";
+import { getEnabledResourceDirs } from "#config/resource-manifest.js";
 import type { AppContext } from "#core/app/context.js";
 import { getAppPreset } from "#core/app/get-app-preset.js";
 import { registerAfterResources } from "#core/app/register-after-resources.js";
@@ -90,13 +91,6 @@ const flowErrorMappers: ErrorMapper[] = [
   accountingErrorMapper,
 ];
 
-// Resolve the resource dir as a URL relative to *this* file so the same value
-// picks src/resources under tsx (dev) and dist/resources under
-// `node dist/index.js` (prod). The old string form `'src/resources'` resolved
-// against process.cwd() and 404'd every /api/v1/* route when the source tree
-// wasn't shipped.
-const RESOURCE_DIR_URL = new URL("../../resources", import.meta.url).href;
-
 interface CreateArcAppOptionsInput {
   resources?: ResourceLike[];
 }
@@ -170,25 +164,24 @@ export function createArcAppOptions({
     },
     resourcePrefix: "/api/v1",
     // Explicit `resources` wins over `resourceDir` per arc 2.11. Tests pass a
-    // pre-loaded array and skip discovery; in normal boot we run the async
-    // factory so catalog-engine-bound resources can receive a live Mongoose
-    // model + mongokit repo through `loadResources({ context })`
-    // (arc 2.11.1). category.resource.ts / product.resource.ts export the
-    // factory form `(ctx) => defineResource(...)` and are picked up by the
-    // same auto-discovery sweep as every other resource — no `exclude` list,
-    // no parallel factory file, no manual push.
+    // pre-loaded array and skip discovery; in normal boot we call loadResources()
+    // per feature-enabled directory (see config/resource-manifest.ts) so disabled
+    // features produce zero routes without touching individual resource files.
+    // category.resource.ts / product.resource.ts use the factory form
+    // `(ctx) => defineResource(...)` and receive the catalog engine via context.
     //
-    // `silent` was removed in arc 2.11.1 — set ARC_SUPPRESS_WARNINGS=1 in
-    // production env to mute the loader's skip / factory-failure warnings.
+    // ARC_SUPPRESS_WARNINGS=1 mutes loader skip/factory-failure warnings in prod.
     strictResourceDir: config.isProduction,
     strictResources: config.isProduction,
     resources:
       resources ??
       (async (): Promise<ResourceLike[]> => {
         const catalog = await ensureCatalogEngine();
-        return loadResources<AppContext>(RESOURCE_DIR_URL, {
-          context: { catalog },
-        });
+        const dirs = getEnabledResourceDirs(import.meta.url);
+        const batches = await Promise.all(
+          dirs.map((dir) => loadResources<AppContext>(dir, { context: { catalog } })),
+        );
+        return batches.flat();
       }),
     plugins: registerInfraPlugins,
     bootstrap: [registerDomainBootstrap],

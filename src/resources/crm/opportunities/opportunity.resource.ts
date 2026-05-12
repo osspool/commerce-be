@@ -4,7 +4,7 @@ import { QueryParser } from '@classytic/mongokit';
 import { z } from 'zod';
 import crmPermissions from '#config/permissions/crm.js';
 import { orgScoped } from '#shared/presets/index.js';
-import { abandonOpportunity, advanceOpportunity, loseOpportunity, winOpportunity } from './opportunity.actions.js';
+import { abandonOpportunity, advanceOpportunity, linkOrderToOpportunity, loseOpportunity, winOpportunity } from './opportunity.actions.js';
 import CrmOpportunity from './opportunity.model.js';
 import crmOpportunityRepository from './opportunity.repository.js';
 
@@ -68,6 +68,11 @@ const crmOpportunityResource = defineResource({
       handler: abandonOpportunity,
       permissions: crmPermissions.opportunity.update,
       schema: emptyBody,
+    },
+    linkOrder: {
+      handler: linkOrderToOpportunity,
+      permissions: crmPermissions.opportunity.update,
+      schema: z.object({ orderId: z.string().min(1) }),
     },
   },
 });

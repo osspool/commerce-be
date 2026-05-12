@@ -23,6 +23,8 @@ export interface ExtraTaxClassEntry {
   };
 }
 
+export type BudgetEnforcementMode = 'stop' | 'warn' | 'ignore';
+
 export interface AccountingConfigSection {
   accounting: {
     enabled: boolean;
@@ -37,7 +39,29 @@ export interface AccountingConfigSection {
      * entry here instead of patching the npm package.
      */
     extraTaxClasses: ExtraTaxClassEntry[];
+    budget: {
+      /**
+       * Company-wide default enforcement mode for new budgets.
+       *   - `stop`   — block JE post that would overage the threshold
+       *   - `warn`   — log + emit `budget.threshold.exceeded`, post anyway
+       *   - `ignore` — informational only (legacy default)
+       * Per-budget `actionIfExceeded` overrides this. Driven by
+       * BUDGET_DEFAULT_ENFORCEMENT env var.
+       */
+      defaultActionIfExceeded: BudgetEnforcementMode;
+      /**
+       * Company-wide default threshold percent (1–200). 100 = enforce on
+       * overage, 80 = early warning at 80% utilization. Per-budget
+       * `thresholdPercent` overrides this.
+       */
+      defaultThresholdPercent: number;
+    };
   };
+}
+
+function parseEnforcementMode(raw: string | undefined): BudgetEnforcementMode {
+  if (raw === 'stop' || raw === 'warn' || raw === 'ignore') return raw;
+  return 'ignore';
 }
 
 const accounting: AccountingConfigSection['accounting'] = {
@@ -45,6 +69,13 @@ const accounting: AccountingConfigSection['accounting'] = {
   fiscalYearStartMonth: parseInt(process.env.FISCAL_YEAR_START_MONTH || '7', 10),
   autoSeedAccounts: process.env.ACCOUNTING_AUTO_SEED !== 'false',
   extraTaxClasses: [],
+  budget: {
+    defaultActionIfExceeded: parseEnforcementMode(process.env.BUDGET_DEFAULT_ENFORCEMENT),
+    defaultThresholdPercent: (() => {
+      const n = parseInt(process.env.BUDGET_DEFAULT_THRESHOLD_PERCENT || '100', 10);
+      return Number.isFinite(n) && n >= 1 && n <= 200 ? n : 100;
+    })(),
+  },
 };
 
 const accountingConfig: AccountingConfigSection = { accounting };

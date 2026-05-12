@@ -12,8 +12,12 @@ can navigate without re-reading the codebase.
 - Cross-link via relative markdown: `[place](order/place.md)`.
 - Update when the linked code changes. If you can't, leave a `<!-- STALE: <date> -->` marker.
 
+## Agent reference (READ FIRST before any audit)
+
+- [CLAUDE.md](CLAUDE.md) — canonical index of implemented features (with test refs), known false positives (with evidence), and genuinely-open gaps. Updated 2026-05-12.
+
 ## Subsystems
 
 - [order/](order/) — order lifecycle, RMA, refund, fulfillment money flow
-
-(append your subsystem here)
+- [features/](features/) — feature flag system, resource manifest, engine dependency graph
+- [erp-gaps.md](erp-gaps.md) — full gap register by subsystem (CRITICAL/MAJOR/MINOR), reviewed 2026-05-12

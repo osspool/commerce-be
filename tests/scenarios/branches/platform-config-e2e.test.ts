@@ -162,6 +162,63 @@ describe('PATCH /platform/config — deep merge', () => {
   });
 });
 
+// ── Gap #17: company profile fields (legalName, logo, baseCurrency, fiscalYearStartMonth)
+// RED: fails until these fields are added to platform.model.ts
+describe('PATCH /platform/config — company profile fields (gap #17)', () => {
+  it('persists company.legalName and company.logo', async () => {
+    const patchRes = await env.server.inject({
+      method: 'PATCH',
+      url: `${API}/platform/config`,
+      headers: env.auth.as('admin').headers,
+      payload: {
+        company: {
+          legalName: 'BigBoss Bangladesh Ltd',
+          logo: 'https://cdn.example.com/logo.png',
+        },
+      },
+    });
+    expect(patchRes.statusCode, patchRes.body).toBe(200);
+    const updated = (parse(patchRes.body) ?? {}) as Record<string, unknown>;
+    const co = updated.company as Record<string, unknown> | undefined;
+    expect(co?.legalName).toBe('BigBoss Bangladesh Ltd');
+    expect(co?.logo).toBe('https://cdn.example.com/logo.png');
+
+    const fromDb = await mongoose.connection.db!
+      .collection('platformconfigs')
+      .findOne({ isSingleton: true });
+    expect((fromDb?.company as Record<string, unknown> | undefined)?.legalName).toBe('BigBoss Bangladesh Ltd');
+  });
+
+  it('persists baseCurrency and fiscalYearStartMonth', async () => {
+    const patchRes = await env.server.inject({
+      method: 'PATCH',
+      url: `${API}/platform/config`,
+      headers: env.auth.as('admin').headers,
+      payload: { baseCurrency: 'BDT', fiscalYearStartMonth: 7 },
+    });
+    expect(patchRes.statusCode, patchRes.body).toBe(200);
+    const updated = (parse(patchRes.body) ?? {}) as Record<string, unknown>;
+    expect(updated.baseCurrency).toBe('BDT');
+    expect(updated.fiscalYearStartMonth).toBe(7);
+
+    const fromDb = await mongoose.connection.db!
+      .collection('platformconfigs')
+      .findOne({ isSingleton: true });
+    expect(fromDb?.baseCurrency).toBe('BDT');
+    expect(fromDb?.fiscalYearStartMonth).toBe(7);
+  });
+
+  it('rejects fiscalYearStartMonth outside 1-12', async () => {
+    const res = await env.server.inject({
+      method: 'PATCH',
+      url: `${API}/platform/config`,
+      headers: env.auth.as('admin').headers,
+      payload: { fiscalYearStartMonth: 13 },
+    });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+  });
+});
+
 describe('GET /platform/permissions/matrix — RBAC introspection', () => {
   it('returns the role list and per-module permission entries', async () => {
     const res = await env.server.inject({

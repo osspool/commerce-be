@@ -1,6 +1,8 @@
 import type { FastifyRequest } from 'fastify';
+import { NotFoundError, ValidationError } from '@classytic/arc/utils';
 import { getCrmContext } from '../context-helpers.js';
 import { buildCrmServices } from '../crm-engine.js';
+import CrmOpportunity from './opportunity.model.js';
 
 function resolveServices(req: FastifyRequest): ReturnType<typeof buildCrmServices> {
   if (typeof req.getCrmServices === 'function') return req.getCrmServices();
@@ -63,6 +65,32 @@ export async function loseOpportunity(
     ...(by ? { by } : {}),
     ...(note ? { note } : {}),
   });
+}
+
+/**
+ * Link a sales order to an opportunity. Uses $set on metadata sub-fields
+ * so other metadata keys (source, campaign, …) survive the update.
+ * Does NOT require the CRM engine — metadata is just a Mongoose field.
+ */
+export async function linkOrderToOpportunity(
+  id: string,
+  data: Record<string, unknown>,
+): Promise<unknown> {
+  const orderId = typeof data.orderId === 'string' ? data.orderId.trim() : '';
+  if (!orderId) throw new ValidationError("'orderId' is required");
+
+  const updated = await CrmOpportunity.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        'metadata.orderId': orderId,
+        'metadata.orderLinkedAt': new Date().toISOString(),
+      },
+    },
+    { new: true },
+  );
+  if (!updated) throw new NotFoundError('Opportunity');
+  return updated.toObject();
 }
 
 export async function abandonOpportunity(
