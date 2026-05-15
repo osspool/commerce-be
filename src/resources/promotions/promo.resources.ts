@@ -186,6 +186,7 @@ export const voucherResource = defineResource({
   displayName: 'Promo Vouchers',
   tag: 'Promotions',
   prefix: '/promotions/vouchers',
+  // Company-wide — a voucher generated at one branch must redeem at any other (same rationale as programResource above).
   tenantField: false,
   adapter: voucherAdapter,
   permissions: {

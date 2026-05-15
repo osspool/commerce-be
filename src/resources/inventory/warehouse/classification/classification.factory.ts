@@ -29,6 +29,7 @@ export function createSkuClassificationResource() {
     displayName: 'SKU Velocity Classification',
     tag: 'Warehouse - Classification',
     prefix: '/inventory/classification',
+    // Per-branch — SKU velocity (ABC/XYZ) is computed from each branch's own move history.
     tenantField: 'organizationId',
 
     adapter: createFlowAdapter(

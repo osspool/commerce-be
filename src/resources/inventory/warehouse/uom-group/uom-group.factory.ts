@@ -36,6 +36,7 @@ export function createUomGroupResource() {
     displayName: 'Unit of Measure Groups',
     tag: 'Warehouse - UoM',
     prefix: '/inventory/uom-groups',
+    // Per-branch — UoM groups are Flow-backed warehouse config, scoped to each branch's stock context.
     tenantField: 'organizationId',
 
     adapter: createFlowAdapter(engine.models.UomGroup, engine.repositories.uomGroup),

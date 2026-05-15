@@ -18,9 +18,9 @@
  * InvoiceRepository methods — see PACKAGE_RULES §30.
  */
 
-import { requireRoles } from '@classytic/arc/permissions';
 import { getOrgId, getUserId } from '@classytic/arc/scope';
 import type { RequestWithExtras } from '@classytic/arc/types';
+import { requireFinanceManager } from '#shared/permissions.js';
 import type { Invoice } from '@classytic/invoice';
 import type { Repository } from '@classytic/mongokit';
 import {
@@ -38,7 +38,7 @@ function ctx(req: RequestWithExtras) {
   };
 }
 
-const financeRoles = requireRoles('admin', 'finance_admin', 'finance_manager');
+const financeRoles = requireFinanceManager();
 
 // ─── Approval gate (submit_for_approval + decide) ──────────────────────────
 //

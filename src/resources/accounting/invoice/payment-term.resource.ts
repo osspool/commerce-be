@@ -15,8 +15,9 @@
 
 import { defineResource } from '@classytic/arc';
 import { createMongooseAdapter } from '@classytic/mongokit/adapter';
-import { requireAuth, requireRoles } from '@classytic/arc/permissions';
+import { requireAuth } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
+import { requireFinanceManager } from '#shared/permissions.js';
 import { computeInstallmentSchedule } from './invoice.handlers.js';
 
 const placeholder = defineResource({
@@ -38,7 +39,7 @@ export function buildPaymentTermResource(
   repo: any,
 ) {
   const authenticated = requireAuth();
-  const financeRoles = requireRoles('admin', 'finance_admin', 'finance_manager');
+  const financeRoles = requireFinanceManager();
 
   const queryParser = new QueryParser({
     maxLimit: 200,

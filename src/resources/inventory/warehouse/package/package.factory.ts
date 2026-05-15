@@ -19,8 +19,10 @@ import type { IRequestContext, IControllerResponse } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
+import { allOf } from '#shared/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
-import { flow, flowCtxFromArcReq, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
+import { requireFlowMode } from '#shared/flow-mode-gate.js';
+import { flow, flowCtxFromArcReq, flowCtxGuard } from '../shared/helpers.js';
 
 class PackageController extends BaseController {
   async create(req: IRequestContext): Promise<IControllerResponse<Record<string, unknown>>> {
@@ -60,14 +62,12 @@ export function createStockPackageResource() {
       maxLimit: 100,
       allowedFilterFields: ['locationId', 'parentPackageId', 'packageUse', 'packageTypeId'],
     }),
-    routeGuards: [standardModeGuard.preHandler],
-
     permissions: {
-      list: permissions.inventory.packageView,
-      get: permissions.inventory.packageView,
-      create: permissions.inventory.packageManage,
-      update: permissions.inventory.packageManage, // ignored (route disabled)
-      delete: permissions.inventory.packageManage,
+      list: allOf(requireFlowMode('standard'), permissions.inventory.packageView),
+      get: allOf(requireFlowMode('standard'), permissions.inventory.packageView),
+      create: allOf(requireFlowMode('standard'), permissions.inventory.packageManage),
+      update: allOf(requireFlowMode('standard'), permissions.inventory.packageManage), // ignored (route disabled)
+      delete: allOf(requireFlowMode('standard'), permissions.inventory.packageManage),
     },
 
     routes: [
@@ -76,7 +76,7 @@ export function createStockPackageResource() {
         path: '/:id/contents',
         summary: 'Get package contents',
         description: 'List child packages and stock quants inside this package.',
-        permissions: permissions.inventory.packageView,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.packageView),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -90,7 +90,7 @@ export function createStockPackageResource() {
         method: 'POST',
         path: '/:id/nest',
         summary: 'Nest a package inside another',
-        permissions: permissions.inventory.packageManage,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.packageManage),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -105,7 +105,7 @@ export function createStockPackageResource() {
         method: 'POST',
         path: '/:id/unnest',
         summary: 'Remove package from parent',
-        permissions: permissions.inventory.packageManage,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.packageManage),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -121,7 +121,7 @@ export function createStockPackageResource() {
         summary: 'Pack items into package',
         description:
           'Pack stock items into a package. Creates moves with resultPackageId for accurate quant tracking.',
-        permissions: permissions.inventory.packageManage,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.packageManage),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -139,7 +139,7 @@ export function createStockPackageResource() {
         path: '/:id/unpack',
         summary: 'Unpack all items from package',
         description: 'Remove all stock from package. Quants become loose at the same location.',
-        permissions: permissions.inventory.packageManage,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.packageManage),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -154,7 +154,7 @@ export function createStockPackageResource() {
         path: '/:id/relocate',
         summary: 'Relocate package to new location',
         description: 'Atomically moves the package and all its contents to a new location.',
-        permissions: permissions.inventory.packageManage,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.packageManage),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -175,7 +175,7 @@ export function createStockPackageResource() {
         summary: 'Stamp an LPN code on a package (one-time)',
         description:
           'Body: { lpnCode, assignedBy? }. Fails if pkg already has an lpnCode. Host owns the code format (SSCC, internal prefix, carrier tracking).',
-        permissions: permissions.inventory.lpnAssign,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.lpnAssign),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -199,7 +199,7 @@ export function createStockPackageResource() {
         summary: 'Seal a package (freezes contents — pre-dispatch)',
         description:
           'Body: { sealedBy? }. After seal, nest() into this package fails. Unseal is intentionally not a primitive.',
-        permissions: permissions.inventory.lpnSeal,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.lpnSeal),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {

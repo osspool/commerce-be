@@ -29,6 +29,7 @@ export function createSkuSlotAssignmentResource() {
     displayName: 'SKU Slot Assignments',
     tag: 'Warehouse - Slotting',
     prefix: '/inventory/slotting',
+    // Per-branch — slot assignments live inside a branch's warehouse locations and never cross branches.
     tenantField: 'organizationId',
 
     adapter: createFlowAdapter(

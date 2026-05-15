@@ -11,11 +11,12 @@
  *   const ctx = flowCtxGuard.from(req);
  */
 
-import { ForbiddenError, defineGuard, type Guard } from '@classytic/arc/utils';
+import { defineGuard, type Guard } from '@classytic/arc/utils';
 import type { IRequestContext } from '@classytic/arc';
-import type { FlowContext, FlowEngine } from '@classytic/flow';
+import type { FlowContext, FlowEngine, FlowMode } from '@classytic/flow';
 import { getFlowContext } from '../../flow/context-helpers.js';
 import { getFlowEngine } from '../../flow/flow-engine.js';
+import { assertFlowMode } from '#shared/flow-mode-gate.js';
 
 /** Get the Flow engine singleton. */
 export function flow(): FlowEngine {
@@ -32,20 +33,24 @@ export const flowCtxGuard: Guard<FlowContext> = defineGuard<FlowContext>({
 });
 
 // ── Mode Gate Guards ────────────────────────────────────────────────
-// Enforce FLOW_MODE tier. 403s if mode is insufficient.
-// Use: `routeGuards: [standardModeGuard.preHandler]` (or enterprise).
+// Enforce FLOW_MODE tier. 403s (ForbiddenError) if mode is insufficient.
+//
+// **Single source of truth for the rank/throw logic is `#shared/flow-mode-gate.ts`
+//   (`assertFlowMode`).** The route-guard shape below is kept so existing
+//   `routeGuards: [standardModeGuard.preHandler]` call sites keep working,
+//   but new code should prefer the `permissions:`-slot form:
+//
+//     import { requireFlowMode } from '#shared/flow-mode-gate.js';
+//     permissions: { list: allOf(requireFlowMode('standard'), permissions.inventory.lotView) }
+//
+//   The permission-slot form composes with role checks via `allOf(...)`
+//   and is introspected by OpenAPI / MCP / audit tooling.
 
-function createModeGuard(requiredMode: 'standard' | 'enterprise'): Guard<true> {
+function createModeGuard(requiredMode: FlowMode): Guard<true> {
   return defineGuard<true>({
     name: `flow-mode-${requiredMode}`,
-    resolve: (_req, reply) => {
-      const current = flow().services.mode;
-      const rank: Record<string, number> = { simple: 0, standard: 1, enterprise: 2 };
-      if ((rank[current] ?? 0) < rank[requiredMode]) {
-        throw new ForbiddenError(`This feature requires '${requiredMode}' mode or higher. Current mode: '${current}'. Update FLOW_MODE in your environment config.`);
-        // defineGuard checks reply.sent — stash is skipped when the reply
-        // was already sent, so the handler never runs.
-      }
+    resolve: () => {
+      assertFlowMode(requiredMode);
       return true as const;
     },
   });

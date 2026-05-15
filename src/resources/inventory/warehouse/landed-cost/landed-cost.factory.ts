@@ -30,6 +30,7 @@ export function createLandedCostResource() {
     displayName: 'Landed Cost',
     tag: 'Warehouse - Landed Cost',
     prefix: '/inventory/landed-costs',
+    // Per-branch — landed-cost allocations roll into the receiving branch's inventory valuation.
     tenantField: 'organizationId',
 
     adapter: createFlowAdapter(engine.models.LandedCost, engine.repositories.landedCost, {

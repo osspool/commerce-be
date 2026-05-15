@@ -13,8 +13,8 @@
  * stay in lockstep.
  */
 
-import { requireRoles } from '@classytic/arc/permissions';
 import type { RequestWithExtras } from '@classytic/arc/types';
+import { requireFinanceAdmin } from '#shared/permissions.js';
 import mongoose from 'mongoose';
 import { accounting, JournalEntry } from '../accounting.engine.js';
 import {
@@ -252,7 +252,7 @@ async function debitNoteAction(invJeId: string, data: Record<string, unknown>, r
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-const arFinanceRoles = requireRoles('admin', 'finance_admin');
+const arFinanceRoles = requireFinanceAdmin();
 
 /**
  * Arc 2.8 declarative actions — imported by customer-invoice.resource.ts.

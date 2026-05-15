@@ -18,9 +18,9 @@
  */
 
 import { calculateVDS } from '@classytic/bd-tax';
-import { requireRoles } from '@classytic/arc/permissions';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import mongoose from 'mongoose';
+import { requireFinanceAdmin } from '#shared/permissions.js';
 import { JournalEntry } from '../accounting.engine.js';
 import WithholdingCertificate from '../withholding/withholding-certificate.model.js';
 import { buildCertificateData } from '../withholding/withholding-certificate.auto.js';
@@ -355,7 +355,7 @@ async function creditNoteAction(billJeId: string, data: Record<string, unknown>,
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-const apFinanceRoles = requireRoles('admin', 'finance_admin');
+const apFinanceRoles = requireFinanceAdmin();
 
 /**
  * Arc 2.8 declarative actions — imported by vendor-bill.resource.ts.

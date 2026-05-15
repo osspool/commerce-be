@@ -19,10 +19,12 @@ import type { IRequestContext, IControllerResponse } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import permissions from '#config/permissions.js';
+import { allOf } from '#shared/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
+import { requireFlowMode } from '#shared/flow-mode-gate.js';
 import { withApprovalChain } from '#core/approval/with-approval-chain.js';
 import { createPolicyChainResolver } from '#resources/approval/policy-resolver.js';
-import { flow, flowCtxFromArcReq, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
+import { flow, flowCtxFromArcReq, flowCtxGuard } from '../shared/helpers.js';
 import { NotFoundError, ValidationError } from '@classytic/arc/utils';
 
 interface ProcurementCreateBody {
@@ -169,14 +171,12 @@ export function createProcurementResource() {
       maxLimit: 100,
       allowedFilterFields: ['status', 'vendorRef', 'destinationNodeId'],
     }),
-    routeGuards: [standardModeGuard.preHandler],
-
     permissions: {
-      list: permissions.inventory.procurementView,
-      get: permissions.inventory.procurementView,
-      create: permissions.inventory.procurementCreate,
-      update: permissions.inventory.procurementApprove, // ignored (route disabled)
-      delete: permissions.inventory.procurementApprove,
+      list: allOf(requireFlowMode('standard'), permissions.inventory.procurementView),
+      get: allOf(requireFlowMode('standard'), permissions.inventory.procurementView),
+      create: allOf(requireFlowMode('standard'), permissions.inventory.procurementCreate),
+      update: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove), // ignored (route disabled)
+      delete: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
     },
 
     routes: [
@@ -186,7 +186,7 @@ export function createProcurementResource() {
         summary: 'Receive procurement items',
         description:
           'Receive items against a procurement order. Creates receipt moves and updates quants.',
-        permissions: permissions.inventory.procurementReceive,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementReceive),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -204,7 +204,7 @@ export function createProcurementResource() {
         summary: 'Return received items to vendor',
         description:
           'Creates a return move group (warehouse → vendor) for items previously received against this PO.',
-        permissions: permissions.inventory.procurementApprove,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -264,7 +264,7 @@ export function createProcurementResource() {
         method: 'GET',
         path: '/:id/match-status',
         summary: 'Get 3-way match status (PO vs Receipt vs Bill)',
-        permissions: permissions.inventory.procurementView,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementView),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -280,7 +280,7 @@ export function createProcurementResource() {
         summary: 'Report invoiced quantities for 3-way matching',
         description:
           'Push billed quantities from vendor bill system. Quantities are SET (absolute), not incremented.',
-        permissions: permissions.inventory.procurementApprove,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -301,7 +301,7 @@ export function createProcurementResource() {
         path: '/:id/validate-match',
         summary: 'Validate 3-way match for payment release',
         description: 'Returns whether PO, receipt, and bill quantities match within tolerance.',
-        permissions: permissions.inventory.procurementApprove,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -317,7 +317,7 @@ export function createProcurementResource() {
         method: 'GET',
         path: '/:id/receipt-moves',
         summary: 'Get receipt moves grouped by PO line',
-        permissions: permissions.inventory.procurementView,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementView),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
@@ -350,14 +350,14 @@ export function createProcurementResource() {
             throw err;
           }
         },
-        permissions: permissions.inventory.procurementApprove,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
       },
       cancel: {
         handler: async (id, _data, req) => {
           const ctx = flowCtxFromArcReq(req as unknown as IRequestContext);
           return engine.services.procurement.cancel(id, ctx);
         },
-        permissions: permissions.inventory.procurementApprove,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
       },
       'force-cancel': {
         handler: async (id, data, req) => {
@@ -368,7 +368,7 @@ export function createProcurementResource() {
             ...(body.reason ? { reason: body.reason } : {}),
           });
         },
-        permissions: permissions.inventory.procurementApprove,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
       },
       // Approval chain — `submit_for_approval` + `decide` come from the
       // shared `withApprovalChain` preset (`#core/approval`). Replaces the
@@ -385,8 +385,8 @@ export function createProcurementResource() {
         allowedSubmitStatus: ['draft'],
         // `status` is the default — omitted; preset reads `doc.status` natively.
         permissions: {
-          submit: permissions.inventory.procurementApprove,
-          decide: permissions.inventory.procurementApprove,
+          submit: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
+          decide: allOf(requireFlowMode('standard'), permissions.inventory.procurementApprove),
         },
         // Optional matrix-driven submit. Callers pass `useMatrix: true` to
         // resolve a chain from `/approval/policies` instead of supplying a

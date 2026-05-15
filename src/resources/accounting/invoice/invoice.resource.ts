@@ -13,8 +13,9 @@
 
 import { defineResource } from '@classytic/arc';
 import { createMongooseAdapter } from '@classytic/mongokit/adapter';
-import { requireAuth, requireRoles } from '@classytic/arc/permissions';
+import { requireAuth } from '@classytic/arc/permissions';
 import { buildCrudSchemasFromModel, QueryParser } from '@classytic/mongokit';
+import { requireFinanceManager } from '#shared/permissions.js';
 import config from '#config/index.js';
 import {
   batchCancel,
@@ -30,7 +31,7 @@ import {
 } from './invoice.handlers.js';
 
 const authenticated = requireAuth();
-const financeRoles = requireRoles('admin', 'finance_admin', 'finance_manager');
+const financeRoles = requireFinanceManager();
 
 // Placeholder — auto-discovered by loadResources at boot.
 // When engine is disabled, this is the final resource (empty).

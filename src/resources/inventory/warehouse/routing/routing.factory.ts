@@ -31,6 +31,7 @@ export function createRoutingResources() {
     displayName: 'Stock Routing Rules',
     tag: 'Warehouse - Routing',
     prefix: '/inventory/stock-rules',
+    // Per-branch — stock routing rules drive each branch's own put-away / pick / replenish flows.
     tenantField: 'organizationId',
     adapter: createFlowAdapter(engine.models.StockRule, engine.repositories.stockRule),
     queryParser: new QueryParser({
@@ -60,6 +61,7 @@ export function createRoutingResources() {
     displayName: 'Stock Routing Chains',
     tag: 'Warehouse - Routing',
     prefix: '/inventory/stock-routes',
+    // Per-branch — routing chains compose per-branch rules into multi-step stock paths.
     tenantField: 'organizationId',
     adapter: createFlowAdapter(engine.models.StockRoute, engine.repositories.stockRoute),
     queryParser: new QueryParser({

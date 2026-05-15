@@ -33,6 +33,7 @@ export function createWorkerSessionResource() {
     displayName: 'Worker Sessions & Labor',
     tag: 'Warehouse - Labor',
     prefix: '/inventory/labor',
+    // Per-branch — worker sessions / labor logs are owned by the branch where the shift was worked.
     tenantField: 'organizationId',
 
     adapter: createFlowAdapter(

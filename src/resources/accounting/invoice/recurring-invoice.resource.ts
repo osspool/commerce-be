@@ -14,8 +14,9 @@
 
 import { defineResource } from '@classytic/arc';
 import { createMongooseAdapter } from '@classytic/mongokit/adapter';
-import { requireAuth, requireRoles } from '@classytic/arc/permissions';
+import { requireAuth } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
+import { requireFinanceManager } from '#shared/permissions.js';
 
 const placeholder = defineResource({
   name: 'recurring-invoices',
@@ -36,7 +37,7 @@ export function buildRecurringInvoiceResource(
   repo: any,
 ) {
   const authenticated = requireAuth();
-  const financeRoles = requireRoles('admin', 'finance_admin', 'finance_manager');
+  const financeRoles = requireFinanceManager();
 
   const queryParser = new QueryParser({
     maxLimit: 200,

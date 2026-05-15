@@ -32,9 +32,7 @@
 
 import { defineAggregation, defineResource } from '@classytic/arc';
 import { createMongooseAdapter } from '@classytic/mongokit/adapter';
-import type { PermissionCheck } from '@classytic/arc/permissions';
-import { groups } from '#config/permissions/roles.js';
-import branchRepository from '#resources/commerce/branch/branch.repository.js';
+import { requireHeadOfficeAdmin } from '#shared/permissions.js';
 import { ensureOrderEngine } from '#resources/sales/orders/order.engine.js';
 import { buildSalesAggregations } from '#resources/sales/sales-analytics/aggregations.js';
 
@@ -43,46 +41,6 @@ const orderAdapter = createMongooseAdapter(
   orderEngine.models.Order as never,
   orderEngine.repositories.order as never,
 );
-
-/**
- * Permission check that grants only when the caller is a platform admin
- * AND their active branch is the head office. The branch role lookup is
- * async — `PermissionCheck` supports promises.
- */
-const requireHeadOfficeAdmin: PermissionCheck = async (ctx) => {
-  const userRoles = Array.isArray(ctx.user?.role)
-    ? (ctx.user!.role as string[])
-    : ctx.user?.role
-      ? [String(ctx.user.role)]
-      : [];
-  const isPlatformAdmin = userRoles.some((r) =>
-    (groups.platformAdmin as readonly string[]).includes(r),
-  );
-  if (!isPlatformAdmin) {
-    return { granted: false, reason: 'HQ sales overview requires platform admin role.' };
-  }
-
-  const orgId =
-    (ctx.request.headers?.['x-organization-id'] as string | undefined) ??
-    (ctx.request as { scope?: { organizationId?: string } }).scope?.organizationId;
-  if (!orgId) {
-    return { granted: false, reason: 'HQ sales overview requires an active branch context.' };
-  }
-
-  // Branch documents may store the role under either `role` (model field) or
-  // `branchRole` (denormalised from BA org metadata) — accept either, both
-  // should agree for any well-formed branch record.
-  const branch = await branchRepository.getById(orgId);
-  const branchRole = branch?.role ?? branch?.branchRole;
-  if (!branch || branchRole !== 'head_office') {
-    return {
-      granted: false,
-      reason: 'HQ sales overview is only available from the head-office branch context.',
-    };
-  }
-
-  return { granted: true };
-};
 
 const salesOverviewResource = defineResource({
   name: 'salesOverview',

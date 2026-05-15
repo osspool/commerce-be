@@ -19,5 +19,6 @@ can navigate without re-reading the codebase.
 ## Subsystems
 
 - [order/](order/) — order lifecycle, RMA, refund, fulfillment money flow
+- [accounting/](accounting/) — vendor-bill, customer-invoice, period-close, bank-reconciliation, budget-enforcement, withholding-cert-auto
 - [features/](features/) — feature flag system, resource manifest, engine dependency graph
 - [erp-gaps.md](erp-gaps.md) — full gap register by subsystem (CRITICAL/MAJOR/MINOR), reviewed 2026-05-12

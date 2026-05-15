@@ -19,8 +19,10 @@ import { defineResource, BaseController } from '@classytic/arc';
 import type { IRequestContext, IControllerResponse } from '@classytic/arc';
 import { QueryParser } from '@classytic/mongokit';
 import permissions from '#config/permissions.js';
+import { allOf } from '#shared/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
-import { flow, flowCtxFromArcReq, standardModeGuard } from '../shared/helpers.js';
+import { requireFlowMode } from '#shared/flow-mode-gate.js';
+import { flow, flowCtxFromArcReq } from '../shared/helpers.js';
 
 class WaveController extends BaseController {
   override async create(
@@ -107,13 +109,11 @@ export function createStockWaveResource() {
       ],
       allowedSortFields: ['plannedAt', 'slaTargetAt', 'priority', 'status'],
     }),
-    routeGuards: [standardModeGuard.preHandler],
-
     permissions: {
-      list: permissions.inventory.waveView,
-      get: permissions.inventory.waveView,
-      create: permissions.inventory.waveCreate,
-      delete: permissions.inventory.waveCreate,
+      list: allOf(requireFlowMode('standard'), permissions.inventory.waveView),
+      get: allOf(requireFlowMode('standard'), permissions.inventory.waveView),
+      create: allOf(requireFlowMode('standard'), permissions.inventory.waveCreate),
+      delete: allOf(requireFlowMode('standard'), permissions.inventory.waveCreate),
     },
 
     actions: {
@@ -129,7 +129,7 @@ export function createStockWaveResource() {
             ctx,
           );
         },
-        permissions: permissions.inventory.waveRelease,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.waveRelease),
       },
       start: {
         handler: async (id, data, req) => {
@@ -143,7 +143,7 @@ export function createStockWaveResource() {
             ctx,
           );
         },
-        permissions: permissions.inventory.waveExecute,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.waveExecute),
       },
       complete: {
         handler: async (id, data, req) => {
@@ -157,7 +157,7 @@ export function createStockWaveResource() {
             ctx,
           );
         },
-        permissions: permissions.inventory.waveExecute,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.waveExecute),
       },
       cancel: {
         handler: async (id, data, req) => {
@@ -177,7 +177,7 @@ export function createStockWaveResource() {
             ctx,
           );
         },
-        permissions: permissions.inventory.waveCreate,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.waveCreate),
       },
     },
   });

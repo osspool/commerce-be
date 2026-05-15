@@ -13,11 +13,12 @@
  *       abort       — aborts the session (no further advance)
  *
  * Stripe-style: `POST /:id/action { action: "advance" }` etc., wired
- * through Arc's createActionRouter.
+ * through the declarative `actions:` block on `defineResource()`.
  */
 
 import { defineResource } from '@classytic/arc';
 import { requireRoles } from '@classytic/arc/permissions';
+import { requireFinanceAdmin } from '#shared/permissions.js';
 import { getOrgId, getUserId } from '@classytic/arc/scope';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import { createMongooseAdapter } from '@classytic/mongokit/adapter';
@@ -65,8 +66,8 @@ const periodCloseResource = defineResource({
   disabledRoutes: ['create', 'update'],
 
   permissions: {
-    list: requireRoles('admin', 'finance_admin'),
-    get: requireRoles('admin', 'finance_admin'),
+    list: requireFinanceAdmin(),
+    get: requireFinanceAdmin(),
     delete: requireRoles('admin'),
   },
 
@@ -77,7 +78,7 @@ const periodCloseResource = defineResource({
       summary: 'Start a guided period-close session for a fiscal period',
       description:
         'Creates a new session with the default 5-step ladder (validate-drafts → trial-balance → bank-reconcile → close-period → archive). Aborts any prior in-progress session for the same period.',
-      permissions: requireRoles('admin', 'finance_admin'),
+      permissions: requireFinanceAdmin(),
       raw: true,
       schema: {
         body: {
@@ -104,7 +105,7 @@ const periodCloseResource = defineResource({
       method: 'GET',
       path: '/by-period/:periodId',
       summary: 'Get the active session for a fiscal period (if any)',
-      permissions: requireRoles('admin', 'finance_admin'),
+      permissions: requireFinanceAdmin(),
       raw: true,
       handler: async (req: FastifyRequest, reply: AnyReply) => {
         const { periodId } = req.params as { periodId: string };
@@ -120,7 +121,7 @@ const periodCloseResource = defineResource({
         const actorId = actorFrom(req);
         return advanceSession(id, actorId ? { actorId } : {});
       },
-      permissions: requireRoles('admin', 'finance_admin'),
+      permissions: requireFinanceAdmin(),
     },
     skip: {
       handler: async (id, data, req) => {
@@ -128,7 +129,7 @@ const periodCloseResource = defineResource({
         const actorId = actorFrom(req);
         return skipCurrentStep(id, reason, actorId ? { actorId } : {});
       },
-      permissions: requireRoles('admin', 'finance_admin'),
+      permissions: requireFinanceAdmin(),
       schema: {
         type: 'object',
         required: ['reason'],

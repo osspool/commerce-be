@@ -9,6 +9,7 @@ import { defineResource } from '@classytic/arc';
 import { createMongooseAdapter } from '@classytic/mongokit/adapter';
 import { requireRoles } from '@classytic/arc/permissions';
 import { QueryParser } from '@classytic/mongokit';
+import { requireFinanceAdmin, requireFinanceManager } from '#shared/permissions.js';
 import CurrencyExchangeRate from './exchange-rate.model.js';
 import exchangeRateRepository from './exchange-rate.repository.js';
 
@@ -27,10 +28,10 @@ export default defineResource({
   adapter: createMongooseAdapter(CurrencyExchangeRate, exchangeRateRepository),
   queryParser,
   permissions: {
-    list: requireRoles('admin', 'finance_admin', 'finance_manager'),
-    get: requireRoles('admin', 'finance_admin', 'finance_manager'),
-    create: requireRoles('admin', 'finance_admin'),
-    update: requireRoles('admin', 'finance_admin'),
+    list: requireFinanceManager(),
+    get: requireFinanceManager(),
+    create: requireFinanceAdmin(),
+    update: requireFinanceAdmin(),
     delete: requireRoles('admin'),
   },
 });

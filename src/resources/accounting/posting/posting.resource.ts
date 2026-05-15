@@ -19,14 +19,15 @@
  */
 
 import { defineResource } from '@classytic/arc';
-import { requireOrgMembership, requireRoles } from '@classytic/arc/permissions';
+import { requireOrgMembership } from '@classytic/arc/permissions';
 import mongoose from 'mongoose';
+import { requireFinanceAdmin } from '#shared/permissions.js';
 import { posEngine } from '#resources/sales/pos/pos.engine.js';
 import { bdToday } from '#lib/utils/bd-date.js';
 import { ConflictError, NotFoundError, ValidationError, createDomainError, createError } from '@classytic/arc/utils';
 
 const branchMember = requireOrgMembership();
-const financeAdmin = requireRoles('admin', 'finance_admin');
+const financeAdmin = requireFinanceAdmin();
 
 const postingResource = defineResource({
   name: 'accounting-posting',

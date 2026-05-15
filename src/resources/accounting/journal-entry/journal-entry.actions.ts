@@ -24,6 +24,7 @@ import { isApproved } from '@classytic/primitives/approval';
 import { requireRoles } from '@classytic/arc/permissions';
 import { getOrgId, getUserId } from '@classytic/arc/scope';
 import type { RequestWithExtras } from '@classytic/arc/types';
+import { requireFinanceAdmin } from '#shared/permissions.js';
 import { createDomainError } from '@classytic/arc/utils';
 import mongoose from 'mongoose';
 import {
@@ -86,7 +87,7 @@ const approvalActions = withApprovalChain<JournalEntryDoc>({
   getStatus: (doc) => doc.state,
   permissions: {
     submit: requireRoles('admin', 'finance_admin', 'staff'),
-    decide: requireRoles('admin', 'finance_admin'),
+    decide: requireFinanceAdmin(),
   },
   toEvaluationContext: (doc) => ({
     branchId: String(doc.organizationId ?? ''),
@@ -174,7 +175,7 @@ export const journalEntryActions = {
       }
       return rethrowDomainError(journalEntryRepository.post(id, orgId, { actorId }));
     },
-    permissions: requireRoles('admin', 'finance_admin'),
+    permissions: requireFinanceAdmin(),
   },
 
   /**
@@ -187,7 +188,7 @@ export const journalEntryActions = {
       const reversalDate = data.reversalDate ? new Date(data.reversalDate as string) : undefined;
       return rethrowDomainError(journalEntryRepository.reverse(id, orgId, { reversalDate, actorId }));
     },
-    permissions: requireRoles('admin', 'finance_admin'),
+    permissions: requireFinanceAdmin(),
     schema: {
       type: 'object',
       properties: {

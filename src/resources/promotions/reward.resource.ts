@@ -27,6 +27,7 @@ export default defineResource({
   displayName: 'Promo Rewards',
   tag: 'Promotions',
   prefix: '/promotions/rewards',
+  // Company-wide — promo is single-tenant multi-branch: a reward earned at one branch must redeem at any other (matches programResource/voucherResource).
   tenantField: false,
   adapter: createMongooseAdapter(
     promoEngine.models.Reward as never,

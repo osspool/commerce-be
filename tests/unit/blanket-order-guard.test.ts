@@ -1,54 +1,108 @@
 /**
- * Blanket order quantity guard — unit test (MAJOR gap)
+ * Blanket order commitment-guard logic — unit test.
  *
- * Gap: No cumulative quantity guard — generation was blocked only when
- *      consumedQty >= totalCommitmentQty, not when projectedConsumed would exceed it.
- *      An order with consumedQty=4, cap=5, generationQty=3 would over-order by 2.
+ * Contract (since @classytic/order 0.2.0): on each release, the kernel
+ * sizes the Order against the remaining commitment using SAP/Oracle
+ * blanket-release semantics:
  *
- * Fix: Changed condition to `projectedConsumed > totalCommitmentQty` in
- *      packages/order/src/repositories/blanket-order.repository.ts
+ *   - No cap → release the template as-is.
+ *   - requested < remaining → release full template, blanket stays active.
+ *   - requested === remaining → release full template, blanket exhausts.
+ *   - 0 < remaining < requested → PARTIAL FILL: clamp release to `remaining`
+ *     so consumedQty lands exactly on cap, then exhaust.
+ *   - remaining <= 0 → refuse — no Order created, blanket exhausts.
  *
- * RED: guard uses consumedQty >= cap (too late — already at cap)
- * GREEN: guard uses projectedConsumed > cap (blocks before over-order)
+ * `consumedQty` must never exceed `totalCommitmentQty`.
  */
 
 import { describe, it, expect } from 'vitest';
 
-describe('Blanket order quantity guard logic', () => {
-  /**
-   * Mirrors the _generateFor guard condition — isolated for fast unit testing
-   * without needing a full order engine instance.
-   */
-  function wouldExceedCommitment(
-    consumedQty: number,
-    generationQty: number,
-    totalCommitmentQty: number | undefined,
-  ): boolean {
-    if (totalCommitmentQty === undefined) return false;
-    const projectedConsumed = (consumedQty ?? 0) + generationQty;
-    return projectedConsumed > totalCommitmentQty;
+type ClampResult = {
+  generationQty: number;
+  willExhaust: boolean;
+  refused: boolean;
+};
+
+/**
+ * Pure mirror of the sizing decision in `_generateFor`. Isolated for fast
+ * unit testing without spinning up an order engine.
+ */
+function sizeRelease(
+  consumed: number,
+  requested: number,
+  cap: number | undefined,
+): ClampResult {
+  if (cap === undefined) {
+    return { generationQty: requested, willExhaust: false, refused: false };
   }
+  const remaining = cap - consumed;
+  if (remaining <= 0) {
+    return { generationQty: 0, willExhaust: true, refused: true };
+  }
+  if (requested > remaining) {
+    return { generationQty: remaining, willExhaust: true, refused: false };
+  }
+  if (requested === remaining) {
+    return { generationQty: requested, willExhaust: true, refused: false };
+  }
+  return { generationQty: requested, willExhaust: false, refused: false };
+}
 
-  it('blocks generation when projectedConsumed exceeds cap', () => {
-    // consumedQty=4, cap=5, generationQty=3 → projected=7 > 5
-    expect(wouldExceedCommitment(4, 3, 5)).toBe(true);
+describe('Blanket order release sizing — partial-fill semantics', () => {
+  it('no cap → full release, never exhausts', () => {
+    expect(sizeRelease(100, 50, undefined)).toEqual({
+      generationQty: 50,
+      willExhaust: false,
+      refused: false,
+    });
   });
 
-  it('allows generation when projectedConsumed is exactly at cap', () => {
-    // consumedQty=2, cap=5, generationQty=3 → projected=5, not > 5
-    expect(wouldExceedCommitment(2, 3, 5)).toBe(false);
+  it('plenty of headroom → full release, blanket stays active', () => {
+    expect(sizeRelease(0, 2, 5)).toEqual({
+      generationQty: 2,
+      willExhaust: false,
+      refused: false,
+    });
   });
 
-  it('blocks when already at cap (edge case from old bug)', () => {
-    // consumedQty=5, cap=5, generationQty=1 → projected=6 > 5
-    expect(wouldExceedCommitment(5, 1, 5)).toBe(true);
+  it('exact fit (requested === remaining) → full release, exhaust', () => {
+    expect(sizeRelease(2, 3, 5)).toEqual({
+      generationQty: 3,
+      willExhaust: true,
+      refused: false,
+    });
   });
 
-  it('allows when no cap is set', () => {
-    expect(wouldExceedCommitment(100, 50, undefined)).toBe(false);
+  it('partial fill (consumed=4, requested=3, cap=5) → clamp to 1, exhaust', () => {
+    expect(sizeRelease(4, 3, 5)).toEqual({
+      generationQty: 1,
+      willExhaust: true,
+      refused: false,
+    });
   });
 
-  it('package source uses projectedConsumed not consumedQty in the guard', async () => {
+  it('partial fill never overdraws — consumedQty lands exactly on cap', () => {
+    const { generationQty } = sizeRelease(60, 60, 100);
+    expect(60 + generationQty).toBe(100);
+  });
+
+  it('already at cap → refuse, no order, exhaust', () => {
+    expect(sizeRelease(5, 1, 5)).toEqual({
+      generationQty: 0,
+      willExhaust: true,
+      refused: true,
+    });
+  });
+
+  it('already past cap (defensive) → refuse, no order, exhaust', () => {
+    expect(sizeRelease(7, 1, 5)).toEqual({
+      generationQty: 0,
+      willExhaust: true,
+      refused: true,
+    });
+  });
+
+  it('package source implements partial-fill (not the legacy hard-block guard)', async () => {
     const fs = await import('fs/promises');
     const path = await import('path');
     const repoFile = path.resolve(
@@ -56,9 +110,11 @@ describe('Blanket order quantity guard logic', () => {
       '../../../packages/order/src/repositories/blanket-order.repository.ts',
     );
     const src = await fs.readFile(repoFile, 'utf8');
-    // The fixed condition must reference projectedConsumed, not the old consumedQty check
-    expect(src).toContain('projectedConsumed > (blanket.totalCommitmentQty');
-    // Old condition must NOT appear
+    // New partial-fill markers.
+    expect(src).toContain('linesForOrder');
+    expect(src).toContain('remaining - assigned');
+    // Legacy guard strings must NOT appear.
     expect(src).not.toContain('blanket.consumedQty >= (blanket.totalCommitmentQty');
+    expect(src).not.toContain('projectedConsumed > (blanket.totalCommitmentQty');
   });
 });

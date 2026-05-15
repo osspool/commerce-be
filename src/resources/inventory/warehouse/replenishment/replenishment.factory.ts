@@ -25,6 +25,7 @@ export function createReplenishmentResource() {
     displayName: 'Replenishment Rules',
     tag: 'Warehouse - Replenishment',
     prefix: '/inventory/replenishment',
+    // Per-branch — min/max replenishment rules target each branch's own stock levels.
     tenantField: 'organizationId',
 
     adapter: createFlowAdapter(

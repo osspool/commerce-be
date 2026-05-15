@@ -9,8 +9,9 @@
  * initialises — the adapter needs the model + repo at registration
  * time, which isn't available via auto-discovery.
  *
- * `routeGuards: [standardModeGuard.preHandler]` enforces FLOW_MODE>=standard
- * for every generated CRUD route — 403 below standard.
+ * `requireFlowMode('standard')` is composed into every `permissions:` slot
+ * (CRUD + custom routes) via `allOf(...)` — 403 below standard via the
+ * canonical permission pipeline, not a one-off preHandler.
  */
 
 import { defineResource } from '@classytic/arc';
@@ -18,8 +19,10 @@ import { QueryParser } from '@classytic/mongokit';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { Types } from 'mongoose';
 import permissions from '#config/permissions.js';
+import { allOf } from '#shared/permissions.js';
 import { createFlowAdapter } from '#shared/flow-adapter.js';
-import { flow, flowCtxGuard, standardModeGuard } from '../shared/helpers.js';
+import { requireFlowMode } from '#shared/flow-mode-gate.js';
+import { flow, flowCtxGuard } from '../shared/helpers.js';
 
 export function createLotResource() {
   const engine = flow();
@@ -29,6 +32,7 @@ export function createLotResource() {
     displayName: 'Lot/Serial Tracking',
     tag: 'Warehouse - Lots',
     prefix: '/inventory/lots',
+    // Per-branch — lot/serial inventory lives in the branch's own Flow stock context.
     // Arc 2.10.7 auto-injects `{ organizationId: { systemManaged, preserveForElevated } }`
     // into BOTH sanitizer and adapter-generated schemas when `tenantField` is set.
     tenantField: 'organizationId',
@@ -37,13 +41,12 @@ export function createLotResource() {
       maxLimit: 100,
       allowedFilterFields: ['skuRef', 'trackingType', 'status', 'lotCode', 'serialCode', 'vendorBatchRef'],
     }),
-    routeGuards: [standardModeGuard.preHandler],
     permissions: {
-      list: permissions.inventory.lotView,
-      get: permissions.inventory.lotView,
-      create: permissions.inventory.lotManage,
-      update: permissions.inventory.lotManage,
-      delete: permissions.inventory.lotManage,
+      list: allOf(requireFlowMode('standard'), permissions.inventory.lotView),
+      get: allOf(requireFlowMode('standard'), permissions.inventory.lotView),
+      create: allOf(requireFlowMode('standard'), permissions.inventory.lotManage),
+      update: allOf(requireFlowMode('standard'), permissions.inventory.lotManage),
+      delete: allOf(requireFlowMode('standard'), permissions.inventory.lotManage),
     },
     routes: [
       {
@@ -52,7 +55,7 @@ export function createLotResource() {
         summary: 'Aggregate quantities per lot for the active branch',
         description:
           'Returns on-hand / reserved / available quantities grouped by lotId. One row per lot that has at least one StockQuant record. Lots with no quants are absent.',
-        permissions: permissions.inventory.lotView,
+        permissions: allOf(requireFlowMode('standard'), permissions.inventory.lotView),
         raw: true,
         preHandler: [flowCtxGuard.preHandler],
         handler: async (req: FastifyRequest, reply: FastifyReply) => {

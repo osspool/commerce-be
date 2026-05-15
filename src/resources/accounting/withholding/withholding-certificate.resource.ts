@@ -15,6 +15,7 @@ const withholdingCertificateResource = defineResource({
   tag: 'Accounting',
   prefix: '/accounting/withholding-certificates',
   audit: true,
+  // Per-branch — VDS/TDS withholding certificates are branch-specific filings (each branch issues its own).
   tenantField: 'organizationId',
   presets: [orgScoped],
   // The repo intentionally uses `Repository<AnyDocument>` (no per-field

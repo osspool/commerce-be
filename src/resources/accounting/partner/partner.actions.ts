@@ -10,9 +10,9 @@
  * transition on a partner relationship from the A/P or A/R perspective.
  */
 
-import { requireRoles } from '@classytic/arc/permissions';
 import { getOrgId, getUserId } from '@classytic/arc/scope';
 import type { RequestWithExtras } from '@classytic/arc/types';
+import { requireFinanceAdmin } from '#shared/permissions.js';
 import {
   openingBalanceToPosting,
   type PartnerSide,
@@ -59,7 +59,7 @@ async function openBalanceAction(partnerId: string, data: Record<string, unknown
 export const partnerActions = {
   'open-balance': {
     handler: openBalanceAction,
-    permissions: requireRoles('admin', 'finance_admin'),
+    permissions: requireFinanceAdmin(),
     schema: {
       type: 'object',
       properties: {

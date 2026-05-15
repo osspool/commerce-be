@@ -147,6 +147,38 @@ return { success: false, error: 'msg', status: 400 };             // wrong
 
 The error handler emits `{ code, message, status, details?, meta?, correlationId? }` for any thrown `ArcError`. `code` is `arc.<canonical>` (e.g. `arc.not_found`) for the bundled subclasses; pass a custom code via `createDomainError(code, msg, status)` when downstream clients need to discriminate beyond HTTP status.
 
+### Aggregations — where they live
+
+One rule: declare aggregations close to where they're consumed; lift them to a `_shared/` builder only when 2+ surfaces reuse them.
+
+- **Resource-specific aggregations** → declare inline on `defineResource()`. Canonical example: per-branch sales aggregations on [src/resources/sales/orders/order.resource.ts](src/resources/sales/orders/order.resource.ts).
+- **Multi-surface aggregations** → lift into a `_shared/aggregations.ts` exporting a builder that takes the permission gate as a parameter. Canonical example: [src/resources/sales/sales-analytics/aggregations.ts](src/resources/sales/sales-analytics/aggregations.ts) — `buildSalesAggregations(orderEngine, gate)` is reused by both `/orders/aggregations/*` (per-branch, orgScoped) and `/admin/sales/aggregations/*` (HQ, `tenantField: false`).
+
+If you copy an aggregation block across two resources, that's the signal to lift. Don't pre-factor — wait for the second use site. Arc aggregation gotchas (controller requirement, `compileFilterToMongo`, `aggregatePipeline` for materialized) live in the "Arc — patterns + gotchas" section of [../AGENTS.md](../AGENTS.md).
+
+### Permission helpers — shared, not inline
+
+Re-usable predicates live in [src/shared/permissions.ts](src/shared/permissions.ts). Import named exports; do NOT redefine inline on a resource.
+
+- `requireHeadOfficeAdmin` — platform-admin role + active branch's `role` (or `branchRole`) === `head_office`. Use for HQ-only writes (Fiscal Periods, Exchange Rates, Period Close, Tax Settings, HQ sales overview).
+- `requireFinanceAdmin` — `admin` or `finance_admin`. Use for state mutations on AP/AR (post / pay / reverse / credit note / period advance).
+- `requireFinanceManager` — `admin`, `finance_admin`, or `finance_manager`. Use for broader finance reads / CRUD (invoice, recurring, payment-term, FX list).
+- `requireFlowMode(minMode)` from [src/shared/flow-mode-gate.ts](src/shared/flow-mode-gate.ts) — gates advanced WMS routes by `FLOW_MODE`. Compose with role gates via `allOf(requireFlowMode('standard'), requireRoles(...))`.
+
+All four throw `ForbiddenError` from `@classytic/arc/utils` on failure. If you find yourself writing `branch.role === 'head_office'` or `requireRoles('admin', 'finance_admin')` inline on a new resource, you're duplicating — import instead.
+
+### tenantField — every resource must declare it explicitly
+
+Per the ledger-scoping table in [../AGENTS.md](../AGENTS.md), every `defineResource()` must set `tenantField` explicitly (`'organizationId'` for per-branch, `false` for company-wide) **with a one-line JSDoc explaining why**. Silent declarations turn into accidental rewrites when someone else copy-pastes the resource.
+
+```typescript
+// Company-wide — shared across branches per AGENTS.md (Chart of Accounts).
+tenantField: false,
+
+// Per-branch — every JE carries organizationId for branch-partitioned reports.
+tenantField: 'organizationId',
+```
+
 ### Do NOT
 - Use `disableDefaultRoutes: true` when you have a model + repository — use the adapter instead
 - Use `raw: true` for CRUD routes — this bypasses Arc's entire pipeline (audit, hooks, permissions, pagination)

@@ -18,6 +18,7 @@ import {
 import { QueryParser } from '@classytic/mongokit';
 import { z } from 'zod';
 import { orgScoped } from '#shared/presets/index.js';
+import { requireFinanceAdmin } from '#shared/permissions.js';
 import {
   cancelMusokInvoice,
   generateMusokFromOrderEndpoint,
@@ -49,7 +50,7 @@ const musokResource = defineResource({
   permissions: {
     list: requireAuth(),
     get: requireAuth(),
-    create: requireRoles('admin', 'finance_admin'),
+    create: requireFinanceAdmin(),
     update: requireRoles('admin'),
     delete: requireRoles('admin'),
   },
@@ -71,7 +72,7 @@ const musokResource = defineResource({
   actions: {
     cancel: {
       handler: async (id, data) => cancelMusokInvoice(id, data),
-      permissions: requireRoles('admin', 'finance_admin'),
+      permissions: requireFinanceAdmin(),
       schema: z.object({ reason: z.string().optional() }),
     },
   },
@@ -95,7 +96,7 @@ const musokResource = defineResource({
       summary: 'Generate Mushak 6.3 from an existing order (auto-derives buyer + lines + tax)',
       description:
         'Same code path as the order.fulfilled auto-generation bridge. Idempotent on (Order, orderId). Use to backfill Mushaks for orders fulfilled before the bridge was wired or to retry after a typed-error skip.',
-      permissions: requireRoles('admin', 'finance_admin'),
+      permissions: requireFinanceAdmin(),
       raw: true,
       schema: {
         body: z.object({
@@ -118,7 +119,7 @@ const musokResource = defineResource({
       method: 'GET' as const,
       path: '/return/:period',
       summary: 'Monthly VAT / TOT return (branches on branch.businessType — Mushak 9.1 or 9.2)',
-      permissions: requireRoles('admin', 'finance_admin'),
+      permissions: requireFinanceAdmin(),
       raw: true,
       schema: { params: monthlyReturnParamsSchema },
       handler: getMonthlyReturn,

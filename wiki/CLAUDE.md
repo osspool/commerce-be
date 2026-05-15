@@ -136,6 +136,10 @@ Audited and confirmed NOT real gaps. Do not "fix" these.
 | "No account hierarchy" | FALSE POSITIVE | Hierarchy encoded in country pack via `AccountType.parentCode/isGroup/isTotal`. Drives BS/P&L subtotaling. Document-level `parentId` would be redundant — reports don't read it. |
 | "Cycle count variance not auto-posted" | PARTIAL FALSE POSITIVE | All adjustment paths go through `inventory.controller.ts` which publishes `accounting:inventory.adjusted` (lines 423-438). |
 | "Cart concurrent-checkout guard missing" | FALSE POSITIVE | MongoDB partial unique index on `(draftId, state='open')` enforces single-open-checkout-per-draft (checkout.repository.ts:114-170). |
+| "No materialized report caching" | FALSE POSITIVE | Period close step results (trial balance, balance-sheet snapshot, P&L summary) persist in `PeriodCloseStepDoc.result` (period-close.model.ts:54) and `BalanceSheetSnapshot` (packages/ledger/src/reports/balance-sheet.ts:331-343). Not a separate table, but materialized + cached on period close. |
+| "No quantity-break pricing" | FALSE POSITIVE | `PriceRule.tiers` array of `TierLadder { minQty, maxQty }` in packages/pricelist/src/models/price-list.model.ts:72-90, fully wired through the resolver. |
+| "No date-range / seasonal pricing" | FALSE POSITIVE | `validFrom` + `validTo` on PriceRule in packages/pricelist/src/models/price-list.model.ts:119-120. |
+| "No bundle/kit products" | PARTIAL | Catalog interface ships `bundleable` flag (product-types/type.interface.ts:48), `BundleMonetization` type (catalog-core/monetization.vo.ts:87-98), `relationship.vo.ts:43-45 bundles?:ProductRef[]`. No built-in bundle handler registered in be-prod yet — hosts must provide a custom `ProductTypeHandler`. Architecture ready, turn-key handler absent. |
 
 ## Genuinely OPEN gaps (verified)
 
@@ -143,13 +147,11 @@ Real gaps remaining (much smaller than the original audit suggested):
 
 | Gap | Severity | Notes |
 |---|---|---|
-| No materialized report caching | MAJOR | Every report aggregates live. Acceptable below ~10k JEs/branch/month. |
 | No Mushak 6.10 NBR e-filing bridge | CRITICAL | BLOCKED — requires NBR portal API credentials + `buildMushak610` in `@classytic/bd-tax`. |
-| No quantity-break / date-range pricing | MAJOR | Pricelist model extension required. |
-| No bundle/kit products | MAJOR | Catalog model extension required. |
-| RecurringInvoice: only Streamline-driven | MAJOR-PARTIAL | Workflow exists but no operator dashboard for invoice schedule management. |
+| Bundle product handler (turn-key) | MAJOR | Catalog architecture supports bundles (`bundleable`, `BundleMonetization`, `relationship.bundles`); needs a built-in `ProductTypeHandler` registered in be-prod for the no-config path. |
+| RecurringInvoice: no operator dashboard | MAJOR-PARTIAL | Streamline workflow exists; missing FE schedule-management UI. |
 | Failed-payment abandoned sweep (NOT retry) | MINOR | Optional — flag PENDING transactions >24h for ops review. Different from retry. |
-| Encumbrance (reserve before posting) | MAJOR | Budget enforces at post-time, not pre-allocation. Requires budget model + flow integration. |
+| Encumbrance (reserve before posting) | MAJOR | Budget enforces at post-time only (budget-enforcement-plugin.ts). No pre-allocation/commitment table. Multiple concurrent JEs can over-commit a budget until the last one trips the guard. |
 
 ## How to add a new entry
 
