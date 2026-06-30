@@ -11,7 +11,7 @@
 
 import logger from '#lib/utils/logger.js';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
-import { buildFlowContext, DEFAULT_LOCATION } from './flow/context-helpers.js';
+import { buildFlowContext, DEFAULT_LOCATION, resolveStockLocationRefs } from './flow/context-helpers.js';
 import { getFlowEngine } from './flow/flow-engine.js';
 
 interface StockEntry {
@@ -29,6 +29,9 @@ interface ProductVariantMap {
   productId: string;
   variantSkus: string[];
 }
+
+// Stock-location ref resolution lives in flow/context-helpers
+// (`resolveStockLocationRefs`) so every raw quant read shares one definition.
 
 /** Per-branch stock summary suitable for dashboard cards. */
 export interface BranchStockSummary {
@@ -83,7 +86,7 @@ async function getBatchBranchStock(
   try {
     const flow = getFlowEngine();
     const ctx = buildFlowContext(branchId);
-    const locationId = DEFAULT_LOCATION;
+    const locationRefs = await resolveStockLocationRefs(flow, branchId);
     const pids = productIds.map(String);
     const pidSet = new Set(pids);
 
@@ -100,7 +103,7 @@ async function getBatchBranchStock(
     }
 
     const allQuants = await flow.repositories.quant.findMany(
-      { locationId, skuRef: { $in: [...skuRefs] } },
+      { locationId: { $in: locationRefs }, skuRef: { $in: [...skuRefs] } },
       ctx,
     );
 
@@ -239,6 +242,9 @@ async function getStockSummary(
     const flow = getFlowEngine();
     const ctx = buildFlowContext(branchId);
     const catalog = await ensureCatalogEngine();
+    // Match canonical Location._id (and the legacy code) — see
+    // resolveStockLocationRefs. Quants are keyed by _id under flow 0.3.0.
+    const locationRefs = await resolveStockLocationRefs(flow, branchId);
 
     const [catalogResult, flowResult] = await Promise.all([
       // 1. Total active variants in catalog. Single document expected.
@@ -274,7 +280,7 @@ async function getStockSummary(
         lowStockCount: number;
       }>(
         [
-          { $match: { locationId: DEFAULT_LOCATION } },
+          { $match: { locationId: { $in: locationRefs } } },
           { $group: { _id: '$skuRef', qty: { $sum: '$quantityOnHand' } } },
           {
             $group: {

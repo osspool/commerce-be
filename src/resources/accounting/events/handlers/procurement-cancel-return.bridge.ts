@@ -33,6 +33,7 @@
  */
 import type { DomainEvent } from '@classytic/primitives/events';
 import { subscribe } from '#lib/events/arcEvents.js';
+import { majorToMinor } from '#shared/money.js';
 import logger from '#lib/utils/logger.js';
 import { getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';
 import {
@@ -124,8 +125,8 @@ async function deriveBillTotals(
   if (grossMajor <= 0) return null;
 
   return {
-    totalAmountPaisa: Math.round(grossMajor * 100),
-    taxPaisa: Math.round(taxMajor * 100),
+    totalAmountPaisa: majorToMinor(grossMajor),
+    taxPaisa: majorToMinor(taxMajor),
     dominantTaxRate,
   };
 }

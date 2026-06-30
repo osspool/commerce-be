@@ -13,14 +13,19 @@
  * keeps the totals deterministic regardless of input order.
  */
 
+import { takaToPaisa, paisaToTaka } from '#shared/money.js';
+
 export function normalizeNumber(value: unknown, fallback: number = 0): number {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return num;
 }
 
-const toPaisa = (value: unknown): number => Math.round(normalizeNumber(value, 0) * 100);
-const fromPaisa = (paisa: number): number => paisa / 100;
+// Boundary conversions route through the single BDT-pinned money authority
+// (`#shared/money` → `@classytic/primitives`). `normalizeNumber` guards the
+// untrusted-input case before handing a finite value to the primitive.
+const toPaisa = (value: unknown): number => takaToPaisa(normalizeNumber(value, 0));
+const fromPaisa = (paisa: number): number => paisaToTaka(paisa);
 
 interface LineItemInput {
   quantity?: number | unknown;
@@ -78,9 +83,9 @@ export function computePurchaseTotals(items: LineItemInput[] = []): PurchaseTota
   let discountPaisa = 0;
   let taxPaisa = 0;
   for (const item of normalizedItems) {
-    subPaisa += Math.round(item.lineTotal * 100);
-    discountPaisa += Math.round(item.discount * 100);
-    taxPaisa += Math.round(item.taxAmount * 100);
+    subPaisa += toPaisa(item.lineTotal);
+    discountPaisa += toPaisa(item.discount);
+    taxPaisa += toPaisa(item.taxAmount);
   }
   const grandPaisa = subPaisa - discountPaisa + taxPaisa;
 

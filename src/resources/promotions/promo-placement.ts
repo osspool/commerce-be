@@ -124,7 +124,10 @@ const resolveActorId = (actorId: string | undefined): string =>
  * audit logging (which branch triggered the commit), never forwarded to
  * the engine itself.
  */
-const buildCtx = (input: { actorId: string }) => ({ actorId: input.actorId });
+// @classytic/promo 0.3 renamed the context actor field `actorId` → `actorRef`
+// (clean break, no alias). The internal `actorId` naming is kept; only the
+// engine-facing context key changes.
+const buildCtx = (input: { actorId: string }) => ({ actorRef: input.actorId });
 
 /** Canonical line builder for placement pipelines — see `placement.service.ts`. */
 export function buildPromoLines(

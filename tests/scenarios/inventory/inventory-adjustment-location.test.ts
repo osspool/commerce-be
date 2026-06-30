@@ -102,9 +102,16 @@ async function getLocationByCode(code: string): Promise<{ _id: string; type: str
 
 async function getQuantOnHand(locationCode: string): Promise<number> {
   const db = mongoose.connection.db!;
+  // flow 0.3.0 canonicalizes location refs on write: quants are keyed by the
+  // resolved `Location._id`, not the code string. Resolve the code to its _id
+  // and match BOTH forms ($in) so this read sees canonical rows (and stays
+  // tolerant of any legacy code-keyed row).
+  const loc = await db.collection('flow_locations').findOne({ code: locationCode });
+  const refs: string[] = [locationCode];
+  if (loc?._id) refs.push(String(loc._id));
   const q = await db.collection('flow_stock_quants').findOne({
     skuRef: VARIANT_SKU,
-    locationId: locationCode,
+    locationId: { $in: refs },
   });
   return q ? Number(q.quantityOnHand ?? 0) : 0;
 }

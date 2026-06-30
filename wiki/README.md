@@ -21,4 +21,11 @@ can navigate without re-reading the codebase.
 - [order/](order/) — order lifecycle, RMA, refund, fulfillment money flow
 - [accounting/](accounting/) — vendor-bill, customer-invoice, period-close, bank-reconciliation, budget-enforcement, withholding-cert-auto
 - [features/](features/) — feature flag system, resource manifest, engine dependency graph
+- [accounting/posting-sources.md](accounting/posting-sources.md) — who posts AR/AP + the no-double-post rule (direct vs invoice engine)
 - [erp-gaps.md](erp-gaps.md) — full gap register by subsystem (CRITICAL/MAJOR/MINOR), reviewed 2026-05-12
+
+## Patterns (standards — follow, don't reinvent)
+
+- [read-projections.md](read-projections.md) — event-driven read caches (reference: `product.stockProjection`)
+- money: all major↔minor conversion goes through [#shared/money](../src/shared/money.ts) (`majorToMinor`/`minorToMajor`); config-driven `BASE_CURRENCY`. Guarded by `tests/unit/money-convention.test.ts`.
+- events: accounting events must be registered `EventDefinition`s — guarded by `tests/unit/accounting-event-catalog-no-drift.test.ts`.

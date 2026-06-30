@@ -15,6 +15,7 @@
 
 import type { RequestWithExtras } from '@classytic/arc/types';
 import { requireFinanceAdmin } from '#shared/permissions.js';
+import { majorToMinor } from '#shared/money.js';
 import mongoose from 'mongoose';
 import { accounting, JournalEntry } from '../accounting.engine.js';
 import {
@@ -123,7 +124,7 @@ async function postInvoiceAction(orderId: string, data: Record<string, unknown>,
     typeof order.taxAmount === 'number'
       ? order.taxAmount
       : typeof order.taxTotal === 'number'
-      ? Math.round(order.taxTotal * 100)
+      ? majorToMinor(order.taxTotal)
       : 0;
   const vatAmount = (data.vatAmount as number | undefined) ?? vatFromOrder;
 
@@ -242,6 +243,9 @@ async function debitNoteAction(invJeId: string, data: Record<string, unknown>, r
       reason: data.reason as string,
       reference: data.reference as string,
       date: data.date ? new Date(data.date as string) : undefined,
+      // Optional GL override — route a service/allowance debit to its proper
+      // account instead of the default Sales Returns (4114).
+      contraAccount: (data.contraAccount as string | undefined) ?? undefined,
     },
     { autoPost: true },
   );

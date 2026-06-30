@@ -8,6 +8,7 @@ hand in resources.
 
 | Flow | When | File |
 |---|---|---|
+| [posting-sources](posting-sources.md) | who posts AR/AP + the no-double-post rule when `INVOICE_AUTO_*` is on | direct handlers vs invoice engine |
 | [vendor-bill](vendor-bill.md) | post / pay / credit-note / bulk-pay | `/accounting/vendor-bills/...` |
 | [customer-invoice](customer-invoice.md) | post / receive / debit-note / auto-from-order | `/accounting/customer-invoices/...` |
 | [period-close](period-close.md) | 5-step wizard close + reopen | `/accounting/period-close/...` |

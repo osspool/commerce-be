@@ -402,4 +402,60 @@ describe('posting contract autoPost defaults', () => {
       expect(debitAccountCodeFor('bank_transfer')).toBe('1113');
     });
   });
+
+  describe('credit/debit-note contra-account routing (service credits)', () => {
+    it('vendor credit note defaults the offset leg to Purchase Returns 5503', () => {
+      const posting = vendorCreditNoteToPosting({
+        sourceId: 'po-1',
+        sourceModel: 'PurchaseOrder',
+        amount: 1000,
+        reason: 'Damaged goods returned',
+        reference: 'CN-001',
+        supplierId: 'sup-1',
+      });
+      const offset = posting.items.find((i) => i.credit === 1000);
+      expect(offset?.accountCode).toBe('5503');
+    });
+
+    it('vendor credit note routes a SERVICE credit to the overridden account', () => {
+      const posting = vendorCreditNoteToPosting({
+        sourceId: 'po-1',
+        sourceModel: 'PurchaseOrder',
+        amount: 1000,
+        reason: 'Freight SLA penalty (not a goods return)',
+        reference: 'CN-002',
+        supplierId: 'sup-1',
+        contraAccount: '6328', // freight/expense, not Purchase Returns
+      });
+      const offset = posting.items.find((i) => i.credit === 1000);
+      expect(offset?.accountCode).toBe('6328');
+    });
+
+    it('customer debit note defaults the offset leg to Sales Returns 4114', () => {
+      const posting = customerDebitNoteToPosting({
+        sourceId: 'ord-1',
+        sourceModel: 'Order',
+        amount: 1000,
+        reason: 'Customer return allowance',
+        reference: 'DN-001',
+        customerId: 'cust-1',
+      });
+      const offset = posting.items.find((i) => i.debit === 1000);
+      expect(offset?.accountCode).toBe('4114');
+    });
+
+    it('customer debit note routes a SERVICE charge to the overridden account', () => {
+      const posting = customerDebitNoteToPosting({
+        sourceId: 'ord-1',
+        sourceModel: 'Order',
+        amount: 1000,
+        reason: 'Late-pickup service fee (not a goods return)',
+        reference: 'DN-002',
+        customerId: 'cust-1',
+        contraAccount: '4319', // service fee income, not Sales Returns
+      });
+      const offset = posting.items.find((i) => i.debit === 1000);
+      expect(offset?.accountCode).toBe('4319');
+    });
+  });
 });

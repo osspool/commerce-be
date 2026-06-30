@@ -21,6 +21,7 @@
 import type { LineSnapshot, OrderCatalogBridge, OrderContext } from '@classytic/order';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 import { getPricelistEngineOrNull } from '#resources/sales/pricelist/pricelist.plugin.js';
+import { majorToMinor } from '#shared/money.js';
 
 interface ProductVariant {
   sku: string;
@@ -80,7 +81,7 @@ export function createCatalogBridge(): OrderCatalogBridge {
         const productCostPrice = (() => {
           const fromMoney = amountOf(pricing?.costPrice);
           if (typeof fromMoney === 'number') return fromMoney;
-          if (typeof p.costPrice === 'number') return Math.round(p.costPrice * 100);
+          if (typeof p.costPrice === 'number') return majorToMinor(p.costPrice);
           return undefined;
         })();
 
@@ -110,7 +111,7 @@ export function createCatalogBridge(): OrderCatalogBridge {
               if (v && typeof v === 'object' && 'amount' in v) {
                 return amountOf(v);
               }
-              if (typeof v === 'number') return Math.round(v * 100);
+              if (typeof v === 'number') return majorToMinor(v);
               return undefined;
             })()
           : undefined;

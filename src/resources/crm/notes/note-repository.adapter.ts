@@ -1,4 +1,5 @@
-import type { Note, NoteRepository, SubjectKind } from '@classytic/crm';
+import type { SubjectKind } from '@classytic/crm';
+import type { Note, NoteRepository } from '../ports.js';
 import type { CrmRequestContext } from '../context-helpers.js';
 import type { INoteDoc } from './note.model.js';
 import crmNoteRepository from './note.repository.js';

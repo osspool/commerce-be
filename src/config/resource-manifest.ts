@@ -10,6 +10,7 @@
  * See: wiki/features/resource-manifest.md for the full table + deployment matrix.
  */
 
+import { fileURLToPath } from 'node:url';
 import { isFeatureEnabled } from '#config/features.js';
 
 type AnyOf = string[];
@@ -78,13 +79,19 @@ const RESOURCE_DIRS: DirEntry[] = [
 ];
 
 /**
- * Returns absolute file:// URLs for all dirs whose feature is currently enabled.
+ * Returns absolute directory paths for all dirs whose feature is currently enabled.
  * Pass `import.meta.url` from the call site (create-arc-app-options.ts).
+ *
+ * Returns plain paths (NOT file:// URLs). Arc's `loadResources(dir)` treats any
+ * string starting with `file://` as a file URL and calls `dirname()` on it
+ * (the `import.meta.url` calling convention), which would strip our target
+ * subdir back to `src/resources/` and scan everything per batch. Stripping the
+ * scheme via `fileURLToPath` keeps the intended subdir intact.
  */
 export function getEnabledResourceDirs(callerFileUrl: string): string[] {
   return RESOURCE_DIRS
     .filter(({ features }) =>
       features === 'always' || features.some((f) => isFeatureEnabled(f)),
     )
-    .map(({ dir }) => new URL(`../../resources/${dir}`, callerFileUrl).href);
+    .map(({ dir }) => fileURLToPath(new URL(`../../resources/${dir}/`, callerFileUrl)));
 }

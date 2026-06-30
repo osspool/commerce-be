@@ -1,4 +1,4 @@
-import type { Account, AccountFilter, AccountRepository } from '@classytic/crm';
+import type { Account, AccountFilter, AccountRepository } from '../ports.js';
 import type { CrmRequestContext } from '../context-helpers.js';
 import type { IAccountDoc } from './account.model.js';
 import crmAccountRepository from './account.repository.js';

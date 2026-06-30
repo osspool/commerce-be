@@ -19,6 +19,7 @@
  */
 
 import { calculateVDS } from '@classytic/bd-tax';
+import { majorToMinor } from '#shared/money.js';
 import { inputVatAccount } from '../../tax/tax.accounts.js';
 import { rateCodeForRate } from '../../tax/tax.split.js';
 import type { AccountingRegime } from '../../tax/tax-resolver.js';
@@ -348,7 +349,7 @@ export function supplierReturnToPosting(
   // Convert per-line major BDT × qty into total paisa.
   const totalPaisa = data.lines.reduce((sum, line) => {
     const cost = Number(line.unitCost ?? 0);
-    return sum + Math.round(cost * line.quantityReturned * 100);
+    return sum + majorToMinor(cost * line.quantityReturned);
   }, 0);
 
   const items: PostingItem[] = [

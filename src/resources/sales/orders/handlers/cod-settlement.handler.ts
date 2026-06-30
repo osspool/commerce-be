@@ -1,7 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { publish } from '#lib/events/arcEvents.js';
-import { BD } from '#resources/accounting/posting/bd-account-codes.js';
-import { validateCodSettlementInputs } from '#resources/accounting/posting/contracts/cod-settlement.contract.js';
 import { ensureOrderEngine } from '../order.engine.js';
 import { getOrderContext, getScopedOrderByNumber } from './shared.js';
 import { ConflictError, NotFoundError, ValidationError, createDomainError } from '@classytic/arc/utils';
@@ -13,7 +11,7 @@ export async function codSettlementHandler(req: FastifyRequest, reply: FastifyRe
     actualReceived: number;
     courierCommission: number;
     writeoff?: number;
-    cashAccount?: typeof BD.pettyCash | typeof BD.cash;
+    cashAccount?: 'cash' | 'petty_cash';
     notes?: string;
     date?: string;
   };
@@ -42,14 +40,17 @@ export async function codSettlementHandler(req: FastifyRequest, reply: FastifyRe
   const courierCommission = Math.max(0, Math.trunc(Number(body.courierCommission) || 0));
   const writeoff = Math.max(0, Math.trunc(Number(body.writeoff) || 0));
 
-  const check = validateCodSettlementInputs({
-    grossAmount,
-    actualReceived,
-    courierCommission,
-    writeoff,
-  });
-  if (!check.ok) {
-    throw createDomainError('SETTLEMENT_UNBALANCED', check.reason, 400);
+  // Balance invariant — the remitted cash, courier commission, and any
+  // write-off MUST reconcile to the gross. Checked order-side (pure arithmetic,
+  // no accounting dependency); the accounting posting contract re-checks
+  // defensively before it ever writes a journal.
+  const settlementSum = actualReceived + courierCommission + writeoff;
+  if (settlementSum !== grossAmount) {
+    throw createDomainError(
+      'SETTLEMENT_UNBALANCED',
+      `actualReceived + courierCommission + writeoff (${settlementSum}) must equal grossAmount (${grossAmount})`,
+      400,
+    );
   }
 
   const settlementId = `cod-settle-${String(order._id)}-${Date.now()}`;
@@ -59,7 +60,7 @@ export async function codSettlementHandler(req: FastifyRequest, reply: FastifyRe
     actualReceived,
     courierCommission,
     writeoff,
-    cashAccount: body.cashAccount ?? BD.cash,
+    cashAccount: body.cashAccount ?? 'cash',
     notes: body.notes,
     settledAt,
     settledBy: ctx.actorRef,

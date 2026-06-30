@@ -145,6 +145,14 @@ export interface CogsData {
 }
 
 export function cogsToPosting(data: CogsData, options: { autoPost?: boolean } = {}): PostingInput {
+  // A zero-value COGS entry (costMissing — no cost basis resolved) carries no
+  // accounting weight; it exists purely as an audit placeholder for finance to
+  // backfill later. ledger 0.13.0 rejects auto-posting a zero/zero entry, so we
+  // keep it as an intentional draft instead of letting the post fail. Real
+  // cost-bearing entries still auto-post. (We post the entry as a single
+  // zero/zero row pair rather than filtering the lines so the GL still shows
+  // the placeholder; suppressing autoPost is what avoids the ledger rejection.)
+  const hasCost = data.costAmount > 0;
   return {
     journalType: 'INVENTORY',
     label: `COGS — Order ${displayRef(data.orderReferenceNumber, data.orderId)}`,
@@ -155,7 +163,7 @@ export function cogsToPosting(data: CogsData, options: { autoPost?: boolean } = 
     ],
     idempotencyKey: `cogs-${data.orderId}`,
     sourceRef: { sourceModel: 'Order', sourceId: data.orderId },
-    autoPost: options.autoPost ?? true,
+    autoPost: (options.autoPost ?? true) && hasCost,
     ...(data.metadata ? { metadata: data.metadata } : {}),
   };
 }

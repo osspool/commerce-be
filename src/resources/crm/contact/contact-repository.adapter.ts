@@ -1,4 +1,4 @@
-import type { Contact, ContactFilter, ContactRepository } from '@classytic/crm';
+import type { Contact, ContactFilter, ContactRepository } from '../ports.js';
 import type { ContactInfo, PersonName } from '@classytic/primitives/person';
 import type { ICustomer } from '#resources/sales/customers/customer.model.js';
 import customerRepository from '#resources/sales/customers/customer.repository.js';

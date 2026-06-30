@@ -41,6 +41,10 @@ async function seedTxn(overrides: Record<string, unknown> = {}): Promise<string>
     amount: 500000,
     currency: 'BDT',
     method: 'cash',
+    // revenue 2.4 made methodKind a required schema field, and refund/release/
+    // split copy methodKind from the parent onto the child docs they create
+    // (which DO go through schema validation). Seed it so those children pass.
+    methodKind: 'cash',
     status: 'pending',
     source: 'web',
     sourceModel: 'Order',

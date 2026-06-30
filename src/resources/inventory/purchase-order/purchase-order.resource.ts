@@ -100,6 +100,7 @@ export function createPurchaseOrderResource() {
 
   adapter: createMongooseAdapter(getPurchaseEngine().models.PurchaseOrder, purchaseOrderRepository),
   queryParser,
+  tenantField: false,
   // Custom controller: create/update go through purchaseOrderService
   // (item normalization, supplier lookup, total computation, invoice numbering).
   // Arc's BaseController handles list/get/delete via the adapter.

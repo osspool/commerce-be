@@ -404,12 +404,13 @@ describe('be-prod ↔ Flow Integration', () => {
   });
 
   describe('negative stock guard with string location codes', () => {
-    it('string location code "stock" bypasses findById guard (location not found by code)', async () => {
-      // IMPORTANT: be-prod uses string codes ('stock') as locationId, not ObjectIds.
-      // PostingService's guard does locationPort.findById(move.sourceLocationId) which
-      // expects an ObjectId. With string 'stock', findById returns null → guard skips.
-      // This means the negative stock guard is effectively bypassed for string-code locations.
-      // Stock conservation is still enforced by the double-entry quant bookkeeping.
+    it('string location code "stock" now resolves via findByRef → negative-stock guard fires', async () => {
+      // flow 0.3.0 canonicalizes location refs on write: the posting guard
+      // resolves the source ref with `findByRef('stock')` (dual-resolution),
+      // which DOES find the seeded 'stock' Location (allowNegativeStock:false).
+      // The previous behavior — guard bypassed because `findById('stock')`
+      // returned null for a string code, letting the quant go to -40 — is gone.
+      // A draw-down past on-hand is now correctly rejected with NegativeStockError.
       await adjustStock(ORG_HEAD, 'GUARD-SKU', 0, 10);
 
       const group = await flow.services.moveGroup.create(
@@ -425,14 +426,15 @@ describe('be-prod ↔ Flow Integration', () => {
       );
       await flow.services.moveGroup.executeAction(group._id.toString(), 'confirm', {}, ctx());
 
-      // Guard is bypassed (location not found), but stock still goes negative correctly
-      // via double-entry. The quant at 'stock' will be -40.
-      await flow.services.moveGroup.executeAction(group._id.toString(), 'receive', {}, ctx());
+      await expect(
+        flow.services.moveGroup.executeAction(group._id.toString(), 'receive', {}, ctx()),
+      ).rejects.toThrow(/negative stock/i);
 
+      // On-hand is unchanged — the rejected receive rolled back in-txn.
       const avail = await flow.services.quant.getAvailability(
         { skuRef: 'GUARD-SKU', locationId: LOC.stock }, ctx(),
       );
-      expect(avail.quantityOnHand).toBe(-40); // 10 - 50
+      expect(avail.quantityOnHand).toBe(10);
     });
 
     it('adjustment from virtual "adjustment" location succeeds', async () => {

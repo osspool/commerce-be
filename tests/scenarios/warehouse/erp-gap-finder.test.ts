@@ -29,7 +29,7 @@ import type { FlowEngine } from '@classytic/flow';
 import {
   PRODUCTS, LOC, ctx,
   setupBranch, seedStock, adjustStock, transferBetweenBranches,
-  getStock, getCostLayers, cleanAll,
+  getStock, getCostLayers, cleanAll, resolveCanonicalLocationId,
 } from '../../support/erp-seed.js';
 
 let replSet: MongoMemoryReplSet;
@@ -303,14 +303,17 @@ describe('Gap 6: Paisa rounding precision', () => {
     await flow.services.moveGroup.executeAction(group._id.toString(), 'confirm', {}, ctx(BRANCH_A));
     await flow.services.moveGroup.executeAction(group._id.toString(), 'receive', {}, ctx(BRANCH_A));
 
-    // Create cost layers with tricky fractional costs
+    // Create cost layers with tricky fractional costs. flow 0.3.0 drains
+    // layers by the canonical Location._id (the sale's postMove resolves the
+    // 'stock' code to _id), so seed the layers under that same canonical key.
+    const fracStockLocId = await resolveCanonicalLocationId(flow, BRANCH_A, LOC.stock);
     await flow.models.CostLayer.create({
-      organizationId: BRANCH_A, skuRef: SKU, locationId: LOC.stock,
+      organizationId: BRANCH_A, skuRef: SKU, locationId: fracStockLocId,
       remainingQty: 10, unitCost: 333, // 333 paisa = 3.33 BDT
       receivedAt: new Date('2025-01-01'), moveRef: 'frac-1',
     });
     await flow.models.CostLayer.create({
-      organizationId: BRANCH_A, skuRef: SKU, locationId: LOC.stock,
+      organizationId: BRANCH_A, skuRef: SKU, locationId: fracStockLocId,
       remainingQty: 20, unitCost: 167, // 167 paisa = 1.67 BDT
       receivedAt: new Date('2025-02-01'), moveRef: 'frac-2',
     });

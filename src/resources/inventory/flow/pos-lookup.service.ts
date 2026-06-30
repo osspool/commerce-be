@@ -11,7 +11,7 @@ import type { FlowContext } from '@classytic/flow';
 import branchRepository from '#resources/commerce/branch/branch.repository.js';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 import inventoryRepository from '#resources/inventory/inventory.repository.js';
-import { buildFlowContext, DEFAULT_LOCATION, skuRefFromProduct } from './context-helpers.js';
+import { buildFlowContext, DEFAULT_LOCATION, resolveStockLocationRefs, skuRefFromProduct } from './context-helpers.js';
 import { getFlowEngine } from './flow-engine.js';
 
 // Catalog product lookup by barcode/SKU. Tries variant.barcode first (POS scan),
@@ -238,8 +238,11 @@ class PosLookupService {
     const results: ProductStockEntry[] = [];
     for (const bid of branches) {
       const ctx = buildFlowContext(bid);
-      // Get all quants for this org — filter by skuRef patterns for this product
-      const quants = await flow.repositories.quant.findMany({ locationId: DEFAULT_LOCATION }, ctx);
+      // Get all quants for this org — filter by skuRef patterns for this product.
+      // flow 0.3.0 keys quants by the canonical Location._id; findMany matches
+      // locationId verbatim, so resolve 'stock' to its _id (plus the legacy code).
+      const locationRefs = await resolveStockLocationRefs(flow, bid);
+      const quants = await flow.repositories.quant.findMany({ locationId: { $in: locationRefs } }, ctx);
 
       // Filter quants belonging to this product (skuRef = variantSku or productId)
       const pid = String(productId);

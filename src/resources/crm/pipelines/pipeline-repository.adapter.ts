@@ -1,4 +1,4 @@
-import type { Pipeline, PipelineRepository, Stage } from '@classytic/crm';
+import type { Pipeline, PipelineRepository, Stage } from '../ports.js';
 import type { CrmRequestContext } from '../context-helpers.js';
 import type { IPipelineDoc, IStage } from './pipeline.model.js';
 import crmPipelineRepository from './pipeline.repository.js';

@@ -288,6 +288,8 @@ export const accountingEventDefinitions: ReadonlyArray<EventDefinitionOutput> = 
   OrderFulfilledEvent,
   ReturnRestockedEvent,
   InventoryAdjustedEvent,
+  BudgetThresholdExceededEvent,
+  RmaRestockingFeeCollectedEvent,
   PurchasePaidEvent,
   PurchaseReceivedEvent,
   CodSettledEvent,

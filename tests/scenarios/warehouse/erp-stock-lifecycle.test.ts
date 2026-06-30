@@ -38,6 +38,7 @@ import {
   getStock,
   getCostLayers,
   cleanAll,
+  resolveCanonicalLocationId,
 } from '../../support/erp-seed.js';
 
 let replSet: MongoMemoryReplSet;
@@ -240,9 +241,13 @@ describe('Scenario 4: Stock Damage Write-Off', () => {
       { skuRef: PRODUCTS.JACKET_BLK.sku, status: 'done', operationType: 'adjustment' },
       { organizationId: OUTLET, lean: true },
     );
-    // At least one move from stock → adjustment (the write-off)
+    // At least one move from stock → adjustment (the write-off).
+    // flow 0.3.0 canonicalizes non-virtual move location refs to Location._id
+    // on create (virtual refs like 'adjustment' pass through), so the stored
+    // sourceLocationId is the canonical 'stock' _id, not the 'stock' code.
+    const stockLocId = await resolveCanonicalLocationId(flow, OUTLET, LOC.stock);
     const writeOffMove = moves.find(
-      (m) => m.sourceLocationId === LOC.stock && m.destinationLocationId === LOC.adjustment,
+      (m) => m.sourceLocationId === stockLocId && m.destinationLocationId === LOC.adjustment,
     );
     expect(writeOffMove).toBeDefined();
     expect(writeOffMove!.quantityDone).toBe(3);
@@ -256,9 +261,13 @@ describe('Scenario 4: Stock Damage Write-Off', () => {
     expect(layersBefore).toHaveLength(1);
     expect(layersBefore[0].remainingQty).toBe(30);
 
-    // Consume 5 units via FIFO drain (adjustment destination is inventory_loss = COGS type)
+    // Consume 5 units via FIFO drain (adjustment destination is inventory_loss = COGS type).
+    // flow 0.3.0 keys cost layers by the canonical Location._id; consumeLayers
+    // matches locationId RAW (no alias tolerance), so resolve the code first —
+    // this is exactly what PostingService does internally via findByRef.
+    const stockLocId = await resolveCanonicalLocationId(flow, OUTLET, LOC.stock);
     const consumption = await flow.services.costLayer.consumeLayers(
-      PRODUCTS.TSHIRT_RED_M.sku, LOC.stock, 5, 'fifo', ctx(OUTLET),
+      PRODUCTS.TSHIRT_RED_M.sku, stockLocId, 5, 'fifo', ctx(OUTLET),
     );
     expect(consumption.totalCost).toBe(5 * 450); // 2250
     expect(consumption.consumed).toHaveLength(1);
@@ -346,9 +355,12 @@ describe('Scenario 6: Sale with FIFO COGS', () => {
       { qty: 10, unitCost: 900 },  // Receipt 2: newer, price increased
     ]);
 
-    // Sell 15 units: should drain 10 @ 800 (FIFO first) + 5 @ 900
+    // Sell 15 units: should drain 10 @ 800 (FIFO first) + 5 @ 900.
+    // Resolve 'stock' to its canonical Location._id — flow 0.3.0 keys layers
+    // by _id and consumeLayers matches locationId without alias tolerance.
+    const saleStockLocId = await resolveCanonicalLocationId(flow, OUTLET, LOC.stock);
     const consumption = await flow.services.costLayer.consumeLayers(
-      sku, LOC.stock, 15, 'fifo', ctx(OUTLET),
+      sku, saleStockLocId, 15, 'fifo', ctx(OUTLET),
     );
 
     // FIFO: oldest first (800), then newer (900)

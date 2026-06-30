@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { BD } from '#resources/accounting/posting/bd-account-codes.js';
 
 const idParam = z.object({ id: z.string().min(1) });
 const orderNumberParam = z.object({ orderNumber: z.string().min(1) });
@@ -68,7 +67,10 @@ export const codSettlementSchema = {
       writeoff: numericInput.optional(),
       // Limit to canonical chart codes — never hardcode literals here, the
        // ledger-bd chart has renumbered Bank `1112 → 1113` once already.
-      cashAccount: z.enum([BD.pettyCash, BD.cash]).optional(),
+      // Semantic cash intent — the accounting layer maps this to the GL
+      // account. Keeps the sales/orders module free of chart-of-accounts codes
+      // (pure-ecom hosts that run without accounting still compile this schema).
+      cashAccount: z.enum(['cash', 'petty_cash']).optional(),
       notes: z.string().optional(),
       date: z.string().optional(),
     })

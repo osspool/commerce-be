@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import config from '#config/index.js';
 import { getTransactionModel } from '#shared/revenue/engine.js';
 import { type CodPlacementData, codPlacementToPosting } from '../../posting/contracts/cod-placement.contract.js';
 import { type SalesTransactionData, salesTransactionToPosting } from '../../posting/contracts/sales.contract.js';
@@ -71,6 +72,21 @@ export const orderPaidHandler = definePostingHandler({
     const { promoDiscount, orderGateway, customerId, orderReferenceNumber } = orderId
       ? await loadOrderMeta(orderId)
       : { promoDiscount: 0, orderGateway: '', customerId: null, orderReferenceNumber: undefined };
+
+    // Mutual exclusion (single source of truth for credit-sale A/R). When
+    // auto-invoicing credit sales is enabled, the @classytic/invoice engine
+    // creates AND posts the customer invoice (Dr A/R / Cr Revenue) from this
+    // SAME OrderPaid event (it fires only for paymentMethod === 'credit'). The
+    // direct sales JE below MUST yield for credit orders, or revenue is
+    // recognized twice. Prepaid / COD are unaffected — the invoice engine never
+    // creates documents for them, so the direct path stays authoritative there.
+    if (config.invoice.autoSales !== 'off' && orderGateway === 'credit') {
+      log.debug(
+        { orderId },
+        'order-paid: auto-invoice owns the credit sale A/R — skipping direct sales JE',
+      );
+      return null;
+    }
 
     if (orderGateway === 'cod' && orderId) {
       const data: CodPlacementData = {

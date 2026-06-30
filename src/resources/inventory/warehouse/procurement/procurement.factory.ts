@@ -192,8 +192,28 @@ export function createProcurementResource() {
         handler: async (req: FastifyRequest, reply: FastifyReply) => {
           const { id } = req.params as { id: string };
           const ctx = flowCtxGuard.from(req);
-          // biome-ignore lint/suspicious/noExplicitAny: service contract opaque
-          const body = req.body as any;
+          const raw = req.body as {
+            receivedAt?: string;
+            lines?: Array<{
+              skuRef: string;
+              quantityReceived: number;
+              lotCode?: string;
+              serialCode?: string;
+              unitCost?: number;
+              expiresAt?: string | Date;
+            }>;
+          };
+          // Flow's receive schema expects real `Date`s (z.date()); the HTTP
+          // body carries ISO strings. Coerce the date fields at the boundary
+          // so manual-expiry receipts (perishables) reach the WMS correctly.
+          const body = {
+            ...raw,
+            receivedAt: raw?.receivedAt ? new Date(raw.receivedAt) : undefined,
+            lines: (raw?.lines ?? []).map((line) => ({
+              ...line,
+              expiresAt: line?.expiresAt ? new Date(line.expiresAt) : undefined,
+            })),
+          };
           const result = await flow().services.procurement.receive(id, body, ctx);
           return reply.send(result);
         },

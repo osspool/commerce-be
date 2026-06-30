@@ -143,20 +143,25 @@ export function createClassyticLedgerBridge(): LedgerBridge {
       // AP for vendor-side) that mirrors the original invoice. Tag it with
       // the source invoice's partner so AR-aging by-partner stays correct
       // and the negative `contactId: null` slop row doesn't accumulate.
-      // LedgerPaymentInput doesn't carry partnerId/moveType, so we look
-      // them up off the source invoice via the same mongoose connection.
+      //
+      // `moveType` arrives on `input` since invoice@0.3.0 — no extra fetch
+      // needed for that side. We still re-read the invoice for `partnerId`
+      // because `LedgerPaymentInput` doesn't carry it (could be deferred to
+      // a future invoice release; today it's a single indexed lookup).
+      const moveType = input.moveType;
       const Invoice = mongoose.connection.collection('invoices');
       const sourceInv = (await Invoice.findOne({
         _id: mongoose.Types.ObjectId.isValid(input.invoiceId)
           ? new mongoose.Types.ObjectId(input.invoiceId)
           : (input.invoiceId as unknown as mongoose.Types.ObjectId),
       })) as { partnerId?: string; moveType?: string } | null;
-      if (sourceInv?.partnerId && sourceInv.moveType) {
+      const effectiveMoveType = moveType ?? sourceInv?.moveType;
+      if (sourceInv?.partnerId && effectiveMoveType) {
         await stampPartner(
           id,
           sourceInv.partnerId,
-          partnerSide(sourceInv.moveType),
-          controlAccount(sourceInv.moveType),
+          partnerSide(effectiveMoveType),
+          controlAccount(effectiveMoveType),
         );
       }
       return id;

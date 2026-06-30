@@ -30,6 +30,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import platformRepository from '#resources/platform/platform.repository.js';
 import { enrollCustomer, getMemberForCustomer, syncCustomerMembership } from '#resources/sales/loyalty/loyalty.bridge.js';
 import { getLoyaltyEngine } from '#resources/sales/loyalty/loyalty.plugin.js';
+import { minorToMajor } from '#shared/money.js';
 
 interface OrderLineLite {
   quantity?: number;
@@ -114,7 +115,7 @@ async function tryAwardPoints(
     // on a rule then literally means "1 point per ৳100 spent".
     const orderTotalPaisa = order.totals?.grandTotal?.amount ?? 0;
     if (orderTotalPaisa <= 0) return;
-    const orderTotalBdt = orderTotalPaisa / 100;
+    const orderTotalBdt = minorToMajor(orderTotalPaisa);
 
     // Build BDT-major line items so category-typed earning rules can
     // match against frozen categoryId. unitPrice is paisa on the snapshot
@@ -126,7 +127,7 @@ async function tryAwardPoints(
         const unitPaisa = l.snapshot?.unitPrice ?? 0;
         return {
           categoryId: meta?.categoryId,
-          amount: (unitPaisa * qty) / 100,
+          amount: minorToMajor(unitPaisa * qty),
           quantity: qty,
         };
       })

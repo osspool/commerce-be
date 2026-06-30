@@ -24,6 +24,8 @@
  * ledger flag is more useful than a failed shipment.
  */
 
+import { majorToMinor } from '#shared/money.js';
+
 interface OrderLineLite {
   lineId?: string;
   quantity?: number;
@@ -134,7 +136,7 @@ export async function defaultProductCostLookup(
       const moneyAmt = (v as { amount?: unknown }).amount;
       if (typeof moneyAmt === 'number' && moneyAmt > 0) return moneyAmt;
     }
-    if (typeof v === 'number' && v > 0) return Math.round(v * 100);
+    if (typeof v === 'number' && v > 0) return majorToMinor(v);
   }
 
   // Product-level cost — `defaultMonetization.pricing.costPrice.amount` is
@@ -146,7 +148,7 @@ export async function defaultProductCostLookup(
 
   // Legacy top-level field — pre-monetization-block schema, bare BDT number.
   const legacy = product.costPrice as unknown;
-  if (typeof legacy === 'number' && legacy > 0) return Math.round(legacy * 100);
+  if (typeof legacy === 'number' && legacy > 0) return majorToMinor(legacy);
 
   return null;
 }

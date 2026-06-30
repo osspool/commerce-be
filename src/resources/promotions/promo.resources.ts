@@ -48,26 +48,81 @@ function engine() {
  */
 function ctx(req: FastifyRequest) {
   const user = (req as unknown as Record<string, unknown>).user as Record<string, unknown> | undefined;
-  const actorId = (user?._id || user?.id || 'anonymous') as string;
-  return { actorId };
+  // @classytic/promo 0.3 renamed the context actor field `actorId` → `actorRef`
+  // (commerce-wide "stable user id OR guest session id" convention). Clean
+  // break — no alias — so the host must build `actorRef`.
+  const actorRef = (user?._id || user?.id || 'anonymous') as string;
+  return { actorRef };
 }
 
+/**
+ * @classytic/promo 0.4 switched its domain errors to hierarchical lowercase
+ * codes (`promo.<entity>.<problem>`) that each implement `HttpError` (carrying
+ * an authoritative `status`). This table re-maps the new codes back to the
+ * stable UPPER_SNAKE wire codes our SDK + clients discriminate on, so the
+ * public contract is unchanged by the package bump. Anything unmapped keeps
+ * the package's own code verbatim.
+ */
+const PROMO_CODE_TO_WIRE: Record<string, string> = {
+  'promo.program.not_found': 'PROGRAM_NOT_FOUND',
+  'promo.voucher.not_found': 'VOUCHER_NOT_FOUND',
+  'promo.evaluation.not_found': 'EVALUATION_NOT_FOUND',
+  'promo.rule.not_found': 'RULE_NOT_FOUND',
+  'promo.reward.not_found': 'REWARD_NOT_FOUND',
+  'promo.program.invalid_transition': 'INVALID_TRANSITION',
+  'promo.voucher.expired': 'VOUCHER_EXPIRED',
+  'promo.voucher.exhausted': 'VOUCHER_EXHAUSTED',
+  'promo.gift_card.insufficient_balance': 'INSUFFICIENT_BALANCE',
+  'promo.gift_card.exhausted': 'INSUFFICIENT_BALANCE',
+  'promo.validation.invalid_input': 'VALIDATION_ERROR',
+  'promo.voucher.duplicate_redemption': 'DUPLICATE_REDEMPTION',
+  'promo.voucher.duplicate_code': 'DUPLICATE_CODE',
+  'promo.program.usage_cap_exceeded': 'PROGRAM_USAGE_CAP_EXCEEDED',
+  'promo.evaluation.cart_hash_mismatch': 'CART_HASH_MISMATCH',
+  'promo.tenant.missing_context': 'TENANT_ISOLATION',
+  'promo.concurrency.write_conflict': 'WRITE_CONFLICT',
+  'promo.engine.model_collision': 'MODEL_COLLISION',
+};
+
+// Fallback status for the rare legacy/unmapped code that arrives without an
+// HttpError `status`. Promo 0.4 errors all carry `status`, so this is only
+// reached for non-PromoError throwables (e.g. a bare driver error).
 function statusForCode(code: string | undefined): number {
-  if (
-    code === 'PROGRAM_NOT_FOUND' ||
-    code === 'VOUCHER_NOT_FOUND' ||
-    code === 'EVALUATION_NOT_FOUND' ||
-    code === 'RULE_NOT_FOUND' ||
-    code === 'REWARD_NOT_FOUND'
-  )
-    return 404;
-  if (code === 'INVALID_TRANSITION') return 422;
-  if (code === 'VOUCHER_EXPIRED' || code === 'VOUCHER_EXHAUSTED') return 410;
-  if (code === 'INSUFFICIENT_BALANCE' || code === 'VALIDATION_ERROR') return 400;
-  if (code === 'DUPLICATE_REDEMPTION') return 409;
-  if (code === 'CART_HASH_MISMATCH') return 409;
-  if (code === 'TENANT_ISOLATION') return 403;
-  return 400;
+  switch (code) {
+    case 'PROGRAM_NOT_FOUND':
+    case 'VOUCHER_NOT_FOUND':
+    case 'EVALUATION_NOT_FOUND':
+    case 'RULE_NOT_FOUND':
+    case 'REWARD_NOT_FOUND':
+      return 404;
+    case 'INVALID_TRANSITION':
+      return 422;
+    case 'VOUCHER_EXPIRED':
+    case 'VOUCHER_EXHAUSTED':
+      return 410;
+    case 'DUPLICATE_REDEMPTION':
+    case 'DUPLICATE_CODE':
+    case 'CART_HASH_MISMATCH':
+    case 'PROGRAM_USAGE_CAP_EXCEEDED':
+    case 'WRITE_CONFLICT':
+      return 409;
+    case 'TENANT_ISOLATION':
+      return 403;
+    default:
+      return 400;
+  }
+}
+
+/**
+ * Normalise a thrown promo error into a stable wire `{ code, statusCode }`.
+ * Prefers the package's authoritative `HttpError.status` (promo 0.4); maps the
+ * hierarchical code back to the legacy UPPER_SNAKE wire code.
+ */
+function toWireError(err: unknown): { code: string; statusCode: number } {
+  const e = err as Error & { code?: string; status?: number; statusCode?: number };
+  const wireCode = (e.code && PROMO_CODE_TO_WIRE[e.code]) ?? e.code ?? 'PROMO_ERROR';
+  const statusCode = e.status ?? e.statusCode ?? statusForCode(wireCode);
+  return { code: wireCode, statusCode };
 }
 
 /**
@@ -81,11 +136,8 @@ function promoRoute<T>(fn: (req: FastifyRequest, reply: FastifyReply) => Promise
       return await fn(req, reply);
     } catch (err) {
       if (err instanceof ArcError) throw err;
-      const e = err as Error & { code?: string };
-      throw new ArcError(e.message, {
-        code: e.code ?? 'PROMO_ERROR',
-        statusCode: statusForCode(e.code),
-      });
+      const { code, statusCode: status } = toWireError(err);
+      throw new ArcError((err as Error).message, { code, statusCode: status });
     }
   }, statusCode);
 }
@@ -104,11 +156,8 @@ function promoAction<T>(
       return await fn(id, data, req);
     } catch (err) {
       if (err instanceof ArcError) throw err;
-      const e = err as Error & { code?: string; statusCode?: number };
-      throw new ArcError(e.message, {
-        code: e.code ?? 'PROMO_ERROR',
-        statusCode: e.statusCode ?? statusForCode(e.code),
-      });
+      const { code, statusCode } = toWireError(err);
+      throw new ArcError((err as Error).message, { code, statusCode });
     }
   };
 }

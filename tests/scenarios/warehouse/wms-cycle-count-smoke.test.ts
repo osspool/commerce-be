@@ -230,11 +230,14 @@ describe('WMS Cycle Count Smoke — audit lifecycle via HTTP', () => {
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body);
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
-    // Arc's action pipeline returns 'Validation failed' for unknown action
-    // verbs (the enum validator rejects at the schema layer before the
-    // handler runs). The previous 'invalid action' wording was from the
-    // service-level check that's now dead-code behind the schema check.
-    expect(body.message).toMatch(/validation|invalid action/i);
+    // Arc's action router (createActionRouter) rejects an unknown action verb
+    // before the handler runs and returns a 400 whose message names the bad
+    // verb and lists the valid ones: "Unknown action 'explode' on
+    // 'stock-audit'. Valid at 'POST /:id/action': ...". Earlier Arc builds
+    // surfaced this as 'Validation failed'; accept either wording (plus the
+    // legacy service-level 'invalid action') so the assertion pins the
+    // contract — a 400 that identifies the rejection — not the exact prose.
+    expect(body.message).toMatch(/validation|invalid action|unknown action/i);
   });
 
   it('should reject unauthenticated audit list', async () => {

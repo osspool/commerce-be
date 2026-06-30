@@ -1,4 +1,5 @@
-import type { Activity, ActivityFilter, ActivityRepository, ActivityStatus } from '@classytic/crm';
+import type { ActivityStatus } from '@classytic/crm';
+import type { Activity, ActivityFilter, ActivityRepository } from '../ports.js';
 import type { CrmRequestContext } from '../context-helpers.js';
 import type { IActivityDoc } from './activity.model.js';
 import crmActivityRepository from './activity.repository.js';

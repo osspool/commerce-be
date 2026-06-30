@@ -21,6 +21,8 @@
 import { getOrgId, getUserId } from '@classytic/arc/scope';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import { requireFinanceManager } from '#shared/permissions.js';
+import { minorToMajor } from '#shared/money.js';
+import { resolveMethodKind } from '#shared/payments/method-kind.js';
 import type { Invoice } from '@classytic/invoice';
 import type { Repository } from '@classytic/mongokit';
 import {
@@ -148,14 +150,24 @@ export const invoiceActions = {
 
   record_payment: {
     handler: async (id: string, data: Record<string, unknown>, req: RequestWithExtras) => {
+      const amount = data.amount as number;
+      const currency = (data.currency as string | undefined) ?? 'BDT';
+      const method = data.method as string | undefined;
+      const date = data.date ? new Date(data.date as string) : undefined;
       return invoice().repositories.invoices.recordPayment(
         {
           invoiceId: id,
-          paymentId: data.paymentId as string,
-          amount: data.amount as number,
-          method: data.method as string,
-          currency: data.currency as string | undefined,
-          date: data.date ? new Date(data.date as string) : undefined,
+          payment: {
+            externalId: data.paymentId as string | undefined,
+            totalAmount: amount,
+            currency,
+            date,
+            methodKind: resolveMethodKind(method),
+            methodCode: method,
+          },
+          amount,
+          currency,
+          date,
           discountAmount: data.discountAmount as number | undefined,
         },
         ctx(req),
@@ -213,7 +225,7 @@ export const invoiceActions = {
       const inv = await invoice().repositories.invoices.markSent(id, ctx(req));
       const notification = invoice().config?.notification;
       if (notification) {
-        const formatAmt = (paisa: number) => (paisa / 100).toFixed(2);
+        const formatAmt = (paisa: number) => minorToMajor(paisa).toFixed(2);
         await notification
           .send({
             event: 'invoice:sent',

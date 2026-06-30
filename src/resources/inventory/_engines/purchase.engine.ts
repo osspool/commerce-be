@@ -143,6 +143,16 @@ export function initializePurchaseEngine(): PurchaseEngine {
     },
     eventTransport: purchaseEventTransport,
     autoIndex: shouldAutoIndex(),
+    // purchase 0.2.0 (via mongokit 3.16 / repo-core 0.6) now defaults its
+    // PurchaseOrder model to a REQUIRED `organizationId` tenant field + a
+    // fail-closed multiTenantPlugin. be-prod's tenant boundary is arc's
+    // RequestScope (purchase orders are head-office/company-scoped — see the
+    // "company-wide" branch-isolation assertions), and be-prod's
+    // PurchaseOrderRepository extends mongokit's Repository directly without
+    // the engine's tenant plugin, so create() never supplies organizationId.
+    // Disable mongokit tenancy so the schema field is no longer required —
+    // same convention as the transfer + promo engines.
+    tenant: false,
     // Vitest isolates each test file's module scope (engine = null) while the
     // Mongoose connection persists models across files. forceRecreate deletes
     // and re-registers stale models so engine init is idempotent per file.

@@ -92,10 +92,18 @@ async function getStock(): Promise<{ onHand: number; reserved: number; available
 
 async function getCostLayers(): Promise<Array<{ remainingQty: number; unitCost: number }>> {
   const { getFlowEngine } = await import('#resources/inventory/flow/flow-engine.js');
-  const layers = await getFlowEngine().models.CostLayer.find({
+  const flow = getFlowEngine();
+  // flow 0.3.0 keys cost layers by the canonical Location._id (resolved from
+  // the 'stock' code via findByRef); match both forms so the read sees layers
+  // seeded by setExactLayers and drained by the real ship-move alike.
+  const loc = (await flow.repositories.location.findByRef('stock', {
+    organizationId: env.orgId,
+  })) as { _id?: unknown } | null;
+  const canonical = loc?._id ? String(loc._id) : 'stock';
+  const layers = await flow.models.CostLayer.find({
     organizationId: env.orgId,
     skuRef: productId,
-    locationId: 'stock',
+    locationId: { $in: ['stock', canonical] },
     remainingQty: { $gt: 0 },
   }).sort({ receivedAt: 1 }).lean();
   return layers.map((l) => ({ remainingQty: l.remainingQty, unitCost: l.unitCost }));

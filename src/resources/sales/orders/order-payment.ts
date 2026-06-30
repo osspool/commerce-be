@@ -24,6 +24,7 @@ import type {
   PaymentVerificationResult,
   RevenueBridge,
 } from '@classytic/order';
+import { resolveMethodKind } from '#shared/payments/method-kind.js';
 
 export interface OrderPaymentInput {
   method?: string;
@@ -113,6 +114,7 @@ export async function attachPaymentToOrder(params: {
         customerId,
         amount,
         gateway,
+        methodKind: resolveMethodKind(gateway),
         paymentData: payment as Record<string, unknown>,
         verifiedBy: ctx.actorRef,
         idempotencyKey,
@@ -126,6 +128,7 @@ export async function attachPaymentToOrder(params: {
       customerId,
       amount,
       gateway,
+      methodKind: resolveMethodKind(gateway),
       metadata: payment as Record<string, unknown>,
       idempotencyKey,
     });

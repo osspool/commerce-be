@@ -162,3 +162,38 @@ export const SYSTEM_LOCATION_CODES: readonly string[] = [
 export function isSystemLocationCode(code: string): boolean {
   return SYSTEM_LOCATION_CODES.includes(code);
 }
+
+/**
+ * Resolve a location CODE (default 'stock') to the set of location refs a RAW
+ * quant/cost-layer query must match for a given branch.
+ *
+ * flow 0.3.0 canonicalizes location refs to `Location._id` on write: quants and
+ * cost layers created via moveGroup/postMove are keyed by the resolved
+ * `Location._id`, NOT the code string. The quant repository applies alias
+ * tolerance ONLY in `getAvailability`/`getBatch`; the raw `findMany` and
+ * `aggregatePipeline` paths match `locationId` verbatim. So any be-prod read
+ * that filters quants by the bare `'stock'` code (POS browse list, dashboard
+ * summary, batch branch-stock) matches nothing post-upgrade and renders every
+ * product out-of-stock. Resolve the code to its canonical `_id` and match BOTH
+ * forms (use the returned array with `$in`) so we read canonical rows and stay
+ * tolerant of any legacy code-keyed rows written before the upgrade.
+ *
+ * Returns `[code]` when the location can't be resolved (best-effort — better to
+ * run the query than to throw inside a read path).
+ */
+export async function resolveStockLocationRefs(
+  flow: { repositories: { location: { findByRef: (ref: string, opts: { organizationId: string }) => Promise<{ _id?: unknown } | null> } } },
+  branchId: string,
+  code: string = DEFAULT_LOCATION,
+): Promise<string[]> {
+  try {
+    const loc = await flow.repositories.location.findByRef(code, { organizationId: branchId });
+    if (loc?._id) {
+      const canonical = String(loc._id);
+      return canonical === code ? [code] : [code, canonical];
+    }
+  } catch {
+    // Best-effort — fall through to the bare code.
+  }
+  return [code];
+}

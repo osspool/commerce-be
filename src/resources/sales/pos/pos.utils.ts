@@ -172,14 +172,18 @@ async function resolveParentCategoryFilter(
  * rendering with `branchStock.inStock=false` after enrichment.
  */
 async function resolveBranchStockSkuRefs(branchId: string): Promise<string[]> {
-  const [{ getFlowEngine }, { buildFlowContext, DEFAULT_LOCATION }] = await Promise.all([
+  const [{ getFlowEngine }, { buildFlowContext, resolveStockLocationRefs }] = await Promise.all([
     import('#resources/inventory/flow/flow-engine.js'),
     import('#resources/inventory/flow/context-helpers.js'),
   ]);
   const flow = getFlowEngine();
   const ctx = buildFlowContext(branchId);
+  // flow 0.3.0 keys quants by the canonical Location._id; findMany matches
+  // locationId verbatim, so resolve the 'stock' code to its _id (and keep the
+  // code for legacy rows) — see resolveStockLocationRefs.
+  const locationRefs = await resolveStockLocationRefs(flow, branchId);
   const quants = (await flow.repositories.quant.findMany(
-    { locationId: DEFAULT_LOCATION, quantityOnHand: { $gt: 0 } },
+    { locationId: { $in: locationRefs }, quantityOnHand: { $gt: 0 } },
     ctx,
   )) as Array<{ skuRef: string }> | undefined;
   if (!quants?.length) return [];

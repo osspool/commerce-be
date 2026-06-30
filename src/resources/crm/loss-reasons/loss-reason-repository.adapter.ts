@@ -1,4 +1,4 @@
-import type { LossReason, LossReasonRepository } from '@classytic/crm';
+import type { LossReason, LossReasonRepository } from '../ports.js';
 import type { CrmRequestContext } from '../context-helpers.js';
 import type { ILossReasonDoc } from './loss-reason.model.js';
 import crmLossReasonRepository from './loss-reason.repository.js';

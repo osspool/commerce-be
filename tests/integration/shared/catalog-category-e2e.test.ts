@@ -102,7 +102,7 @@ describe('Category Custom Routes', () => {
     expect(body.name).toBe('Men');
   });
 
-  it('GET /tree — returns category tree', async () => {
+  it('GET /tree — builds a nested 2-level tree from ONE query (+ caches)', async () => {
     const res = await ctx.app.inject({
       method: 'GET',
       url: `${API}/tree`,
@@ -110,8 +110,30 @@ describe('Category Custom Routes', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
+    const body = JSON.parse(res.body) as Array<{ slug: string; parent?: string | null; children?: Array<{ parent?: string }> }>;
     expect(Array.isArray(body)).toBe(true);
+
+    // 'men' (root) was created with a child (parent: 'men'). The single-query
+    // in-memory tree build must nest that child under `children` — this is the
+    // regression guard for the old N+1 handler.
+    const men = body.find((c) => c.slug === 'men');
+    expect(men, "'men' root present in tree").toBeDefined();
+    expect(Array.isArray(men!.children)).toBe(true);
+    expect(men!.children!.length).toBeGreaterThan(0);
+    for (const child of men!.children!) {
+      expect(child.parent).toBe('men');
+    }
+    // Roots only at the top level (no child leaked to the root array).
+    expect(body.every((c) => c.parent == null)).toBe(true);
+
+    // Cache consistency — a second read returns the identical tree.
+    const res2 = await ctx.app.inject({
+      method: 'GET',
+      url: `${API}/tree`,
+      headers: authHeaders(ctx.users.admin.token, ctx.orgId),
+    });
+    expect(res2.statusCode).toBe(200);
+    expect(JSON.parse(res2.body)).toEqual(body);
   });
 
   it('GET /:parentSlug/children — returns children', async () => {
@@ -124,6 +146,28 @@ describe('Category Custom Routes', () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(Array.isArray(body)).toBe(true);
+  });
+
+  it('a category mutation busts the /tree cache (no 60s staleness)', async () => {
+    // Prime the cache.
+    await ctx.app.inject({ method: 'GET', url: `${API}/tree`, headers: authHeaders(ctx.users.admin.token, ctx.orgId) });
+
+    // Create a new root AFTER the tree was cached.
+    const created = await ctx.app.inject({
+      method: 'POST',
+      url: API,
+      headers: authHeaders(ctx.users.admin.token, ctx.orgId),
+      payload: { name: 'Gadgets', slug: 'gadgets', description: 'Tech', displayOrder: 9, isActive: true },
+    });
+    expect(created.statusCode).toBeLessThan(300);
+
+    // The tree must reflect it immediately — the mutation invalidated the cache.
+    const res = await ctx.app.inject({ method: 'GET', url: `${API}/tree`, headers: authHeaders(ctx.users.admin.token, ctx.orgId) });
+    const tree = JSON.parse(res.body) as Array<{ slug: string }>;
+    expect(tree.some((c) => c.slug === 'gadgets'), 'new category appears in tree without waiting for TTL').toBe(true);
+
+    // Cleanup so it doesn't leak into the company-wide regression block below.
+    await ctx.app.inject({ method: 'DELETE', url: `${API}/${JSON.parse(created.body)._id}`, headers: authHeaders(ctx.users.admin.token, ctx.orgId) });
   });
 });
 

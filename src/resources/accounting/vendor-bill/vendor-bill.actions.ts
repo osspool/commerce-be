@@ -21,6 +21,7 @@ import { calculateVDS } from '@classytic/bd-tax';
 import type { RequestWithExtras } from '@classytic/arc/types';
 import mongoose from 'mongoose';
 import { requireFinanceAdmin } from '#shared/permissions.js';
+import { majorToMinor } from '#shared/money.js';
 import { JournalEntry } from '../accounting.engine.js';
 import WithholdingCertificate from '../withholding/withholding-certificate.model.js';
 import { buildCertificateData } from '../withholding/withholding-certificate.auto.js';
@@ -90,8 +91,8 @@ async function postBillAction(purchaseId: string, data: Record<string, unknown>,
   // posting contract expects paisa (integer minor units). Convert here and
   // round to integer paisa to match the same contract used by the
   // procurement-received bridge.
-  const grandTotalPaisa = Math.round(Number(purchase.grandTotal || 0) * 100);
-  const taxTotalPaisa = Math.round(Number(purchase.taxTotal || 0) * 100);
+  const grandTotalPaisa = majorToMinor(Number(purchase.grandTotal || 0));
+  const taxTotalPaisa = majorToMinor(Number(purchase.taxTotal || 0));
 
   // Dominant VAT rate across line items (most BD bills are single-rate; the
   // dominant one wins for input-VAT account selection).
@@ -345,6 +346,9 @@ async function creditNoteAction(billJeId: string, data: Record<string, unknown>,
       reason: data.reason as string,
       reference: data.reference as string,
       date: data.date ? new Date(data.date as string) : undefined,
+      // Optional GL override — route a service/allowance credit to its proper
+      // account instead of the default Purchase Returns (5503).
+      contraAccount: (data.contraAccount as string | undefined) ?? undefined,
     },
     { autoPost: true },
   );

@@ -1,3 +1,4 @@
+import type { CrmContext } from '@classytic/crm';
 import type { FastifyRequest } from 'fastify';
 import { getCrmContext } from '../context-helpers.js';
 import { buildCrmServices } from '../crm-engine.js';
@@ -100,11 +101,17 @@ export async function convertLead(id: string, data: Record<string, unknown>, req
       ? (amount as { amount: number; currency: string })
       : undefined;
 
-  return services.leads.convert(id, {
-    pipelineId,
-    ...(typeof opportunityName === 'string' ? { opportunityName } : {}),
-    ...(amountMoney ? { amount: amountMoney } : {}),
-    ...(typeof expectedCloseAt === 'string' ? { expectedCloseAt: new Date(expectedCloseAt) } : {}),
-    ...(actingUserId(req) ? { by: actingUserId(req) } : {}),
-  });
+  const crmCtx: CrmContext = getCrmContext(req);
+
+  return services.leads.convert(
+    id,
+    {
+      pipelineId,
+      ...(typeof opportunityName === 'string' ? { opportunityName } : {}),
+      ...(amountMoney ? { amount: amountMoney } : {}),
+      ...(typeof expectedCloseAt === 'string' ? { expectedCloseAt: new Date(expectedCloseAt) } : {}),
+      ...(actingUserId(req) ? { by: actingUserId(req) } : {}),
+    },
+    crmCtx,
+  );
 }

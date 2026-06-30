@@ -115,9 +115,11 @@ describe('Analytics — /dashboard', () => {
     const { ensureOrderEngine } = await import('#resources/sales/orders/order.engine.js');
 
     // A verified inflow — contributes to totalRevenue + today.revenue.
+    const { resolveMethodKind } = await import('#shared/payments/method-kind.js');
     const txn = await getRevenueEngine().repositories.transaction.createPaymentIntent({
       amount: 12_500,
       gateway: 'cash',
+      methodKind: resolveMethodKind('cash'),
     });
     await getRevenueEngine().repositories.transaction.verify(txn.gateway!.paymentIntentId as string);
 

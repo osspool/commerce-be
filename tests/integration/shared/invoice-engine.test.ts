@@ -107,6 +107,41 @@ function sampleBill(overrides = {}) {
 
 const repo = () => engine.repositories.invoices;
 
+// Map gateway/method strings → universal PaymentMethodKind (invoice 0.4+ requires
+// `payment.methodKind`; the old flat `method` string is preserved as `methodCode`).
+const METHOD_KIND: Record<string, string> = {
+  card: 'card',
+  cash: 'cash',
+  bank: 'bank_transfer',
+  bank_transfer: 'bank_transfer',
+};
+
+// Adapter for the new recordPayment contract (invoice 0.4+): the flat
+// `{ paymentId, amount, method }` shape became `{ amount, payment: { totalAmount,
+// currency, methodKind, methodCode, externalId } }`. Builds the new-payment
+// branch from the old test ergonomics.
+function pay(args: {
+  invoiceId: string;
+  paymentId: string;
+  amount: number;
+  method: string;
+  discountAmount?: number;
+}) {
+  return {
+    invoiceId: args.invoiceId,
+    amount: args.amount,
+    currency: 'BDT',
+    ...(args.discountAmount !== undefined ? { discountAmount: args.discountAmount } : {}),
+    payment: {
+      externalId: args.paymentId,
+      totalAmount: args.amount,
+      currency: 'BDT',
+      methodKind: (METHOD_KIND[args.method] ?? 'other') as never,
+      methodCode: args.method,
+    },
+  };
+}
+
 // ── 1. Engine Initialization ──────────────────────────────────────────────
 
 describe('Engine Initialization', () => {
@@ -178,9 +213,9 @@ describe('Customer Invoice Lifecycle', () => {
   });
 
   it('recordPayment (partial) → paymentStatus=partial', async () => {
-    const alloc = await repo().recordPayment({
+    const alloc = await repo().recordPayment(pay({
       invoiceId, paymentId: 'pay-1', amount: 3000, method: 'card',
-    }, ctx());
+    }), ctx());
 
     expect(alloc.amount).toBe(3000);
     expect(alloc.invoiceId).toBe(invoiceId);
@@ -192,9 +227,9 @@ describe('Customer Invoice Lifecycle', () => {
   });
 
   it('recordPayment (remainder) → paymentStatus=paid', async () => {
-    await repo().recordPayment({
+    await repo().recordPayment(pay({
       invoiceId, paymentId: 'pay-2', amount: 2750, method: 'cash',
-    }, ctx());
+    }), ctx());
 
     const inv = await repo().getById(invoiceId, scope());
     expect(inv?.paymentStatus).toBe('paid');
@@ -213,9 +248,9 @@ describe('Vendor Bill Lifecycle', () => {
     const posted = await repo().post(draft._id, ctx());
     expect(posted.number).toBeTruthy();
 
-    await repo().recordPayment({
+    await repo().recordPayment(pay({
       invoiceId: posted._id, paymentId: 'bill-pay-1', amount: posted.totalAmount, method: 'bank_transfer',
-    }, ctx());
+    }), ctx());
 
     const paid = await repo().getById(posted._id, scope());
     expect(paid?.paymentStatus).toBe('paid');
@@ -255,7 +290,7 @@ describe('Receipt Flow', () => {
     const { receipt, payment } = await repo().createPaidReceipt({
       partnerId: 'walk-in',
       lines: [{ description: 'Cash Sale', quantity: 1, unitPrice: 5000 }],
-      paymentId: 'pos-txn-001', method: 'cash',
+      externalId: 'pos-txn-001', methodKind: 'cash', methodCode: 'cash',
     }, ctx());
 
     expect(receipt.status).toBe('posted');
@@ -298,9 +333,9 @@ describe('Cancel and Void', () => {
   it('voids even if partially paid', async () => {
     const d = await repo().createDraft(sampleInvoice(), ctx());
     const p = await repo().post(d._id, ctx());
-    await repo().recordPayment({
+    await repo().recordPayment(pay({
       invoiceId: p._id, paymentId: 'void-pay', amount: 1000, method: 'cash',
-    }, ctx());
+    }), ctx());
 
     const voided = await repo().void(p._id, 'incorrect invoice', ctx());
     expect(voided.status).toBe('voided');
@@ -309,9 +344,9 @@ describe('Cancel and Void', () => {
   it('rejects cancel on paid invoice', async () => {
     const d = await repo().createDraft(sampleInvoice(), ctx());
     const p = await repo().post(d._id, ctx());
-    await repo().recordPayment({
+    await repo().recordPayment(pay({
       invoiceId: p._id, paymentId: 'full-pay', amount: p.totalAmount, method: 'cash',
-    }, ctx());
+    }), ctx());
 
     await expect(repo().cancel(p._id, 'test', ctx())).rejects.toThrow('no payments');
   });
@@ -422,9 +457,9 @@ describe('LedgerBridge Integration', () => {
     const before = ledgerCalls.length;
     const d = await repo().createDraft(sampleInvoice(), ctx());
     const p = await repo().post(d._id, ctx());
-    await repo().recordPayment({
+    await repo().recordPayment(pay({
       invoiceId: p._id, paymentId: 'bridge-test', amount: p.totalAmount, method: 'bank',
-    }, ctx());
+    }), ctx());
     expect(ledgerCalls.slice(before).filter(c => c.method === 'recordPayment')).toHaveLength(1);
   });
 });
@@ -474,9 +509,9 @@ describe('Deposit / Down Payment', () => {
     const posted = await repo().post(dep._id, ctx());
     expect(posted.status).toBe('posted');
 
-    await repo().recordPayment({
+    await repo().recordPayment(pay({
       invoiceId: dep._id, paymentId: 'dep-pay', amount: posted.totalAmount, method: 'bank_transfer',
-    }, ctx());
+    }), ctx());
     const paid = await repo().getById(dep._id, scope());
     expect(paid?.paymentStatus).toBe('paid');
   });
@@ -494,10 +529,10 @@ describe('Early-Payment Discount', () => {
     const discount = Math.round(p.totalAmount * 0.02);
     const cashAmount = p.totalAmount - discount;
 
-    const alloc = await repo().recordPayment({
+    const alloc = await repo().recordPayment(pay({
       invoiceId: p._id, paymentId: 'disc-pay', amount: cashAmount, method: 'bank',
       discountAmount: discount,
-    }, ctx());
+    }), ctx());
 
     expect(alloc.discountAmount).toBe(discount);
     const settled = await repo().getById(p._id, scope());
@@ -509,10 +544,10 @@ describe('Early-Payment Discount', () => {
     const d = await repo().createDraft(sampleInvoice(), ctx());
     const p = await repo().post(d._id, ctx());
 
-    await expect(repo().recordPayment({
+    await expect(repo().recordPayment(pay({
       invoiceId: p._id, paymentId: 'over', amount: p.totalAmount, method: 'cash',
       discountAmount: 100,
-    }, ctx())).rejects.toThrow('exceeds');
+    }), ctx())).rejects.toThrow('exceeds');
   });
 
   it('reversal un-settles both cash and discount', async () => {
@@ -522,9 +557,9 @@ describe('Early-Payment Discount', () => {
     }, ctx());
     const p = await repo().post(d._id, ctx());
 
-    const alloc = await repo().recordPayment({
+    const alloc = await repo().recordPayment(pay({
       invoiceId: p._id, paymentId: 'rev-d', amount: 48500, method: 'card', discountAmount: 1000,
-    }, ctx());
+    }), ctx());
 
     await repo().reversePayment(alloc._id, 'mistake', ctx());
     const restored = await repo().getById(p._id, scope());
@@ -560,9 +595,9 @@ describe('Response Shape Compliance', () => {
   it('recordPayment returns raw PaymentAllocation doc', async () => {
     const d = await repo().createDraft(sampleInvoice(), ctx());
     const p = await repo().post(d._id, ctx());
-    const alloc = await repo().recordPayment({
+    const alloc = await repo().recordPayment(pay({
       invoiceId: p._id, paymentId: 'shape-test', amount: p.totalAmount, method: 'cash',
-    }, ctx());
+    }), ctx());
     expect(alloc).toHaveProperty('_id');
     expect(alloc).toHaveProperty('amount');
     expect(alloc).toHaveProperty('invoiceId');

@@ -40,9 +40,11 @@ async function createPendingTransaction(amount: number, gateway = 'bkash'): Prom
   publicId: string;
 }> {
   const { getRevenueEngine } = await import('#shared/revenue/engine.js');
+  const { resolveMethodKind } = await import('#shared/payments/method-kind.js');
   const txn = await getRevenueEngine().repositories.transaction.createPaymentIntent({
     amount,
     gateway,
+    methodKind: resolveMethodKind(gateway),
     data: { sourceId: new mongoose.Types.ObjectId().toString(), sourceModel: 'Order' },
     metadata: { source: 'pos', branchCode: 'TEST-HO' },
   });

@@ -13,7 +13,7 @@
  *   - order.cancel → bridge.release() → ReservationService.release()
  */
 
-import type { BridgeRef, FlowBridge, OrderContext } from '@classytic/order';
+import type { BridgeRef, FlowBridge, LotAllocation, OrderContext } from '@classytic/order';
 import { buildFlowContext, DEFAULT_LOCATION } from '#resources/inventory/flow/context-helpers.js';
 import { getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';
 
@@ -116,20 +116,44 @@ export function createFlowBridge(): FlowBridge {
      * with `reservationIds` attached, Flow auto-consumes the reservation.
      * This method exists for the explicit-commit path (POS, manual release).
      */
-    async commit(refs, ctx: OrderContext) {
+    async commit(refs, ctx: OrderContext): Promise<LotAllocation[]> {
       const flow = getFlowEngineOrNull();
-      if (!flow) return;
+      if (!flow) return [];
 
       const flowCtx = buildFlowContext(ctx.organizationId!, ctx.actorRef);
+      const allocations: LotAllocation[] = [];
       for (const ref of refs) {
-        const qty = Number((ref.payload as Record<string, unknown> | undefined)?.quantity ?? 0);
+        const payload = ref.payload as Record<string, unknown> | undefined;
+        const qty = Number(payload?.quantity ?? 0);
         if (!qty) continue;
         try {
           await flow.services.reservation.consume(ref.id, qty, flowCtx);
+          // Surface the lot the reservation resolved to (when lot-level), so
+          // the order kernel can stamp FulfillmentLine.allocatedLots for
+          // perishable traceability. Location-level reservations carry no
+          // lotId — the lot is assigned at the move/pick instead; that
+          // richer capture is wired in the fulfillment ship handler.
+          const reservation = await flow.repositories.reservation.getById(ref.id, {
+            throwOnNotFound: false,
+            organizationId: ctx.organizationId,
+          });
+          const lotId = (reservation as { lotId?: unknown } | null)?.lotId;
+          if (lotId) {
+            allocations.push({
+              lineId: String(payload?.lineId ?? ''),
+              skuRef: String(payload?.skuRef ?? ''),
+              lotId: String(lotId),
+              ...(((reservation as { expiresAt?: Date }).expiresAt)
+                ? { expiresAt: (reservation as { expiresAt?: Date }).expiresAt }
+                : {}),
+              quantity: qty,
+            });
+          }
         } catch {
           // Consume can fail if already consumed or released; treat as idempotent.
         }
       }
+      return allocations;
     },
 
     /**

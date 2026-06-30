@@ -14,6 +14,7 @@
  * one bad row never blocks the rest of the queue.
  */
 import logger from '#lib/utils/logger.js';
+import { resolveMethodKind } from '#shared/payments/method-kind.js';
 import { isRevenueReady } from '#shared/revenue/engine.js';
 import {
   subscriptionRepository,
@@ -83,6 +84,11 @@ export async function processBillingDue(now: Date = new Date()): Promise<Billing
           ...(sub.customerId ? { customerId: sub.customerId } : {}),
           type: 'subscription',
           method: 'subscription',
+          // revenue 2.4 makes methodKind a required schema field. A recurring
+          // billing tick has no concrete instrument at charge time (the
+          // saved-method capture happens later), so use the documented
+          // last-resort kind. resolveMethodKind('subscription') → 'other'.
+          methodKind: resolveMethodKind('subscription'),
           amount: sub.amount,
           currency: sub.currency ?? 'BDT',
           status: 'pending',

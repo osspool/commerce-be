@@ -49,6 +49,14 @@ const auditSchema = new Schema(
   { strict: false, timestamps: false },
 );
 
+// Tenant-prefixed compound indexes (PACKAGE_RULES §36). The audit controller
+// injects `{ organizationId }` into EVERY read filter, so the hot paths are
+// org-scoped — the single-field indexes above can't lead an org-scoped query.
+//   1. per-org, time-ordered feed (the default audit list view)
+//   2. per-entity history: org + resource + documentId, newest first
+auditSchema.index({ organizationId: 1, timestamp: -1 });
+auditSchema.index({ organizationId: 1, resource: 1, documentId: 1, timestamp: -1 });
+
 auditSchema.pre('save', function () {
   const doc = this as unknown as { expiresAt?: Date; get(path: string): unknown };
   if (doc.expiresAt) return;

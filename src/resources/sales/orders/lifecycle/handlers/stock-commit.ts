@@ -133,6 +133,59 @@ export const stockCommitHandler: TransitionHandler = {
     await flow.services.moveGroup.executeAction(String(group._id), 'confirm', {}, flowCtx);
     await flow.services.moveGroup.executeAction(String(group._id), 'receive', {}, flowCtx);
 
+    // 1b. Capture which lots actually shipped (perishable traceability — the
+    //     Odoo stock.move.line.lot_id analog). The posted move-lines carry the
+    //     FEFO-picked lotId/lotCode/expiry; group them by SKU and stamp them
+    //     onto the order fulfillment lines. Best-effort: a read/update blip
+    //     must never fail the shipment itself (stock has already moved).
+    try {
+      const moveLines = (await flow.repositories.stockMoveLine.findAll(
+        { moveGroupId: String(group._id) },
+        { organizationId: orgId, lean: true },
+      )) as Array<{
+        skuRef?: string;
+        lotId?: unknown;
+        lotCode?: string;
+        lotExpiresAt?: Date;
+        quantityDone?: number;
+        quantity?: number;
+      }>;
+
+      const lotsBySku = new Map<
+        string,
+        Array<{ lotId: string; lotCode?: string; expiresAt?: Date; quantity: number }>
+      >();
+      for (const ml of moveLines) {
+        if (!ml.skuRef || !ml.lotId) continue; // non-lot-tracked lines carry no lot
+        const list = lotsBySku.get(ml.skuRef) ?? [];
+        list.push({
+          lotId: String(ml.lotId),
+          ...(ml.lotCode ? { lotCode: ml.lotCode } : {}),
+          ...(ml.lotExpiresAt ? { expiresAt: ml.lotExpiresAt } : {}),
+          quantity: ml.quantityDone ?? ml.quantity ?? 0,
+        });
+        lotsBySku.set(ml.skuRef, list);
+      }
+
+      if (lotsBySku.size > 0) {
+        const updatedLines = fLines.map((line) => {
+          const skuRef = line.skuRef ?? line.sku;
+          const lots = skuRef ? lotsBySku.get(skuRef) : undefined;
+          return lots && lots.length > 0 ? { ...line, allocatedLots: lots } : line;
+        });
+        await deps.engine.repositories.fulfillment.update(
+          String((fulfillment as { _id: unknown })._id),
+          { lines: updatedLines },
+          { organizationId: orgId },
+        );
+      }
+    } catch (err) {
+      deps.logger.debug?.(
+        { err: (err as Error).message, fulfillmentNumber: ctx.fulfillmentNumber },
+        'stock-commit-on-ship: lot capture skipped',
+      );
+    }
+
     // 2. Release the placement-time reservation for each shipped line.
     //    `release` (not `consume`) — units have already physically moved,
     //    we just want `quantityReserved` to drop. Idempotent on

@@ -246,9 +246,19 @@ describe('Flow Inventory E2E', () => {
     });
 
     it('should reject empty items in MoveGroup', async () => {
+      // flow 0.3.0 validates service-boundary input via repo-core's
+      // validateStandardSchema (Zod `items: z.array(...).min(1)`). Structural
+      // failures now throw the org-standard HttpError 400 ('Validation
+      // failed') with the field detail under `validationErrors`, instead of
+      // flow's old domain-specific 'at least one item' message.
       await expect(
         flow.services.moveGroup.create({ groupType: 'adjustment', items: [] }, ctx()),
-      ).rejects.toThrow(/at least one item/);
+      ).rejects.toMatchObject({
+        status: 400,
+        validationErrors: expect.arrayContaining([
+          expect.objectContaining({ error: expect.stringMatching(/items/i) }),
+        ]),
+      });
     });
   });
 
@@ -491,9 +501,18 @@ describe('Flow Inventory E2E', () => {
 
       const moves = await flow.repositories.move.findAll({ moveGroupId: group._id }, { organizationId: ctx().organizationId, lean: true });
 
+      // flow 0.3.0 validates postMove input via Zod
+      // (`quantityDone: z.number().positive()`); a structural failure throws
+      // the org-standard HttpError 400 ('Validation failed') carrying the
+      // field under `validationErrors`, replacing the old /positive/ message.
       await expect(
         flow.services.posting.postMove(moves[0]._id, { quantityDone: 0 }, ctx()),
-      ).rejects.toThrow(/positive/i);
+      ).rejects.toMatchObject({
+        status: 400,
+        validationErrors: expect.arrayContaining([
+          expect.objectContaining({ error: expect.stringMatching(/quantityDone/i) }),
+        ]),
+      });
     });
   });
 

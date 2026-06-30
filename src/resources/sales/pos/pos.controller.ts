@@ -29,6 +29,7 @@ import {
   rollbackPromo,
   type PromoLineItem,
 } from '#resources/promotions/promo-placement.js';
+import { majorToMinor } from '#shared/money.js';
 import type { OrderChannel } from '../orders/channel.js';
 import { ensureOrderEngine } from '../orders/order.engine.js';
 import { toFulfillmentAddress } from '../orders/shipping-address.js';
@@ -189,7 +190,7 @@ class PosController {
             .slice(0, 64) || 'misc';
           const syntheticSku = `service:${slug}`;
           const unitPriceMinor =
-            typeof item.price === 'number' ? Math.round(item.price * 100) : 0;
+            typeof item.price === 'number' ? majorToMinor(item.price) : 0;
           return {
             kind: 'service-fee',
             offerId: syntheticSku,
@@ -213,7 +214,7 @@ class PosController {
           offerId: item.variantSku ?? item.productId,
           quantity: item.quantity,
           unitPriceOverride:
-            typeof item.price === 'number' ? { amount: Math.round(item.price * 100), currency: 'BDT' } : undefined,
+            typeof item.price === 'number' ? { amount: majorToMinor(item.price), currency: 'BDT' } : undefined,
           metadata: { productId: item.productId, variantSku: item.variantSku },
         };
       });
@@ -231,7 +232,7 @@ class PosController {
           item.kind !== 'service-fee' && typeof item.productId === 'string',
         )
         .map((item) => {
-        const unitPrice = typeof item.price === 'number' ? Math.round(item.price * 100) : 0;
+        const unitPrice = typeof item.price === 'number' ? majorToMinor(item.price) : 0;
         return {
           productId: item.productId,
           sku: item.variantSku ?? item.productId,
@@ -271,7 +272,7 @@ class PosController {
                   paymentData: {
                     payments: payments.map((p) => ({
                       ...p,
-                      amount: typeof p.amount === 'number' ? Math.round(p.amount * 100) : 0,
+                      amount: typeof p.amount === 'number' ? majorToMinor(p.amount) : 0,
                     })),
                     reference: payments[0].reference,
                   },
@@ -293,7 +294,7 @@ class PosController {
               // hook reads from here instead. Amounts are paisa.
               payments: payments.map((p) => ({
                 method: p.method,
-                amount: typeof p.amount === 'number' ? Math.round(p.amount * 100) : 0,
+                amount: typeof p.amount === 'number' ? majorToMinor(p.amount) : 0,
                 ...(p.reference ? { reference: p.reference } : {}),
               })),
               ...(promoReservation.evaluationId ? { promoEvaluationId: promoReservation.evaluationId } : {}),

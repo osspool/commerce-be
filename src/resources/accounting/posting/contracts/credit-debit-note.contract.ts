@@ -43,6 +43,16 @@ export interface NoteInputBase {
   reason: string; // audit — non-empty
   reference: string; // human doc number (CN-001, DN-001) — required for idempotency
   date?: Date;
+  /**
+   * GL account for the OFFSETTING leg (the non-AR/AP side). Defaults to the
+   * returns/allowances account (5503 vendor, 4114 customer) — i.e. "goods came
+   * back". Override it to route a NON-goods credit to its proper account:
+   * a service-fee reversal, SLA penalty, freight allowance, discount, etc.
+   * This is the JE-view path's equivalent of the invoice engine's per-line
+   * `accountCode` — so service-based credits route correctly on both surfaces.
+   * Opaque host COA code; resolved + validated by the posting service.
+   */
+  contraAccount?: string;
 }
 
 export interface VendorCreditNoteInput extends NoteInputBase {
@@ -89,7 +99,7 @@ export function vendorCreditNoteToPosting(
       partnerType: 'supplier',
     },
     {
-      accountCode: PURCHASE_RETURNS,
+      accountCode: input.contraAccount ?? PURCHASE_RETURNS,
       debit: 0,
       credit: input.amount,
       label: `Credit note ${input.reference}`,
@@ -114,7 +124,7 @@ export function customerDebitNoteToPosting(
   validateNoteInput(input);
   const items: PostingItem[] = [
     {
-      accountCode: SALES_RETURNS,
+      accountCode: input.contraAccount ?? SALES_RETURNS,
       debit: input.amount,
       credit: 0,
       label: `Debit note ${input.reference}`,

@@ -33,6 +33,7 @@ import {
 import posLookupService from './flow/pos-lookup.service.js';
 import inventoryRepository from './inventory.repository.js';
 import { createError, ForbiddenError, NotFoundError, ValidationError } from '@classytic/arc/utils';
+import { takaToPaisa } from '#shared/money.js';
 
 const loadPosUtils = createModuleLoader('#resources/sales/pos/pos.utils.js');
 
@@ -313,16 +314,18 @@ class InventoryController extends BaseController {
         // shorter transaction span.
         const current = await flow.services.quant.getAvailability({ skuRef, locationId: locationCode }, ctx);
         const currentQty = current.quantityOnHand;
-        // Pre-move unit cost in PAISA. Two sources, two units to normalize:
-        //   1. Flow quant breakdown — `unitCost` is BDT major (set by
-        //      receive-items-into-stock as a bare number). Multiply ×100.
+        // Pre-move unit cost in PAISA (the accounting / posting unit). Two
+        // sources, two units to normalize:
+        //   1. Flow quant breakdown — `unitCost` is a major-taka number (set
+        //      by receive-items-into-stock). Convert major → paisa via the
+        //      BDT-pinned money authority (`takaToPaisa`), NOT a literal ×100.
         //   2. `defaultProductCostLookup` — already returns paisa. Use as-is.
         // Fallback to (2) only when Flow has no breakdown for this skuRef
         // at the queried location (cost not seeded yet).
         let preMoveUnitCostPaisa = 0;
         const flowUnitCost = current.breakdowns?.[0]?.unitCost;
         if (typeof flowUnitCost === 'number' && flowUnitCost > 0) {
-          preMoveUnitCostPaisa = Math.round(flowUnitCost * 100);
+          preMoveUnitCostPaisa = takaToPaisa(flowUnitCost);
         }
         if (preMoveUnitCostPaisa <= 0 && adj.productId) {
           const { defaultProductCostLookup } = await import(

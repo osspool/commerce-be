@@ -327,3 +327,47 @@ describe('Product Delete', () => {
     expect(res.statusCode).toBeLessThan(300);
   });
 });
+
+// ── Perishable / shelf-life cascade ─────────────────────────────────────
+// Product-level `tracking` / `catchWeight` must cascade onto EVERY
+// (auto-generated) variant — be-prod's wrapProductRepo does this so flow's
+// CatalogBridge can read the policy per variant. Also proves the fields
+// survive the Arc create pipeline (not stripped as unknown).
+
+describe('Perishable cascade', () => {
+  it('cascades product-level tracking + catchWeight onto generated variants', async () => {
+    const res = await ctx.app.inject({
+      method: 'POST',
+      url: API,
+      headers: authHeaders(ctx.users.admin.token, ctx.orgId),
+      payload: {
+        name: 'Fresh Milk 1L',
+        productType: 'physical',
+        defaultMonetization: {
+          type: 'one_time',
+          pricing: { basePrice: { amount: 12000, currency: 'BDT' }, currency: 'BDT' },
+        },
+        variationAttributes: [
+          { code: 'size', name: 'Size', values: [{ code: '1l', label: '1L' }, { code: '2l', label: '2L' }] },
+        ],
+        // product-level perishable policy → cascaded to every variant
+        tracking: { mode: 'lot', useExpiration: true, shelfLifeDays: 14, removalDays: 3, alertDays: 5 },
+        catchWeight: true,
+        weightUom: 'kg',
+      },
+    });
+
+    expect(res.statusCode, `create: ${res.statusCode} ${res.body}`).toBeLessThan(300);
+    const body = JSON.parse(res.body);
+    expect(body.variants?.length).toBeGreaterThan(0);
+
+    for (const v of body.variants) {
+      expect(v.tracking?.mode, `variant ${v.sku} tracking.mode`).toBe('lot');
+      expect(v.tracking?.useExpiration).toBe(true);
+      expect(v.tracking?.shelfLifeDays).toBe(14);
+      expect(v.tracking?.removalDays).toBe(3);
+      expect(v.catchWeight).toBe(true);
+      expect(v.weightUom).toBe('kg');
+    }
+  });
+});

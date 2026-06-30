@@ -9,6 +9,7 @@
 
 import { arcLog } from '@classytic/arc/logger';
 import { ConsoleChannel, createSimpleResolver, EmailChannel, NotificationService } from '@classytic/notifications';
+import { clientConfig } from '#config/client.config.js';
 import { templates } from './templates.js';
 
 const log = arcLog('notifications');
@@ -16,7 +17,7 @@ const log = arcLog('notifications');
 let _service: NotificationService | null = null;
 
 function getPlatformName(): string {
-  return process.env.PLATFORM_NAME || 'BigBoss';
+  return process.env.PLATFORM_NAME || clientConfig.name;
 }
 
 function getFrontendUrl(): string {

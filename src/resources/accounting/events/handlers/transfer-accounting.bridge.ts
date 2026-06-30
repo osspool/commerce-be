@@ -35,6 +35,7 @@
 import type { DomainEvent } from '@classytic/primitives/events';
 import type { Types } from 'mongoose';
 import { subscribe } from '#lib/events/arcEvents.js';
+import { majorToMinor } from '#shared/money.js';
 import logger from '#lib/utils/logger.js';
 import { skuRefFromProduct } from '#resources/inventory/flow/context-helpers.js';
 import { buildFlowContext } from '#resources/inventory/flow/context-helpers.js';
@@ -153,7 +154,7 @@ async function resolveCostFromBranch(
   let transitPaisa = 0;
   for (const item of items) {
     const transit = Number(item.transitCost ?? 0);
-    if (transit > 0) transitPaisa += Math.round(transit * 100);
+    if (transit > 0) transitPaisa += majorToMinor(transit);
   }
 
   if (!flow) return { goodsPaisa: 0, transitPaisa, missing: [] };
@@ -194,7 +195,7 @@ async function resolveCostFromBranch(
       missing.push(skuRef);
       continue;
     }
-    goodsPaisa += Math.round(qty * unitCost * 100);
+    goodsPaisa += majorToMinor(qty * unitCost);
   }
 
   return { goodsPaisa, transitPaisa, missing };

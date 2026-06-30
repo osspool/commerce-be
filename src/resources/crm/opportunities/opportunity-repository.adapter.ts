@@ -1,10 +1,10 @@
+import type { OpportunityStatus } from '@classytic/crm';
 import type {
   Opportunity,
   OpportunityFilter,
   OpportunityRepository,
-  OpportunityStatus,
   OpportunityStatusEntry,
-} from '@classytic/crm';
+} from '../ports.js';
 import type { CrmRequestContext } from '../context-helpers.js';
 import type { IOpportunityDoc, IOpportunityStatusEntry } from './opportunity.model.js';
 import crmOpportunityRepository from './opportunity.repository.js';

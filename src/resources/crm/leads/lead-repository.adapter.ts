@@ -1,4 +1,5 @@
-import type { Lead, LeadFilter, LeadRepository, LeadStatus, LeadStatusEntry } from '@classytic/crm';
+import type { LeadStatus } from '@classytic/crm';
+import type { Lead, LeadFilter, LeadRepository, LeadStatusEntry } from '../ports.js';
 import type { CrmRequestContext } from '../context-helpers.js';
 import type { ILeadDoc, ILeadStatusEntry } from './lead.model.js';
 import crmLeadRepository from './lead.repository.js';

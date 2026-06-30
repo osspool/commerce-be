@@ -4,6 +4,7 @@ import posLookupService from '#resources/inventory/flow/pos-lookup.service.js';
 import { createStatusError } from '#resources/inventory/shared/status-errors.js';
 import { notifyEvent } from '#resources/notifications/notification.publish.js';
 import { outboxStore } from '#shared/outbox/index.js';
+import { majorToMinor } from '#shared/money.js';
 import { getPurchaseEngine } from '#resources/inventory/_engines/purchase.engine.js';
 import { PurchaseOrderStatus } from '../purchase-order.constants.js';
 import { buildStatusEntry, normalizeNumber } from '../purchase-order.utils.js';
@@ -79,8 +80,8 @@ export async function receivePurchase(
         // paisa` per posting.service.ts). Convert at the publish boundary so
         // the journal entry's `Dr/Cr` amounts match the actual money paid.
         // Without this we'd post entries 100× too small (৳55.20 instead of ৳5,520).
-        const grandTotalPaisa = Math.round(grandTotal * 100);
-        const taxTotalPaisa = Math.round(taxTotal * 100);
+        const grandTotalPaisa = majorToMinor(grandTotal);
+        const taxTotalPaisa = majorToMinor(taxTotal);
         const currency = purchase.currency || 'BDT';
         const exchangeRate = purchase.exchangeRate || undefined;
         // Propagate the purchase's dominant VAT rate so the posting contract

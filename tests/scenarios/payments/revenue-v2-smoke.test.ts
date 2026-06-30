@@ -132,7 +132,7 @@ describe('Payment lifecycle: create → verify → refund', () => {
     const branchId = new mongoose.Types.ObjectId();
     const txn = await engine.repositories.transaction.createPaymentIntent({
       amount: 150000,
-      gateway: 'fake',
+      gateway: 'fake', methodKind: 'card',
       data: { customerId: 'cust_1', sourceId: 'order_1', sourceModel: 'Order' },
       metadata: { branch: branchId, source: 'pos', branchCode: 'DHK-001' },
     });
@@ -147,7 +147,7 @@ describe('Payment lifecycle: create → verify → refund', () => {
 
   it('verify transitions to VERIFIED and records verifiedBy', async () => {
     const txn = await engine.repositories.transaction.createPaymentIntent({
-      amount: 50000, gateway: 'fake',
+      amount: 50000, gateway: 'fake', methodKind: 'card',
     });
 
     const verified = await engine.repositories.transaction.verify(
@@ -162,7 +162,7 @@ describe('Payment lifecycle: create → verify → refund', () => {
 
   it('full refund creates outflow doc and marks original REFUNDED', async () => {
     const txn = await engine.repositories.transaction.createPaymentIntent({
-      amount: 80000, gateway: 'fake',
+      amount: 80000, gateway: 'fake', methodKind: 'card',
     });
     await engine.repositories.transaction.verify(txn.gateway!.paymentIntentId as string);
 
@@ -180,7 +180,7 @@ describe('Payment lifecycle: create → verify → refund', () => {
 
   it('partial refund → PARTIALLY_REFUNDED', async () => {
     const txn = await engine.repositories.transaction.createPaymentIntent({
-      amount: 100000, gateway: 'fake',
+      amount: 100000, gateway: 'fake', methodKind: 'card',
     });
     await engine.repositories.transaction.verify(txn.gateway!.paymentIntentId as string);
 
@@ -194,7 +194,7 @@ describe('Payment lifecycle: create → verify → refund', () => {
 
 describe('Escrow lifecycle: hold → release → split', () => {
   it('hold + full release', async () => {
-    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 200000, gateway: 'fake' });
+    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 200000, gateway: 'fake', methodKind: 'card' });
     await engine.repositories.transaction.verify(txn.gateway!.paymentIntentId as string);
 
     const held = await engine.repositories.transaction.hold(String(txn._id), { reason: 'marketplace_escrow' });
@@ -208,7 +208,7 @@ describe('Escrow lifecycle: hold → release → split', () => {
   }, TIMEOUT);
 
   it('split distributes among recipients atomically', async () => {
-    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 100000, gateway: 'fake' });
+    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 100000, gateway: 'fake', methodKind: 'card' });
     await engine.repositories.transaction.verify(txn.gateway!.paymentIntentId as string);
 
     const updated = await engine.repositories.transaction.split(String(txn._id), [
@@ -230,7 +230,7 @@ describe('Mongokit hooks fire on state changes', () => {
     const spy = vi.fn();
     engine.repositories.transaction.on('after:update', spy);
 
-    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 10000, gateway: 'fake' });
+    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 10000, gateway: 'fake', methodKind: 'card' });
     await engine.repositories.transaction.verify(txn.gateway!.paymentIntentId as string);
 
     expect(spy).toHaveBeenCalled();
@@ -246,7 +246,7 @@ describe('Mongokit hooks fire on state changes', () => {
     const spy = vi.fn();
     engine.repositories.transaction.on('after:create', spy);
 
-    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 20000, gateway: 'fake' });
+    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 20000, gateway: 'fake', methodKind: 'card' });
     await engine.repositories.transaction.verify(txn.gateway!.paymentIntentId as string);
     await engine.repositories.transaction.refund(String(txn._id), null, { reason: 'test' });
 
@@ -261,7 +261,7 @@ describe('Mongokit hooks fire on state changes', () => {
 
 describe('Soft delete', () => {
   it('delete soft-deletes, restore revives', async () => {
-    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 5000, gateway: 'fake' });
+    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 5000, gateway: 'fake', methodKind: 'card' });
     const id = String(txn._id);
 
     await engine.repositories.transaction.delete(id);
@@ -278,7 +278,7 @@ describe('Soft delete', () => {
 describe('QueryParser compat (getAll)', () => {
   it('filters by status and paginates', async () => {
     for (let i = 0; i < 5; i++) {
-      const t = await engine.repositories.transaction.createPaymentIntent({ amount: 1000 * (i + 1), gateway: 'fake' });
+      const t = await engine.repositories.transaction.createPaymentIntent({ amount: 1000 * (i + 1), gateway: 'fake', methodKind: 'card' });
       if (i < 3) await engine.repositories.transaction.verify(t.gateway!.paymentIntentId as string);
     }
 
@@ -305,19 +305,19 @@ describe('Enum compatibility', () => {
 describe('Gap detection', () => {
   it('idempotencyKey dedup works across creates', async () => {
     const key = `idem_${Date.now()}`;
-    const first = await engine.repositories.transaction.createPaymentIntent({ amount: 5000, gateway: 'fake', idempotencyKey: key });
-    const second = await engine.repositories.transaction.createPaymentIntent({ amount: 5000, gateway: 'fake', idempotencyKey: key });
+    const first = await engine.repositories.transaction.createPaymentIntent({ amount: 5000, gateway: 'fake', methodKind: 'card', idempotencyKey: key });
+    const second = await engine.repositories.transaction.createPaymentIntent({ amount: 5000, gateway: 'fake', methodKind: 'card', idempotencyKey: key });
     expect(String(first._id)).toBe(String(second._id));
   }, TIMEOUT);
 
   it('free (zero amount) goes straight to VERIFIED', async () => {
-    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 0, gateway: 'fake', monetizationType: 'free' });
+    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 0, gateway: 'fake', methodKind: 'card', monetizationType: 'free' });
     expect(txn.status).toBe(TRANSACTION_STATUS.VERIFIED);
     expect(txn.gateway?.paymentIntentId).toBeUndefined();
   }, TIMEOUT);
 
   it('webhook deduplication', async () => {
-    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 10000, gateway: 'fake' });
+    const txn = await engine.repositories.transaction.createPaymentIntent({ amount: 10000, gateway: 'fake', methodKind: 'card' });
     const first = await engine.repositories.transaction.handleWebhook('fake', {
       type: 'payment.succeeded', sessionId: txn.gateway!.sessionId,
     });

@@ -17,6 +17,7 @@
  */
 
 import { parse } from 'csv-parse/sync';
+import { majorToMinor } from '#shared/money.js';
 import type { ISettlementLeg, SettlementProvider } from './settlement-import.model.js';
 
 export type ParsedLeg = Omit<
@@ -42,7 +43,7 @@ function toPaisa(value: string | undefined, fieldName: string, line: number): nu
   if (!Number.isFinite(num)) {
     throw new Error(`Line ${line}: invalid ${fieldName} '${value}'`);
   }
-  return Math.round(num * 100);
+  return majorToMinor(num);
 }
 
 function toDate(value: string | undefined, fieldName: string, line: number): Date {

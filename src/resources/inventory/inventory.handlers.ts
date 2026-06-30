@@ -29,12 +29,13 @@
  * payloads at publish time. Subscribers can trust the shape.
  */
 
-import { FlowEvents } from '@classytic/flow';
 import { wrapWithBoundary } from '@classytic/arc/events';
+import { FlowEvents } from '@classytic/flow';
 import mongoose from 'mongoose';
 import { subscribe } from '#lib/events/arcEvents.js';
 import logger from '#lib/utils/logger.js';
 import branchRepository from '#resources/commerce/branch/branch.repository.js';
+import { defineProjection, registerProjections } from '#shared/projections.js';
 import {
   buildFlowContext,
   buildHeadOfficeFlowContext,
@@ -54,18 +55,38 @@ interface ProductEventPayload {
   productId: string;
 }
 
-interface FlowQuantChangePayload {
-  organizationId: string;
-  skuRef: string;
-  sourceLocationId?: string;
-  destinationLocationId?: string;
-}
-
 const eventLogger = logger as unknown as Parameters<typeof wrapWithBoundary>[1] extends infer O
   ? O extends { logger?: infer L }
     ? L
     : never
   : never;
+
+/**
+ * Storefront stock read-cache (`product.stockProjection`).
+ *
+ * **Source of truth = head-office on-hand ONLY** — the cache is a single shared
+ * field per product, powering public PDP/listing UIs that don't pick a branch.
+ * Sub-branch (POS/store) quant changes are filtered out in `recompute`
+ * (`syncProductQuantityFromQuant` early-returns when the triggering org isn't
+ * HO), so retail stock never overwrites the online figure.
+ *
+ * Declared via the projection framework so it shares the standard reliability
+ * profile (subscriber filter + boundary-wrapped idempotent recompute). Drift
+ * backstop: `test/backfill-stock-projection.mjs` + `POST /products/:id/sync-stock`.
+ */
+export const stockProjection = defineProjection({
+  name: 'stock',
+  events: [
+    FlowEvents.MOVE_DONE,
+    FlowEvents.RESERVATION_RELEASED, // cart abandonment frees HO stock
+    FlowEvents.RESERVATION_CONSUMED, // sale committed — HO on-hand drops
+    FlowEvents.ADJUSTMENT_POSTED, // cycle count / write-off / write-on (bypasses move lifecycle)
+    FlowEvents.PROCUREMENT_RECEIVED, // new HO receipts — most common positive event
+  ],
+  // Filter: need both skuRef + org; sub-branch orgs are dropped inside recompute.
+  selectKey: (p) => (typeof p.skuRef === 'string' && typeof p.organizationId === 'string' ? p.skuRef : null),
+  recompute: (skuRef, ctx) => syncProductQuantityFromQuant(skuRef, ctx.triggeredBy ?? ''),
+});
 
 let handlersRegistered = false;
 
@@ -167,54 +188,12 @@ export function registerInventoryEventHandlers(options: { force?: boolean } = {}
   );
 
   // ── Flow → Product: keep `product.stockProjection` accurate ──
-  //
-  // **Storefront stock = head-office only.** The cache `stockProjection`
-  // is shared (single field per product) and powers public-facing PDP /
-  // listing UIs that don't pick a branch. We pin the read to head-office
-  // so sub-branch (POS / store) stock changes never overwrite the online
-  // figure with retail-only inventory.
-  //
-  // Sub-branch stock changes are SKIPPED at filter time — only HO events
-  // trigger a sync. This avoids burning a getAvailability call (and the
-  // resulting writeProjection) every time a clerk at MAIN scans a barcode.
-  //
-  // Flow events arrive with data at `event.payload` (modern publishers)
-  // or at the envelope root (legacy) — handle both inline.
-  const handleFlowQuantChange = (eventName: string) =>
-    wrapWithBoundary(
-      async (event) => {
-        const data = ((event.payload as FlowQuantChangePayload | undefined) ??
-          (event as unknown as FlowQuantChangePayload));
-        if (!data.skuRef || !data.organizationId) return;
-        await syncProductQuantityFromQuant(data.skuRef, data.organizationId);
-      },
-      { name: eventName, logger: eventLogger },
-    );
-
-  void subscribe(FlowEvents.MOVE_DONE, handleFlowQuantChange(FlowEvents.MOVE_DONE));
-  void subscribe(
-    FlowEvents.RESERVATION_RELEASED,
-    handleFlowQuantChange(FlowEvents.RESERVATION_RELEASED),
-  );
-  // Reservation consumed = sale committed = on-hand drops at the
-  // fulfilling branch. If that's HO, the storefront cache must shrink.
-  void subscribe(
-    FlowEvents.RESERVATION_CONSUMED,
-    handleFlowQuantChange(FlowEvents.RESERVATION_CONSUMED),
-  );
-  // Stock-adjustment writes (cycle counts, write-offs, write-ons) bypass
-  // move-line lifecycle but still mutate quants. Without this subscriber
-  // the public cache rots between manual sync clicks.
-  void subscribe(
-    FlowEvents.ADJUSTMENT_POSTED,
-    handleFlowQuantChange(FlowEvents.ADJUSTMENT_POSTED),
-  );
-  // Procurement receipts are the most common positive stock event for
-  // online inventory — new HO receipts must propagate to the storefront.
-  void subscribe(
-    FlowEvents.PROCUREMENT_RECEIVED,
-    handleFlowQuantChange(FlowEvents.PROCUREMENT_RECEIVED),
-  );
+  // The storefront read-cache is declared as a projection (see `stockProjection`
+  // above). This wires every registered projection's event subscribers — the
+  // standard, reusable replacement for the hand-rolled subscribe loop that
+  // lived here. (When a 2nd projection is added in another module, lift this
+  // call to a central boot point after all projection modules are imported.)
+  registerProjections(eventLogger);
 }
 
 /**
@@ -237,10 +216,7 @@ export function registerInventoryEventHandlers(options: { force?: boolean } = {}
  * @param triggeringOrganizationId - The branch whose event fired this.
  *   Used to filter out sub-branch noise; the actual read uses HO context.
  */
-async function syncProductQuantityFromQuant(
-  skuRef: string,
-  triggeringOrganizationId: string,
-): Promise<void> {
+async function syncProductQuantityFromQuant(skuRef: string, triggeringOrganizationId: string): Promise<void> {
   const flow = getFlowEngineOrNull();
   if (!flow) return;
 
@@ -261,10 +237,7 @@ async function syncProductQuantityFromQuant(
   const catalog = await ensureCatalogEngine();
   const ctx = { actorId: 'stock-sync', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
 
-  const avail = await flow.services.quant.getAvailability(
-    { skuRef, locationId: DEFAULT_LOCATION },
-    flowCtx,
-  );
+  const avail = await flow.services.quant.getAvailability({ skuRef, locationId: DEFAULT_LOCATION }, flowCtx);
   const onHand = avail.quantityOnHand;
 
   // Variant SKU first — miss returns null (don't throw).
@@ -298,21 +271,14 @@ async function syncProductQuantityFromQuant(
       { totalAvailable: totalQty, variants: variantStocks },
       ctx,
     );
-    logger.debug(
-      { skuRef, productId: product._id, onHand, totalQty },
-      'Synced variant stock projection',
-    );
+    logger.debug({ skuRef, productId: product._id, onHand, totalQty }, 'Synced variant stock projection');
     return;
   }
 
   // Simple product — match by `_id`.
   if (mongoose.isValidObjectId(skuRef)) {
     try {
-      await catalog.repositories.product.updateStockProjection(
-        skuRef,
-        { totalAvailable: onHand },
-        ctx,
-      );
+      await catalog.repositories.product.updateStockProjection(skuRef, { totalAvailable: onHand }, ctx);
       logger.debug({ skuRef, onHand }, 'Synced simple product stock projection');
     } catch {
       // Product may not exist

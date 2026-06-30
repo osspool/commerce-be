@@ -30,6 +30,7 @@
  */
 import type { DomainEvent } from '@classytic/primitives/events';
 import { subscribe } from '#lib/events/arcEvents.js';
+import { majorToMinor } from '#shared/money.js';
 import logger from '#lib/utils/logger.js';
 import { getFlowEngineOrNull } from '#resources/inventory/flow/flow-engine.js';
 import Supplier from '#resources/inventory/supplier/models/supplier.model.js';
@@ -126,8 +127,8 @@ export function registerFlowProcurementAccountingBridge(): void {
         return;
       }
 
-      const totalAmountPaisa = Math.round(grossMajor * 100);
-      const taxPaisa = Math.round(taxMajor * 100);
+      const totalAmountPaisa = majorToMinor(grossMajor);
+      const taxPaisa = majorToMinor(taxMajor);
 
       await ensureCompanyAccounts();
 

@@ -28,6 +28,7 @@ import type {
 } from '@classytic/order';
 import type { RevenueContext } from '@classytic/revenue';
 import { TRANSACTION_STATUS } from '@classytic/revenue/enums';
+import { resolveMethodKind } from '#shared/payments/method-kind.js';
 import { getRevenueEngine, isRevenueReady } from '#shared/revenue/engine.js';
 
 type TxnDoc = {
@@ -194,6 +195,7 @@ export function createRevenueBridge(): RevenueBridge {
         amount: amountOf(params.amount),
         currency: currencyOf(params.amount),
         gateway: params.gateway,
+        methodKind: params.methodKind,
         paymentData: params.metadata,
         metadata: {
           ...(params.metadata ?? {}),
@@ -248,6 +250,7 @@ export function createRevenueBridge(): RevenueBridge {
         amount: amountOf(params.amount),
         currency: currencyOf(params.amount),
         gateway: params.gateway,
+        methodKind: params.methodKind,
         paymentData: params.paymentData,
         metadata: { orderId: params.orderId, ...(params.paymentData ?? {}) },
         idempotencyKey: params.idempotencyKey,
@@ -321,6 +324,7 @@ export function createRevenueBridge(): RevenueBridge {
           await singleIntent({
             ...params,
             gateway: leg.method,
+            methodKind: resolveMethodKind(leg.method),
             amount: { amount: leg.amount, currency },
             idempotencyKey: legIdempotencyKey(params.idempotencyKey, leg, i),
             metadata: { ...params.metadata, splitIndex: i, splitOf: legs.length },
@@ -369,6 +373,7 @@ export function createRevenueBridge(): RevenueBridge {
           await singleImmediate({
             ...params,
             gateway: leg.method,
+            methodKind: resolveMethodKind(leg.method),
             amount: { amount: leg.amount, currency },
             idempotencyKey: legIdempotencyKey(params.idempotencyKey, leg, i),
             paymentData: { ...params.paymentData, splitIndex: i, splitOf: legs.length },

@@ -7,7 +7,16 @@ import {
   resolveLocationCode,
 } from '#resources/inventory/flow/location-resolver.js';
 import { ensureBranchBootstrapped } from '#resources/inventory/inventory-management.plugin.js';
+import { paisaToTaka, takaToPaisa } from '#shared/money.js';
 import type { PurchaseOrderDocument } from '../purchase-order.constants.js';
+
+/**
+ * Snap a major-taka cost to paisa precision (2 dp) before it's stored as the
+ * Flow cost-layer's major-taka `unitCost`. Routes through the BDT money
+ * authority so the round-trip is explicit (major → paisa → major), not a bare
+ * `* 100 / 100`. Guarantees no sub-paisa noise leaks into the cost layer.
+ */
+const snapToPaisaPrecision = (taka: number): number => paisaToTaka(takaToPaisa(taka));
 
 export async function receiveItemsIntoStock(
   purchase: PurchaseOrderDocument,
@@ -83,7 +92,7 @@ export async function receiveItemsIntoStock(
 
   for (const item of resolved) {
     if (item.quantity === 0 && item.costPrice > 0) {
-      const snapshotCost = Math.round(item.costPrice * 100) / 100;
+      const snapshotCost = snapToPaisaPrecision(item.costPrice);
       await flow.repositories.quant.upsert({
         organizationId: ctx.organizationId,
         skuRef: item.skuRef,
@@ -102,7 +111,7 @@ export async function receiveItemsIntoStock(
         ctx,
       );
       const finalCost = availability.breakdowns?.[0]?.unitCost ?? item.costPrice;
-      await setProductCostPriceSnapshot(item.productId, item.variantSku, Math.round(finalCost * 100) / 100);
+      await setProductCostPriceSnapshot(item.productId, item.variantSku, snapToPaisaPrecision(finalCost));
     }
   }
 

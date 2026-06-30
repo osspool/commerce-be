@@ -242,6 +242,16 @@ export function initializeTransferEngine(): TransferEngine {
     },
     eventTransport: transferEventTransport,
     autoIndex: shouldAutoIndex(),
+    // transfer 0.2.0 newly wires mongokit's multiTenantPlugin (fail-closed,
+    // `required: true` by default). be-prod's tenant boundary is arc's
+    // RequestScope — mongokit tenancy stays OFF here, the same convention used
+    // by the promo engine (`tenant: false`) and the purchase repository (which
+    // extends mongokit's Repository directly without the engine's tenant
+    // plugin). A stock transfer is COMPANY-scoped: it must stay visible to BOTH
+    // the sender and the receiver branch (receive runs under the receiver's
+    // x-organization-id), so branch-keyed mongokit scoping would hide the doc
+    // from the receiving branch. Disabling matches the cross-branch contract.
+    multiTenant: false,
     forceRecreate: process.env.NODE_ENV === 'test',
   });
 

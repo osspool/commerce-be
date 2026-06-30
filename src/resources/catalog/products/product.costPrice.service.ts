@@ -7,6 +7,7 @@
 
 import type { ClientSession } from 'mongoose';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
+import { majorToMinor } from '#shared/money.js';
 
 interface CostPriceOptions {
   session?: ClientSession | null;
@@ -58,7 +59,7 @@ export async function setProductCostPriceSnapshot(
     productId,
     {
       'defaultMonetization.pricing.costPrice': {
-        amount: Math.round(costPrice * 100),
+        amount: majorToMinor(costPrice),
         currency: 'BDT',
       },
     } as Record<string, unknown>,

@@ -10,10 +10,34 @@
  */
 
 import type { CatalogBridge, SkuDetails } from '@classytic/flow/domain/contracts';
+import type { ShelfLifePolicy } from '@classytic/primitives/shelf-life';
 import mongoose from 'mongoose';
 import { ensureCatalogEngine } from '#resources/catalog/catalog.engine.js';
 
 const ctx = { actorId: 'flow-bridge', roles: ['admin'] as string[], locale: 'en', currency: 'BDT' };
+
+type TrackedVariant = { tracking?: ShelfLifePolicy; catchWeight?: boolean; weightUom?: string };
+
+/**
+ * Map a variant's tracking + catch-weight policy into the fields Flow consumes.
+ * `trackingPolicy` is authoritative (drives lot creation + expiry-date
+ * derivation); `trackingMode` is kept in sync for back-compat. `catchWeight`
+ * flows so Flow captures a measured net weight on received lots (deli/produce).
+ * Non-tracked variants resolve to `'none'`.
+ */
+function trackingFrom(variant: TrackedVariant | undefined): {
+  trackingMode: 'none' | 'lot' | 'serial';
+  trackingPolicy?: ShelfLifePolicy;
+  catchWeight?: boolean;
+  weightUom?: string;
+} {
+  const catchWeight = variant?.catchWeight
+    ? { catchWeight: true as const, weightUom: variant.weightUom ?? 'kg' }
+    : {};
+  const policy = variant?.tracking;
+  if (!policy) return { trackingMode: 'none', ...catchWeight };
+  return { trackingMode: policy.mode, trackingPolicy: policy, ...catchWeight };
+}
 
 const catalogBridge: CatalogBridge = {
   async resolveSku(skuRef: string): Promise<SkuDetails | null> {
@@ -33,7 +57,7 @@ const catalogBridge: CatalogBridge = {
         skuRef,
         sku: variantSku ?? skuRef,
         displayName: variant ? `${byVariant.name} - ${variantSku}` : byVariant.name,
-        trackingMode: 'none',
+        ...trackingFrom(variant as TrackedVariant | undefined),
         uom: 'unit',
         isActive: byVariant.status === 'active' && (variant as { isActive?: boolean } | undefined)?.isActive !== false,
       };
@@ -45,11 +69,14 @@ const catalogBridge: CatalogBridge = {
         const byId = await catalog.repositories.product.getById(skuRef, { throwOnNotFound: false, ...ctx });
         if (byId) {
           const idents = byId.identifiers as { custom?: { sku?: string } } | undefined;
+          // Simple product addressed by _id — carry the tracking policy from
+          // its variant (single-variant products keep the policy there).
+          const variant = (byId.variants as TrackedVariant[] | undefined)?.find((v) => v.tracking || v.catchWeight);
           return {
             skuRef,
             sku: idents?.custom?.sku ?? skuRef,
             displayName: byId.name,
-            trackingMode: 'none',
+            ...trackingFrom(variant),
             uom: 'unit',
             isActive: byId.status === 'active',
           };
@@ -65,14 +92,20 @@ const catalogBridge: CatalogBridge = {
       { lean: true, limit: 1 },
     );
     const bySku = (list as unknown[])?.[0] as
-      | { name: string; status: string; identifiers?: { custom?: { sku?: string } } }
+      | {
+          name: string;
+          status: string;
+          identifiers?: { custom?: { sku?: string } };
+          variants?: TrackedVariant[];
+        }
       | undefined;
     if (bySku) {
+      const variant = bySku.variants?.find((v) => v.tracking || v.catchWeight);
       return {
         skuRef,
         sku: bySku.identifiers?.custom?.sku ?? skuRef,
         displayName: bySku.name,
-        trackingMode: 'none',
+        ...trackingFrom(variant),
         uom: 'unit',
         isActive: bySku.status === 'active',
       };

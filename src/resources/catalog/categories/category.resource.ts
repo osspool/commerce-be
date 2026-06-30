@@ -19,7 +19,34 @@ import type { AppContext } from '#core/app/context.js';
 import { getResourcePermissions } from '#shared/permissions.js';
 import { queryParser } from '#shared/query-parser.js';
 import { parentSlugParam, slugParam } from './category.catalog.schemas.js';
-import { getBySlug, getChildren, getTree, syncCounts } from './category.handlers.js';
+import {
+  getBySlug,
+  getChildren,
+  getTree,
+  invalidateCategoryTreeCache,
+  syncCounts,
+} from './category.handlers.js';
+
+type CategoryRepo = NonNullable<AppContext['catalog']['repositories']['category']>;
+
+/**
+ * Bust the in-memory `/tree` cache on any category mutation so the storefront
+ * nav reflects edits immediately (not after the 60s TTL) — and so tests that
+ * create categories see them in the tree without cross-test cache bleed.
+ */
+function wrapCategoryRepo(repo: CategoryRepo): CategoryRepo {
+  const wrapped = Object.create(repo) as Record<string, unknown>;
+  for (const name of ['create', 'update', 'delete', 'createMany', 'updateMany', 'deleteMany', 'restore'] as const) {
+    const orig = (repo as unknown as Record<string, unknown>)[name];
+    if (typeof orig !== 'function') continue;
+    wrapped[name] = async function (...args: unknown[]) {
+      const result = await (orig as (...a: unknown[]) => Promise<unknown>).apply(repo, args);
+      invalidateCategoryTreeCache();
+      return result;
+    };
+  }
+  return wrapped as unknown as CategoryRepo;
+}
 
 export default (ctx: AppContext) => {
   // `Category` is optional on `CatalogModels` (gated by `modules.categories`).
@@ -44,7 +71,7 @@ export default (ctx: AppContext) => {
     // ORG_SCOPE_DENIED / 404.
     tenantField: false,
 
-    adapter: createMongooseAdapter(Category, categoryRepo),
+    adapter: createMongooseAdapter(Category, wrapCategoryRepo(categoryRepo)),
     queryParser,
 
     permissions: getResourcePermissions('category'),

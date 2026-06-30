@@ -109,7 +109,7 @@ async function recordSettlement(
     actualReceived: number;
     courierCommission: number;
     writeoff?: number;
-    cashAccount?: '1111' | '1113';
+    cashAccount?: 'cash' | 'petty_cash';
     notes?: string;
   },
 ): Promise<{ status: number; body: Record<string, unknown> | null }> {

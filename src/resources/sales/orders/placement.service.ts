@@ -23,6 +23,7 @@ import {
   reservePromo,
   rollbackPromo,
 } from '#resources/promotions/promo-placement.js';
+import { majorToMinor } from '#shared/money.js';
 import { isRevenueReady } from '#shared/revenue/engine.js';
 import { createCatalogBridge } from './bridges/catalog.bridge.js';
 import { createFlowBridge } from './bridges/flow.bridge.js';
@@ -180,7 +181,7 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
     const deliveryPrice = (body.delivery as { price?: number } | undefined)?.price;
     const promoShipping =
       typeof deliveryPrice === 'number' && deliveryPrice > 0
-        ? { amount: Math.round(deliveryPrice * 100), currency: 'BDT' }
+        ? { amount: majorToMinor(deliveryPrice), currency: 'BDT' }
         : undefined;
 
     order = (await engine.repositories.order.create(
@@ -243,6 +244,42 @@ export async function executePlacement(input: PlacementInput): Promise<Placement
       logger,
     });
     throw err;
+  }
+
+  // Idempotent-replay detection (order 0.5.0). The order kernel now owns
+  // idempotency natively: on a concurrent same-key race it catches the unique-
+  // index E11000 internally and RETURNS the winning order from
+  // `repositories.order.create` instead of surfacing a dup-key error. That
+  // bypasses both be-prod pre-checks above, so the loser would otherwise look
+  // like a fresh placement. Detect it by comparing the persisted order's
+  // reservationRefs against the reservation THIS request just made: if the
+  // kernel handed us back a pre-existing winner, its refs are not ours — we
+  // must release our now-orphaned hold + promo and flag the response as the
+  // idempotent replay (exactly one of the racing callers gets `idempotent:true`).
+  const ourReservationIds = new Set(
+    reservation.reservationRefs.map((r) => String(r.reservationId)).filter(Boolean),
+  );
+  const winnerReservationRefs =
+    ((order.metadata as { reservationRefs?: Array<{ reservationId?: string }> } | undefined)?.reservationRefs) ?? [];
+  const winnerHasOurReservation =
+    ourReservationIds.size === 0 ||
+    winnerReservationRefs.some((r) => r.reservationId && ourReservationIds.has(String(r.reservationId)));
+  if (!winnerHasOurReservation) {
+    // The kernel returned a different (winning) order — our reservation +
+    // promo are orphaned. Release them and short-circuit as the replay.
+    await releaseOrderStock(reservation.reservationRefs, flowBridge, ctx, logger);
+    await rollbackPromo(promoReservation, {
+      actorId: ctx.actorRef,
+      organizationId: ctx.organizationId as string | undefined,
+      logger,
+    });
+    // Mongoose docs don't spread their public fields — flatten first (same as
+    // the success path below) so the wire payload carries orderNumber etc.
+    const winnerPlain =
+      typeof (order as { toObject?: () => unknown }).toObject === 'function'
+        ? ((order as { toObject: () => Record<string, unknown> }).toObject() as Record<string, unknown>)
+        : (order as Record<string, unknown>);
+    return { status: 201, body: { ...winnerPlain, idempotent: true } };
   }
 
   const promoCommit = await commitPromo(promoReservation, String(order._id), {

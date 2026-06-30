@@ -16,18 +16,18 @@ const alias = {
 const SHARED_DB_SETUP = ['./tests/support/per-suite-mongo.ts'];
 
 const SCENARIO_DOMAINS = [
-  { name: 'accounting',    maxForks: 2, hookTimeout: 120_000 },
-  { name: 'cart-order',    maxForks: 2, hookTimeout: 120_000 },
-  { name: 'pos',           maxForks: 2, hookTimeout: 120_000 },
-  { name: 'inventory',     maxForks: 2, hookTimeout: 120_000 },
-  { name: 'warehouse',     maxForks: 2, hookTimeout: 180_000 },
-  { name: 'commerce',      maxForks: 2, hookTimeout: 120_000 },
-  { name: 'payments',      maxForks: 2, hookTimeout: 120_000 },
-  { name: 'logistics',     maxForks: 2, hookTimeout: 120_000 },
-  { name: 'notifications', maxForks: 2, hookTimeout: 120_000 },
-  { name: 'analytics',     maxForks: 2, hookTimeout: 120_000 },
-  { name: 'loyalty',       maxForks: 2, hookTimeout: 120_000 },
-  { name: 'branches',      maxForks: 2, hookTimeout: 180_000 },
+  { name: 'accounting',    hookTimeout: 120_000 },
+  { name: 'cart-order',    hookTimeout: 120_000 },
+  { name: 'pos',           hookTimeout: 120_000 },
+  { name: 'inventory',     hookTimeout: 120_000 },
+  { name: 'warehouse',     hookTimeout: 180_000 },
+  { name: 'commerce',      hookTimeout: 120_000 },
+  { name: 'payments',      hookTimeout: 120_000 },
+  { name: 'logistics',     hookTimeout: 120_000 },
+  { name: 'notifications', hookTimeout: 120_000 },
+  { name: 'analytics',     hookTimeout: 120_000 },
+  { name: 'loyalty',       hookTimeout: 120_000 },
+  { name: 'branches',      hookTimeout: 180_000 },
 ] as const;
 
 export default defineConfig({
@@ -35,6 +35,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Global concurrency cap across ALL projects — bounds total concurrent
+    // workers so we never spin more in-memory mongod (8.2) replsets than the
+    // box (28c/34GB) holds. Without it, unit's thread pool + scenario/integration
+    // forks oversubscribe and heavy e2e tests flake under memory/connection load.
+    maxWorkers: 10,
+    minWorkers: 1,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
@@ -101,7 +107,7 @@ export default defineConfig({
           hookTimeout: 120_000,
         },
       },
-      ...SCENARIO_DOMAINS.map(({ name, maxForks, hookTimeout }) => ({
+      ...SCENARIO_DOMAINS.map(({ name, hookTimeout }) => ({
         extends: true as const,
         test: {
           name: `scenarios-${name}`,
@@ -110,7 +116,6 @@ export default defineConfig({
           isolate: true,
           fileParallelism: true,
           sequence: { concurrent: false },
-          poolOptions: { forks: { maxForks, minForks: 1 } },
           testTimeout: 30_000,
           hookTimeout,
         },
@@ -124,8 +129,8 @@ export default defineConfig({
           include: ['tests/scenarios/security/**/*.test.{js,ts}'],
           isolate: true,
           fileParallelism: false,
+          // Rate-limit tests must not race — serial within this project.
           sequence: { concurrent: false },
-          poolOptions: { forks: { maxForks: 1, minForks: 1 } },
           testTimeout: 30_000,
           hookTimeout: 180_000,
         },

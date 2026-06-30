@@ -36,6 +36,30 @@ export function ctx(orgId: string, actorId = 'test-actor'): FlowContext {
   return { organizationId: orgId, actorId };
 }
 
+/**
+ * Resolve a location CODE (e.g. 'stock') to its canonical `Location._id`.
+ *
+ * flow 0.3.0 canonicalizes location refs to `Location._id` on write: the
+ * PostingService resolves move source/dest codes via `location.findByRef`
+ * and stamps quants AND cost layers with the resolved `_id` string. The
+ * CostLayer repository's `findOrderedForConsumption` (the FIFO/FEFO drain
+ * read) matches `locationId` RAW — no alias tolerance — so a layer seeded
+ * under the literal code `'stock'` is invisible to a ship-move that drains
+ * under the resolved `_id`. (Quants are unaffected: the quant repo resolves
+ * aliases on read.) Every fixture that writes/reads CostLayer rows directly
+ * must therefore key them by the same canonical `_id` production uses.
+ */
+export async function resolveCanonicalLocationId(
+  flow: FlowEngine,
+  orgId: string,
+  codeOrId: string,
+): Promise<string> {
+  const loc = (await flow.repositories.location.findByRef(codeOrId, {
+    organizationId: orgId,
+  })) as { _id?: unknown } | null;
+  return loc?._id ? String(loc._id) : codeOrId;
+}
+
 // ── Branch Setup ─────────────────────────────────────────────────────────────
 
 /**
@@ -200,9 +224,15 @@ export async function seedStock(
     flow.services.moveGroup.executeAction(group._id.toString(), 'receive', {}, ctx(orgId)),
   );
 
-  // Ensure stock quant unitCost is set (upsert WAC may compute differently)
+  // Ensure stock quant unitCost is set (upsert WAC may compute differently).
+  // The receive move stamps the quant under the canonical Location._id, and
+  // it only carries unitCost when the move's metadata.unitCost > 0 — this
+  // adjustment-sourced seed doesn't, so the snapshot-mode valuation (which
+  // reads quant.unitCost) would otherwise see 0. Update the canonical-keyed
+  // quant so snapshot and layers modes agree.
+  const stockLocId = await resolveCanonicalLocationId(flow, orgId, LOC.stock);
   await flow.models.StockQuant.findOneAndUpdate(
-    { organizationId: orgId, skuRef: sku, locationId: LOC.stock },
+    { organizationId: orgId, skuRef: sku, locationId: { $in: [LOC.stock, stockLocId] } },
     { $set: { unitCost } },
   );
 }
@@ -262,9 +292,13 @@ export async function transferBetweenBranches(
   items: Array<{ sku: string; qty: number }>,
 ) {
   for (const item of items) {
-    // Capture sender's unit cost BEFORE outbound (for receiver cost propagation)
+    // Capture sender's unit cost BEFORE outbound (for receiver cost propagation).
+    // Read from the canonical Location._id key — flow 0.3.0 stamps quants by _id,
+    // so a query by the raw 'stock' code would miss it and read cost 0.
+    const senderStockLocId = await resolveCanonicalLocationId(flow, senderOrgId, LOC.stock);
     const senderQuant = await flow.models.StockQuant.findOne({
-      organizationId: senderOrgId, skuRef: item.sku, locationId: LOC.stock,
+      organizationId: senderOrgId, skuRef: item.sku,
+      locationId: { $in: [LOC.stock, senderStockLocId] },
     }).lean();
     const senderUnitCost = senderQuant?.unitCost ?? 0;
 
@@ -303,19 +337,25 @@ export async function transferBetweenBranches(
       );
     }
 
-    // Inbound: receiver increments (vendor → stock)
+    // Inbound: receiver increments (vendor → stock).
+    // Carry the sender's unit cost forward as metadata.unitCost — this is the
+    // production-correct pattern (the real transfer engine sets the same), so
+    // PostingService stamps the destination quant's unitCost and seeds the
+    // FIFO cost layer at the receiver even when no source cost basis is read.
+    const inboundItem: Record<string, unknown> = {
+      moveGroupId: '',
+      operationType: 'receipt',
+      skuRef: item.sku,
+      sourceLocationId: LOC.vendor,
+      destinationLocationId: LOC.stock,
+      quantityPlanned: item.qty,
+    };
+    if (senderUnitCost > 0) inboundItem.metadata = { unitCost: senderUnitCost };
     const inGroup = await withMongoRetry(() =>
       flow.services.moveGroup.create(
         {
           groupType: 'receipt',
-          items: [{
-            moveGroupId: '',
-            operationType: 'receipt',
-            skuRef: item.sku,
-            sourceLocationId: LOC.vendor,
-            destinationLocationId: LOC.stock,
-            quantityPlanned: item.qty,
-          }],
+          items: [inboundItem as never],
         },
         ctx(receiverOrgId),
       ),
@@ -343,9 +383,15 @@ export async function setExactLayers(
   layers: Array<{ qty: number; unitCost: number; receivedAt?: Date }>,
   locationId = LOC.stock,
 ) {
-  // Clear existing layers for this SKU+location+org
+  // Key layers by the canonical Location._id (see resolveCanonicalLocationId):
+  // flow 0.3.0 drains FIFO/FEFO layers under the resolved _id, so seeding
+  // under the raw 'stock' code would be invisible to a real ship-move.
+  const canonicalLocationId = await resolveCanonicalLocationId(flow, orgId, locationId);
+
+  // Clear existing layers for this SKU+location+org (both code & canonical
+  // forms, so a re-seed after a prior code-keyed write starts clean).
   await flow.models.CostLayer.deleteMany({
-    organizationId: orgId, skuRef: sku, locationId,
+    organizationId: orgId, skuRef: sku, locationId: { $in: [locationId, canonicalLocationId] },
   });
 
   // Create exact layers in order
@@ -355,7 +401,7 @@ export async function setExactLayers(
     await flow.models.CostLayer.create({
       organizationId: orgId,
       skuRef: sku,
-      locationId,
+      locationId: canonicalLocationId,
       remainingQty: layer.qty,
       unitCost: layer.unitCost,
       receivedAt: layer.receivedAt ?? new Date(baseTime + i * 86_400_000),
@@ -374,10 +420,14 @@ export async function getStock(flow: FlowEngine, orgId: string, sku: string, loc
 }
 
 export async function getCostLayers(flow: FlowEngine, orgId: string, sku: string, locationId = LOC.stock) {
+  // Match both the raw code and the canonical Location._id so this read is
+  // tolerant of either keying (production writes canonical; legacy fixtures
+  // may have written the code). See resolveCanonicalLocationId.
+  const canonicalLocationId = await resolveCanonicalLocationId(flow, orgId, locationId);
   return flow.models.CostLayer.find({
     organizationId: orgId,
     skuRef: sku,
-    locationId,
+    locationId: { $in: [locationId, canonicalLocationId] },
     remainingQty: { $gt: 0 },
   }).sort({ receivedAt: 1 }).lean();
 }

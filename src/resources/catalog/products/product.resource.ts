@@ -114,6 +114,61 @@ function wrapProductRepo(cat: CatalogEngine): ProductRepo {
     return base.getAll({ ...parsedParams, filters }, options);
   } as ProductRepo['getAll'];
 
+  // ── Perishable / shelf-life cascade ──────────────────────────────────────
+  // Shelf-life tracking is a PRODUCT-level decision (Odoo's product.template
+  // pattern) but catalog stores it per-VARIANT (and flow's CatalogBridge reads
+  // it per-variant). Catalog auto-generates variants from `variationAttributes`,
+  // so the policy must be stamped onto every variant AFTER generation. Accept
+  // `tracking` / `catchWeight` / `weightUom` at the product level, strip them
+  // before the base write, then re-apply to all generated variants.
+  type TrackingCascade = {
+    tracking?: unknown;
+    catchWeight?: unknown;
+    weightUom?: unknown;
+  };
+  async function applyTrackingCascade(
+    product: { _id: unknown; variants?: unknown },
+    cascade: TrackingCascade,
+    options: unknown,
+  ): Promise<typeof product> {
+    if (cascade.tracking === undefined && cascade.catchWeight === undefined) return product;
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    if (variants.length === 0) return product;
+    const next = variants.map((v) => {
+      const plain = (v && typeof (v as { toObject?: () => unknown }).toObject === 'function'
+        ? (v as { toObject: () => Record<string, unknown> }).toObject()
+        : (v as Record<string, unknown>)) ?? {};
+      return {
+        ...plain,
+        ...(cascade.tracking !== undefined ? { tracking: cascade.tracking } : {}),
+        ...(cascade.catchWeight !== undefined
+          ? { catchWeight: cascade.catchWeight, weightUom: cascade.weightUom ?? plain.weightUom }
+          : {}),
+      };
+    });
+    return (await base.update(String(product._id), { variants: next } as never, options as never)) as typeof product;
+  }
+
+  (wrapped as { create: ProductRepo['create'] }).create = async function create(data, options) {
+    const { tracking, catchWeight, weightUom, ...rest } = (data ?? {}) as Record<string, unknown>;
+    const created = await base.create(rest as never, options);
+    return applyTrackingCascade(
+      created as { _id: unknown; variants?: unknown },
+      { tracking, catchWeight, weightUom },
+      options,
+    ) as never;
+  } as ProductRepo['create'];
+
+  (wrapped as { update: ProductRepo['update'] }).update = async function update(id, data, options) {
+    const { tracking, catchWeight, weightUom, ...rest } = (data ?? {}) as Record<string, unknown>;
+    const updated = await base.update(id, rest as never, options);
+    return applyTrackingCascade(
+      updated as { _id: unknown; variants?: unknown },
+      { tracking, catchWeight, weightUom },
+      options,
+    ) as never;
+  } as ProductRepo['update'];
+
   return wrapped;
 }
 

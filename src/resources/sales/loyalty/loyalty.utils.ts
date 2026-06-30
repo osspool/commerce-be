@@ -47,19 +47,56 @@ export async function resolveBranchCode(req: FastifyRequest): Promise<string | u
   return branch?.code || undefined;
 }
 
+/**
+ * loyalty 0.3.0 renamed every domain error code to a dotted namespace
+ * (`loyalty.member.already_enrolled`, `loyalty.validation.invalid`, …) and now
+ * carries an authoritative HTTP `status` on each LoyaltyError. be-prod's public
+ * API contract still exposes the legacy SCREAMING_SNAKE codes (the FE + these
+ * tests assert on them), so this table translates the package's new code back
+ * to be-prod's stable public code. Unknown codes pass through unchanged.
+ */
+const LOYALTY_CODE_ALIASES: Record<string, string> = {
+  'loyalty.member.already_enrolled': 'MEMBER_ALREADY_ENROLLED',
+  'loyalty.member.not_found': 'MEMBER_NOT_FOUND',
+  'loyalty.member.inactive': 'MEMBER_INACTIVE',
+  'loyalty.points.insufficient': 'INSUFFICIENT_POINTS',
+  'loyalty.earning_rule.not_found': 'RULE_NOT_FOUND',
+  'loyalty.tier.not_found': 'TIER_NOT_FOUND',
+  'loyalty.redemption.not_found': 'REDEMPTION_NOT_FOUND',
+  'loyalty.redemption.expired': 'REDEMPTION_EXPIRED',
+  'loyalty.referral.not_found': 'REFERRAL_NOT_FOUND',
+  'loyalty.referral.duplicate': 'DUPLICATE_REFERRAL',
+  'loyalty.referral.limit_exceeded': 'REFERRAL_LIMIT_EXCEEDED',
+  'loyalty.referral.self': 'SELF_REFERRAL',
+  'loyalty.referral.circular': 'CIRCULAR_REFERRAL',
+  'loyalty.validation.invalid': 'VALIDATION_ERROR',
+};
+
+/** Translate a loyalty 0.3.0 dotted code to be-prod's stable public code. */
+export function normalizeLoyaltyCode(code: string | undefined): string | undefined {
+  if (!code) return code;
+  return LOYALTY_CODE_ALIASES[code] ?? code;
+}
+
 export function mapError(err: unknown): number {
+  // loyalty 0.3.0 LoyaltyErrors carry an authoritative HTTP `status`; trust it.
+  const withStatus = err as { status?: number };
+  if (typeof withStatus.status === 'number') return withStatus.status;
+
+  // Fall back to code-string mapping (legacy codes + normalized new codes).
   const e = err as { code?: string; message?: string };
-  if (e.code === 'MEMBER_ALREADY_ENROLLED') return 409;
-  if (e.code === 'MEMBER_NOT_FOUND' || e.message?.includes('not found') || e.message?.includes('not enrolled'))
+  const code = normalizeLoyaltyCode(e.code);
+  if (code === 'MEMBER_ALREADY_ENROLLED') return 409;
+  if (code === 'MEMBER_NOT_FOUND' || e.message?.includes('not found') || e.message?.includes('not enrolled'))
     return 404;
-  if (e.code === 'DUPLICATE_REFERRAL') return 409;
-  if (e.code === 'SELF_REFERRAL' || e.code === 'CIRCULAR_REFERRAL' || e.code === 'MEMBER_INACTIVE') return 422;
-  if (e.code === 'REFERRAL_LIMIT_EXCEEDED') return 429;
-  if (e.code === 'INSUFFICIENT_POINTS' || e.code === 'VALIDATION_ERROR') return 400;
-  if (e.code === 'RULE_NOT_FOUND' || e.code === 'TIER_NOT_FOUND' || e.code === 'REFERRAL_NOT_FOUND') return 404;
-  if (e.code === 'REDEMPTION_NOT_FOUND') return 404;
-  if (e.code === 'REDEMPTION_EXPIRED') return 410;
-  if (e.code === 'REDEMPTION_INVALID_STATE' || e.code === 'REDEMPTION_ALREADY_CONFIRMED') return 409;
+  if (code === 'DUPLICATE_REFERRAL') return 409;
+  if (code === 'SELF_REFERRAL' || code === 'CIRCULAR_REFERRAL' || code === 'MEMBER_INACTIVE') return 422;
+  if (code === 'REFERRAL_LIMIT_EXCEEDED') return 429;
+  if (code === 'INSUFFICIENT_POINTS' || code === 'VALIDATION_ERROR') return 400;
+  if (code === 'RULE_NOT_FOUND' || code === 'TIER_NOT_FOUND' || code === 'REFERRAL_NOT_FOUND') return 404;
+  if (code === 'REDEMPTION_NOT_FOUND') return 404;
+  if (code === 'REDEMPTION_EXPIRED') return 410;
+  if (code === 'REDEMPTION_INVALID_STATE' || code === 'REDEMPTION_ALREADY_CONFIRMED') return 409;
   return 400;
 }
 
@@ -80,7 +117,7 @@ export function loyaltyRoute<T>(
       if (err instanceof ArcError) throw err;
       const e = err as Error & { code?: string };
       throw new ArcError(e.message, {
-        code: e.code ?? 'LOYALTY_ERROR',
+        code: normalizeLoyaltyCode(e.code) ?? 'LOYALTY_ERROR',
         statusCode: mapError(err),
       });
     }
@@ -103,7 +140,7 @@ export function loyaltyAction<T>(
       if (err instanceof ArcError) throw err;
       const e = err as Error & { code?: string; statusCode?: number };
       throw new ArcError(e.message, {
-        code: e.code ?? 'LOYALTY_ERROR',
+        code: normalizeLoyaltyCode(e.code) ?? 'LOYALTY_ERROR',
         statusCode: e.statusCode ?? mapError(err),
       });
     }

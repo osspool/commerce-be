@@ -20,16 +20,49 @@ export async function getBySlug(req: FastifyRequest, reply: FastifyReply) {
   return reply.send(cat);
 }
 
+// In-memory cache for the storefront nav tree. The `/tree` route is `raw:true`
+// so it bypasses the resource's adapter `cache` config — yet it's read on
+// EVERY page load while categories change rarely. 60s TTL matches the resource
+// `cache.staleTime`; edits self-heal within the window (or call
+// `invalidateCategoryTreeCache()` from category mutations for instant refresh).
+let treeCache: { data: unknown; expiresAt: number } | null = null;
+const TREE_TTL_MS = 60_000;
+
+export function invalidateCategoryTreeCache(): void {
+  treeCache = null;
+}
+
 /** GET /categories/tree */
 export async function getTree(_req: FastifyRequest, reply: FastifyReply) {
+  const now = Date.now();
+  if (treeCache && treeCache.expiresAt > now) {
+    return reply.send(treeCache.data);
+  }
+
   const catalog = await ensureCatalogEngine();
   const categoryRepo = catalog.repositories.category!;
-  const roots = await categoryRepo.findAll({ parent: null }, ctx);
-  const tree = [];
-  for (const root of roots) {
-    const children = await categoryRepo.findAll({ parent: root.slug }, ctx);
-    tree.push({ ...root, children });
+
+  // ONE query for the whole (small) category set, then group by parent in
+  // memory. The previous version ran 1 + N SEQUENTIAL queries (a query per
+  // root category) — on remote MongoDB (~150ms/round-trip) that turned a tiny
+  // dataset into a 1–9s endpoint (the slow / erratic storefront navbar). A
+  // category catalog is dozens of rows; build the 2-level tree in memory.
+  const all = (await categoryRepo.findAll({}, { ...ctx, limit: 1000 })) as unknown as Array<
+    Record<string, unknown> & { slug: string; parent?: string | null }
+  >;
+
+  const byParent = new Map<string, typeof all>();
+  for (const c of all) {
+    const key = c.parent ?? '__root__';
+    const bucket = byParent.get(key);
+    if (bucket) bucket.push(c);
+    else byParent.set(key, [c]);
   }
+
+  const roots = byParent.get('__root__') ?? [];
+  const tree = roots.map((root) => ({ ...root, children: byParent.get(root.slug) ?? [] }));
+
+  treeCache = { data: tree, expiresAt: now + TREE_TTL_MS };
   return reply.send(tree);
 }
 

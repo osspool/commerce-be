@@ -1,7 +1,19 @@
+import { BD } from '../../posting/bd-account-codes.js';
 import { type CodSettlementData, codSettlementToPosting } from '../../posting/contracts/cod-settlement.contract.js';
 import { getOrderRefAndCustomer } from '../../_shared/order-ref.service.js';
 import { definePostingHandler } from '../define-posting-handler.js';
 import { CodSettledEvent, codSettledSchema } from '../event-definitions.js';
+
+/**
+ * Map the order layer's semantic cash intent → GL account. Chart-of-accounts
+ * knowledge lives here (accounting tier), not in sales/orders. Accepts a raw
+ * GL code too for forward-compat, defaulting to operating cash.
+ */
+function resolveCashAccount(intent: string | undefined): string {
+  if (intent === 'petty_cash') return BD.pettyCash;
+  if (intent === 'cash' || intent === undefined) return BD.cash;
+  return intent; // already a GL code
+}
 
 /**
  * Fired by `POST /orders/:id/cod-settlement` after the admin enters the
@@ -37,7 +49,7 @@ export const codSettledHandler = definePostingHandler({
       actualReceived: payload.actualReceived,
       courierCommission: payload.courierCommission,
       writeoff: payload.writeoff,
-      cashAccount: payload.cashAccount,
+      cashAccount: resolveCashAccount(payload.cashAccount),
       // Customer reference for the A/R clear line — must match the placement
       // entry's partnerId so the subsidiary ledger nets to zero. Null for
       // guest checkouts (placement also stamps no partnerId).

@@ -1,4 +1,6 @@
 import mongoose from 'mongoose';
+import config from '#config/index.js';
+import { majorToMinor } from '#shared/money.js';
 import { vendorBillToPosting } from '../../posting/contracts/vendor-bill.contract.js';
 import { definePostingHandler } from '../define-posting-handler.js';
 import { PurchaseReceivedEvent, purchaseReceivedSchema } from '../event-definitions.js';
@@ -20,6 +22,21 @@ export const purchaseReceivedHandler = definePostingHandler({
   payloadSchema: purchaseReceivedSchema,
 
   async build(payload, log) {
+    // Mutual exclusion (single source of truth for A/P). When auto-invoicing
+    // vendor bills is enabled, the @classytic/invoice engine creates AND posts
+    // the bill (Cr A/P) from this SAME `purchase:received` event — see
+    // invoice.events.ts. This direct accrual MUST yield, or A/P is credited
+    // twice for one purchase (the two paths use different idempotency keys, so
+    // the posting-service dedup cannot catch it). The invoice engine is the
+    // document of record whenever the host opts into auto-invoicing.
+    if (config.invoice.autoPurchase !== 'off') {
+      log.debug(
+        { purchaseId: payload.purchaseId },
+        'purchase-received: auto-invoice owns the vendor bill — skipping direct A/P accrual',
+      );
+      return null;
+    }
+
     const purchase = await mongoose.connection.db
       ?.collection('purchase_orders')
       .findOne({ _id: new mongoose.Types.ObjectId(payload.purchaseId) });
@@ -41,8 +58,8 @@ export const purchaseReceivedHandler = definePostingHandler({
     // PO model persists totals as BDT-major numbers (e.g. `grandTotal: 5520` = ৳5,520);
     // the vendor-bill posting contract works in paisa (debit/credit are paisa per
     // posting.service.ts). Convert at the boundary so JE amounts match real money.
-    const totalAmountPaisa = Math.round(Number(purchase.grandTotal ?? 0) * 100);
-    const taxPaisa = Math.round(tax * 100);
+    const totalAmountPaisa = majorToMinor(Number(purchase.grandTotal ?? 0));
+    const taxPaisa = majorToMinor(tax);
 
     // Receipt is the operational signal that the bill is real and the A/P
     // liability has accrued — the goods are physically in, the PO was already
